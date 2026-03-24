@@ -1,12 +1,8 @@
+import _ from 'lodash';
+
 import Blockly from 'scratch-blocks';
 import Generator from '../generator';
 
-import EncodingHelpers from './encoding.js';
-import VariableHelpers from './variables.js';
-import ScrubHandler from './scrub.js';
-import SpriteNewGenerator from './sprite-new.js';
-import ClassWrapper from './class-wrapper.js';
-import CodeFinisher from './code-finisher.js';
 import MathBlocks from './math.js';
 import TextBlocks from './text.js';
 import ColourBlocks from './colour.js';
@@ -36,10 +32,16 @@ import MeshBlocks from './mesh.js';
 import MeshV2Blocks from './mesh_v2.js';
 import SmalrubotS1Blocks from './smalrubot_s1.js';
 import KoshienBlocks from './koshien.js';
-import FaceSensingBlocks from './face_sensing.js';
-// === Smalruby: Start of Ruby String extension ===
-import SmalrubyRubyBlocks from './smalruby-ruby.js';
-// === Smalruby: End of Ruby String extension ===
+
+import KaniroboBlocks from './smt_kanirobo.js'
+import KaniroboRBlocks from './smt_kaniroboR.js'
+import RBoardBlocks from './smt_rboard.js'
+import MCTBoardBlocks from './smt_mctboard.js'
+import UnifiedAPIBlocks from './smt_unifiedapi.js'
+import PeripheralsBlocks from './smt_peripherals.js'
+
+const SCALAR_TYPE = '';
+const LIST_TYPE = 'list';
 
 const RubyGenerator = new Generator('Ruby');
 
@@ -121,10 +123,7 @@ RubyGenerator.init = function (options) {
     this.notEqualsCallCache_ = {};
     this.greaterThanOrEqualCallCache_ = {};
     this.lessThanOrEqualCallCache_ = {};
-    // === Smalruby: regex match operator caches ===
-    this.regexNotMatchCallCache_ = {};
-    this._moduleMethodCodes = {};
-    this.version = options && options.version ? String(options.version) : '1';
+    this.version = options && options.version ? options.version : '1';
     if (this.variableDB_) {
         this.variableDB_.reset();
     } else {
@@ -132,8 +131,501 @@ RubyGenerator.init = function (options) {
     }
 };
 
+RubyGenerator.finish = function (code, options) {
+    const defs = [];
+    for (const name in this.definitions_) {
+        const def = this.definitions_[name];
+        if (this.isString(def)) {
+            if (name.match(/^require__/)) {
+                this.requires_[name] = def;
+            } else if (name.match(/^prepare__/)) {
+                this.prepares_[name] = def;
+            } else {
+                defs.push(def);
+            }
+        }
+    }
+
+    const comments = RubyGenerator.getTargetCommentTexts();
+
+    // Detect @ruby:class comments
+    let classComment = null;
+    const otherComments = [];
+    for (const comment of comments) {
+        if (comment === '@ruby:class' || comment.startsWith('@ruby:class:')) {
+            classComment = comment;
+        } else {
+            otherComments.push(comment);
+        }
+    }
+
+    // Add non-class target comments
+    if (otherComments.length > 0) {
+        const commentCodes = otherComments.map(comment => `${this.prefixLines(comment, '# ')}\n`);
+        code = `${commentCodes.join('\n')}\n${code}`;
+    }
+
+    // For version 1 file output (withSpriteNew), use Sprite.new format
+    // even when @ruby:class comment is present.
+    // For version 2, @ruby:class takes priority over withSpriteNew.
+    if (classComment && this.version !== '1') {
+        code = this._wrapWithClass(
+            code, classComment, options && options.withSpriteNew
+        );
+    } else if (options && options.withSpriteNew) {
+        const spriteNewCode = this.spriteNew(this.currentTarget);
+        if (code.length > 0) {
+            code = this.prefixLines(code, this.INDENT);
+        }
+        code = `${spriteNewCode} do\n${code}end\n`;
+    }
+
+    if (defs.length === 0 && code.length === 0) {
+        return '';
+    }
+
+    let s = '';
+    if (defs.length > 0) {
+        s += `${defs.join('\n')}\n\n`;
+    }
+
+    return s + code;
+};
+
+RubyGenerator._wrapWithClass = function (code, classComment, forFileOutput) {
+    const target = this.currentTarget;
+    let className;
+    const setLines = [];
+
+    // Parse attribute list from @ruby:class:attr1,attr2,...
+    // Support name=ClassName format for preserving class names
+    let allowedAttributes = [];
+    let explicitClassName = null;
+    if (classComment.startsWith('@ruby:class:')) {
+        const attrPart = classComment.slice('@ruby:class:'.length);
+        allowedAttributes = attrPart.split(',');
+
+        // Check for name=ClassName in the first attribute
+        const nameAttrIndex = allowedAttributes.findIndex(a => a.startsWith('name='));
+        if (nameAttrIndex >= 0) {
+            explicitClassName = allowedAttributes[nameAttrIndex].slice('name='.length);
+            // Replace name=ClassName with plain 'name' for attribute processing
+            allowedAttributes[nameAttrIndex] = 'name';
+        }
+    }
+
+    if (explicitClassName) {
+        // Use the explicit class name from name=ClassName
+        className = explicitClassName;
+        const spriteName = target.sprite.name;
+        if (spriteName !== className) {
+            setLines.push(`set_name ${this.quote_(spriteName)}`);
+        }
+    } else if (allowedAttributes.indexOf('name') >= 0) {
+        const spriteName = target.sprite.name;
+        if (/^[A-Z]/.test(spriteName)) {
+            className = spriteName;
+        } else {
+            // Calculate sprite index
+            const sprites = target.runtime.targets.filter(t => !t.isStage);
+            const index = sprites.indexOf(target) + 1;
+            className = `Sprite${index}`;
+            setLines.push(`set_name ${this.quote_(spriteName)}`);
+        }
+    } else {
+        // No name attribute - use Sprite%index%
+        const sprites = target.runtime.targets.filter(t => !t.isStage);
+        const index = sprites.indexOf(target) + 1;
+        className = `Sprite${index}`;
+    }
+
+    // Generate set_xxx only for listed attributes
+    this._generateSetXxx(target, setLines, allowedAttributes);
+
+    let setCode = '';
+    if (setLines.length > 0) {
+        setCode = setLines.map(line => `${this.INDENT}${line}\n`).join('');
+    }
+
+    let outsideCode = '';
+    if (forFileOutput && code.length > 0) {
+        // Split code into top-level sections (separated by blank lines)
+        // and separate hat/def blocks from non-hat code
+        const sections = code.split(/\n\n/);
+        const insideSections = [];
+        const outsideSections = [];
+        for (const section of sections) {
+            const trimmed = section.trim();
+            if (trimmed.length === 0) continue;
+            if (/^self\.when\(/.test(trimmed) ||
+                /^def /.test(trimmed)) {
+                insideSections.push(section);
+            } else {
+                outsideSections.push(section);
+            }
+        }
+        code = insideSections.join('\n\n');
+        if (code.length > 0 && !code.endsWith('\n')) {
+            code += '\n';
+        }
+        if (outsideSections.length > 0) {
+            const commented = outsideSections
+                .join('\n\n')
+                .split('\n')
+                .map(line => (line.trim().length > 0 ? `# ${line}` : ''))
+                .join('\n');
+            outsideCode = `\n${commented}\n`;
+        }
+    }
+
+    if (code.length > 0) {
+        code = this.prefixLines(code, this.INDENT);
+    }
+    const separator = setCode.length > 0 && code.length > 0 ? '\n' : '';
+    code = `class ${className}\n${setCode}${separator}${code}end\n`;
+
+    if (outsideCode.length > 0) {
+        code += outsideCode;
+    }
+
+    return code;
+};
+
+RubyGenerator._generateSetXxx = function (target, setLines, allowedAttributes) {
+    if (allowedAttributes.indexOf('x') >= 0 && target.x !== 0) {
+        setLines.push(`set_x ${target.x}`);
+    }
+    if (allowedAttributes.indexOf('y') >= 0 && target.y !== 0) {
+        setLines.push(`set_y ${target.y}`);
+    }
+    if (allowedAttributes.indexOf('direction') >= 0 && target.direction !== 90) {
+        setLines.push(`set_direction ${target.direction}`);
+    }
+    if (allowedAttributes.indexOf('visible') >= 0 && !target.visible) {
+        setLines.push(`set_visible ${!!target.visible}`);
+    }
+    if (allowedAttributes.indexOf('size') >= 0 && target.size !== 100) {
+        setLines.push(`set_size ${target.size}`);
+    }
+    if (allowedAttributes.indexOf('current_costume') >= 0 && target.currentCostume > 0) {
+        setLines.push(`set_current_costume ${target.currentCostume}`);
+    }
+    if (allowedAttributes.indexOf('rotation_style') >= 0 && target.rotationStyle !== 'all around') {
+        setLines.push(`set_rotation_style ${this.quote_(target.rotationStyle)}`);
+    }
+};
+
+RubyGenerator.initTargets = function (options) {
+    this.requires_ = {};
+    this.prepares_ = {};
+
+    if (options && Object.prototype.hasOwnProperty.call(options, 'requires')) {
+        options.requires.forEach(name => {
+            this.requires_[`require__${name}`] = `require "${name}"`;
+        });
+    }
+};
+
+RubyGenerator.finishTargets = function (code, _options) {
+    let s = '';
+    const requires = Object.keys(this.requires_).map(name => this.requires_[name]);
+    if (requires.length > 0) {
+        s += `${requires.join('\n')}\n\n`;
+    }
+
+    const prepares = Object.keys(this.prepares_).map(name => this.prepares_[name]);
+    if (prepares.length > 0) {
+        s += `${prepares.join('\n')}\n\n`;
+    }
+
+    return s + code;
+};
+
+RubyGenerator.isString = function (s) {
+    return _.isString(s);
+};
+
+RubyGenerator.isWhiteSpace = function (s) {
+    return s === null || (this.isString(s) && s.trim().length === 0);
+};
+
+RubyGenerator.scalarToCode = function (scalar) {
+    if (this.isString(scalar)) {
+        return this.quote_(scalar);
+    }
+    return scalar;
+};
+
+RubyGenerator.listToCode = function (list) {
+    const values = list.map(i => {
+        if (this.isString(i)) {
+            return this.quote_(i);
+        }
+        return i;
+    }).join(', ');
+    return `[${values}]`;
+};
+
+RubyGenerator.hashToCode = function (hash, separator = ': ', brace = true) {
+    const lines = [];
+    for (const key in hash) {
+        const value = hash[key];
+        lines.push(`${key}${separator}${value}`);
+    }
+    let code = lines.join(',\n');
+    if (brace) {
+        code = ['{', this.prefixLines(code, this.INDENT), '}'].join('\n');
+    }
+    return code;
+};
+
+RubyGenerator.numberOrStringToCode = function (value) {
+    if (RubyGenerator.isString(value) &&
+        value[0] === '"' &&
+        value[value.length - 1] === '"') {
+        const s = value.slice(1, value.length - 1);
+        const n = Number(s);
+        if (!isNaN(n) && !(n === 0 && RubyGenerator.isWhiteSpace(s))) {
+            return n;
+        }
+    }
+    return value;
+};
+RubyGenerator.nosToCode = RubyGenerator.numberOrStringToCode;
+
+RubyGenerator.spriteNew = function (renderedTarget) {
+    if (!renderedTarget) {
+        return null;
+    }
+
+    const attributes = {};
+    if (renderedTarget.x !== 0) {
+        attributes.x = renderedTarget.x;
+    }
+    if (renderedTarget.y !== 0) {
+        attributes.y = renderedTarget.y;
+    }
+    if (renderedTarget.direction !== 90) {
+        attributes.direction = renderedTarget.direction;
+    }
+    if (!renderedTarget.visible) {
+        attributes.visible = !!renderedTarget.visible;
+    }
+    if (renderedTarget.size !== 100) {
+        attributes.size = renderedTarget.size;
+    }
+    if (renderedTarget.currentCostume > 1) {
+        attributes.current_costume = renderedTarget.currentCostume - 1;
+    }
+    const costumes = renderedTarget.sprite.costumes;
+    if (costumes.length > 0) {
+        const s = costumes.map(i => {
+            const h = {
+                asset_id: this.quote_(i.assetId),
+                name: this.quote_(i.name),
+                bitmap_resolution: i.bitmapResolution ? i.bitmapResolution : 1,
+                data_format: this.quote_(i.dataFormat),
+                rotation_center_x: i.rotationCenterX,
+                rotation_center_y: i.rotationCenterY
+            };
+            return this.hashToCode(h);
+        }).join(',\n');
+        attributes.costumes = `[\n${this.prefixLines(s, this.INDENT)}\n]`;
+    }
+    if (renderedTarget.rotationStyle !== 'all around') {
+        attributes.rotation_style = this.quote_(renderedTarget.rotationStyle);
+    }
+
+    const variables = [];
+    const lists = [];
+    for (const id in renderedTarget.variables) {
+        const v = renderedTarget.variables[id];
+        switch (v.type) {
+        case SCALAR_TYPE:
+            variables.push(v);
+            break;
+        case LIST_TYPE:
+            lists.push(v);
+            break;
+        }
+    }
+    if (variables.length > 0) {
+        const s = variables.map(i => {
+            const h = {
+                name: this.quote_(this.escapeVariableName(i.name))
+            };
+            if (i.value !== 0) {
+                h.value = this.scalarToCode(i.value);
+            }
+            return this.hashToCode(h);
+        }).join(',\n');
+        attributes.variables = `[\n${this.prefixLines(s, this.INDENT)}\n]`;
+    }
+    if (lists.length > 0) {
+        const s = lists.map(i => {
+            const h = {
+                name: this.quote_(this.escapeVariableName(i.name))
+            };
+            if (i.value.length > 0) {
+                h.value = this.listToCode(i.value);
+            }
+            return this.hashToCode(h);
+        }).join(',\n');
+        attributes.lists = `[\n${this.prefixLines(s, this.INDENT)}\n]`;
+    }
+
+    let code = this.hashToCode(attributes, ': ', false);
+    if (code.length > 0) {
+        const indent = renderedTarget.isStage ? '          ' : '           ';
+        code = `,\n${this.prefixLines(code, indent)}`;
+    }
+    const klass = renderedTarget.isStage ? 'Stage' : 'Sprite';
+    const name = renderedTarget.sprite.name;
+    return `${klass}.new(${this.quote_(name)}${code})`;
+};
+
+RubyGenerator.scrubNakedValue = function (line) {
+    return `${line}\n`;
+};
+
+RubyGenerator.escapeChars_ = {
+    '"': '\\"',
+    '\\': '\\\\',
+    '\n': '\\n',
+    '\t': '\\t',
+    '\r': '\\r',
+    '\b': '\\b',
+    '\f': '\\f',
+    '\v': '\\v',
+    '\0': '\\0'
+};
+
+RubyGenerator.quote_ = function (string) {
+    let i;
+    const s = String(string);
+    const sb = ['"'];
+    for (i = 0; i < s.length; i++) {
+        const ch = s.charAt(i);
+        sb.push(RubyGenerator.escapeChars_[ch] || ch);
+    }
+    sb.push('"');
+    return sb.join('');
+};
+
+RubyGenerator.scrub_ = function (block, code) {
+    if (code === null) {
+        return '';
+    }
+
+    let commentCode = '';
+    if (!this.isConnectedValue(block)) {
+        let comment = this.getCommentText(block);
+        if (comment && !comment.startsWith('@ruby:')) {
+            commentCode += `${this.prefixLines(comment, '# ')}\n`;
+        }
+        const inputs = this.getInputs(block);
+        for (const name in inputs) {
+            const input = inputs[name];
+            const childBlock = this.getBlock(input.block);
+            if (childBlock) {
+                comment = this.allNestedComments(childBlock);
+                if (comment) {
+                    const filteredComment = comment.split('\n')
+                        .filter(line => !line.startsWith('@ruby:'))
+                        .join('\n');
+                    if (filteredComment.trim().length > 0) {
+                        commentCode += this.prefixLines(filteredComment, '# ');
+                    }
+                }
+            }
+        }
+    }
+
+    // Check if this block has explicitly marked that its next chain should not be processed
+    // (e.g., procedures_definition manually processes its body blocks)
+    let nextCode = '';
+    if (block._skipNextInScrub) {
+        // Clean up the flag
+        delete block._skipNextInScrub;
+    } else {
+        const nextBlock = this.getBlock(block.next);
+        nextCode = this.blockToCode(nextBlock);
+    }
+    let endCode = '';
+    if (block.isStatement) {
+        if (nextCode !== '') {
+            nextCode = this.prefixLines(nextCode, this.INDENT);
+        }
+        endCode = 'end\n';
+        delete block.isStatement;
+    }
+    return commentCode + code + nextCode + endCode;
+};
+
 RubyGenerator.spriteName = function () {
     return 'self';
+};
+
+const escapeIdentityRegexp =
+    /[\x00-\x1f\x7f-\x9f !"#$%&'()*+,-./:;<=>?@[\\\]^`{|}~]/g; // eslint-disable-line no-control-regex
+
+RubyGenerator.escapeVariableName = function (s) {
+    return s.replace(escapeIdentityRegexp, '_');
+};
+
+RubyGenerator.escapeMethodName = RubyGenerator.escapeVariableName;
+
+RubyGenerator.makeVariableName = function (isStage, name) {
+    const prefix = isStage ? '$' : '@';
+    return `${prefix}${name.replace(escapeIdentityRegexp, '_')}`;
+};
+
+RubyGenerator.variableName = function (id, type = SCALAR_TYPE) {
+    let currVar;
+    let isStage;
+    const target = this.currentTarget;
+    const variables = target.variables;
+    if (Object.prototype.hasOwnProperty.call(variables, id)) {
+        currVar = variables[id];
+        isStage = target.isStage;
+    } else if (target.runtime && !target.isStage) {
+        const stage = target.runtime.getTargetForStage();
+        if (stage && Object.prototype.hasOwnProperty.call(stage.variables, id)) {
+            currVar = stage.variables[id];
+            isStage = true;
+        }
+    }
+    if (currVar && currVar.type === type) {
+        return this.makeVariableName(isStage, currVar.name);
+    }
+    return null;
+};
+
+RubyGenerator.listName = function (id) {
+    return this.variableName(id, LIST_TYPE);
+};
+
+RubyGenerator.variableNameByName = function (name, type = SCALAR_TYPE) {
+    let currVar;
+    let isStage;
+    const target = this.currentTarget;
+    if (target.runtime) {
+        const stage = target.runtime.getTargetForStage();
+        currVar = stage.lookupVariableByNameAndType(name, type);
+        isStage = true;
+    }
+    if (!currVar) {
+        currVar = target.lookupVariableByNameAndType(name, type);
+        isStage = target.isStage;
+    }
+    if (currVar && currVar.type === type) {
+        return this.makeVariableName(isStage, currVar.name);
+    }
+    return null;
+};
+
+RubyGenerator.listNameByName = function (name) {
+    return this.variableNameByName(name, LIST_TYPE);
 };
 
 RubyGenerator.getScripts = function () {
@@ -144,12 +636,6 @@ RubyGenerator.getScripts = function () {
     });
 };
 
-EncodingHelpers(RubyGenerator);
-VariableHelpers(RubyGenerator);
-ScrubHandler(RubyGenerator);
-SpriteNewGenerator(RubyGenerator);
-ClassWrapper(RubyGenerator);
-CodeFinisher(RubyGenerator);
 MathBlocks(RubyGenerator);
 TextBlocks(RubyGenerator);
 ColourBlocks(RubyGenerator);
@@ -179,9 +665,11 @@ MeshBlocks(RubyGenerator);
 MeshV2Blocks(RubyGenerator);
 SmalrubotS1Blocks(RubyGenerator);
 KoshienBlocks(RubyGenerator);
-FaceSensingBlocks(RubyGenerator);
-// === Smalruby: Start of Ruby String extension ===
-SmalrubyRubyBlocks(RubyGenerator);
-// === Smalruby: End of Ruby String extension ===
+KaniroboBlocks(RubyGenerator);
+KaniroboRBlocks(RubyGenerator);
+RBoardBlocks(RubyGenerator);
+MCTBoardBlocks(RubyGenerator);
+UnifiedAPIBlocks(RubyGenerator);
+PeripheralsBlocks(RubyGenerator);
 
 export default RubyGenerator;

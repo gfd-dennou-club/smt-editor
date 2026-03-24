@@ -27,9 +27,33 @@ import FaceSensingConverter from './face_sensing';
 // === Smalruby: Start of Ruby String extension ===
 import SmalrubyRubyConverter from './smalruby-ruby';
 // === Smalruby: End of Ruby String extension ===
+import SmT_Utils_Converter from './smt_utils';
+import SmT_GPIO_Converter from './smt_gpio';
+import SmT_PWM_Converter from './smt_pwm';
+import SmT_ADC_Converter from './smt_adc';
+import SmT_I2C_Converter from './smt_i2c';
+import SmT_SPI_Converter from './smt_spi';
+import SmT_UART_Converter from './smt_uart';
+import SmT_I2C_Sensors_Converter from './smt_i2c_sensors';
+import SmT_I2C_LCD_Converter from './smt_i2c_lcd';
+import SmT_Time_Converter from './smt_time';
+import SmT_Network_Converter from './smt_network';
+import SmT_SPI_SDcard_Converter from './smt_spi_sdcard';
 
 const registerConverters = function (converter) {
     [
+	SmT_Utils_Converter,
+	SmT_GPIO_Converter,
+	SmT_PWM_Converter,
+	SmT_ADC_Converter,
+	SmT_I2C_Converter,
+	SmT_SPI_Converter,
+	SmT_UART_Converter,
+	SmT_I2C_Sensors_Converter,
+	SmT_I2C_LCD_Converter,
+	SmT_Time_Converter,
+	SmT_Network_Converter,
+	SmT_SPI_SDcard_Converter,
         VariablesConverter,
         EventConverter,
         ControlConverter,

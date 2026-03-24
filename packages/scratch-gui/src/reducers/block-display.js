@@ -11,10 +11,45 @@ const getInitialSelectedBlocks = () => {
     const urlParams = typeof window === 'undefined' ?
         {} : queryString.parse(window.location.search);
 
-    const onlyBlocks = urlParams.only_blocks;
-
+    //const onlyBlocks = urlParams.only_blocks;
+    //
     // Initialize from only_blocks parameter (null if not present, which will select all blocks)
-    return initializeBlockSelectionFromOnlyBlocks(onlyBlocks);
+    //return initializeBlockSelectionFromOnlyBlocks(onlyBlocks);
+
+    //必要なブロックのみに限定
+    const onlyBlocks = {
+	looks: [
+            'looks_say'
+	],
+	control: [
+            'control_wait',
+            'control_repeat',
+            'control_forever',
+            'control_if',
+            'control_if_else',
+            'control_wait_until',
+            'control_repeat_until'
+	],
+	operators: [
+            'operator_add',
+            'operator_subtract',
+            'operator_multiply',
+            'operator_divide',
+            'operator_gt',
+            'operator_lt',
+            'operator_equals',
+            'operator_and',
+            'operator_or',
+            'operator_not',
+            'operator_join',
+            'operator_letter_of',
+            'operator_length',
+            'operator_contains',
+            'operator_mod'
+	]
+    };
+    return onlyBlocks;
+
 };
 
 const initialState = {
@@ -25,19 +60,6 @@ const initialState = {
 
 const reducer = function (state, action) {
     if (typeof state === 'undefined') state = initialState;
-
-    // Migrate old 'events' key to 'event' for backward compatibility when loading state
-    if (state && state.selectedBlocks && state.selectedBlocks.events && !state.selectedBlocks.event) {
-        state = {
-            ...state,
-            selectedBlocks: {
-                ...state.selectedBlocks,
-                event: state.selectedBlocks.events
-            }
-        };
-        delete state.selectedBlocks.events;
-    }
-
     switch (action.type) {
     case SET_SELECTED_BLOCKS:
         return Object.assign({}, state, {
@@ -57,17 +79,9 @@ const reducer = function (state, action) {
 };
 
 const setSelectedBlocks = function (blocks) {
-    // Migrate old 'events' key to 'event' for backward compatibility
-    let migratedBlocks = blocks;
-    if (blocks && blocks.events && !blocks.event) {
-        migratedBlocks = {...blocks};
-        migratedBlocks.event = blocks.events;
-        delete migratedBlocks.events;
-    }
-
     return {
         type: SET_SELECTED_BLOCKS,
-        blocks: migratedBlocks
+        blocks: blocks
     };
 };
 
@@ -96,7 +110,6 @@ const setScratchBlocks = function (scratchBlocks) {
 export {
     reducer as default,
     initialState,
-    initialState as blockDisplayInitialState,
     setSelectedBlocks,
     openBlockDisplayModal,
     closeBlockDisplayModal,

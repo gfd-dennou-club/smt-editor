@@ -44,7 +44,24 @@ const ExpressionHandlers = {
         this._context.isValue = true;
         const args = (node.arguments_ ? node.arguments_.arguments_ : []).map(childNode => {
             const result = this.visit(childNode);
-            const s = this._splitPreBlocksAndValue(result);
+
+	    /**
+	     * 追加 by sugiyama
+	     */
+	    //console.log('--- Debug: Argument Visit ---');
+	    //console.log('Node Type:', this._getNodeTypeName(childNode));
+	    //console.log('Original Result Opcode:', result ? result.opcode : 'null');
+	    
+	    // GPIO の引数で | を使うための措置
+	    if (result && typeof result.opcode === 'string' && result.opcode.startsWith('ruby_')) {
+		const nodeType = this._getNodeTypeName(childNode);
+		if (nodeType === 'CallNode' && childNode.name === '|') {
+		    //console.log('>>> Found "|" operator! Renaming to avoid index.js error.');
+		    result.opcode = 'unifiedapi_custom_bit_or'; // ruby_ 以外なら何でもOK
+		}
+	    }
+
+	    const s = this._splitPreBlocksAndValue(result);
             preBlocks.push(...s.preBlocks);
             return s.value;
         });

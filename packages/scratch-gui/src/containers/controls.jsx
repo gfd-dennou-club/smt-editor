@@ -10,6 +10,9 @@ import ControlsComponent from '../components/controls/controls.jsx';
 
 import RubyToBlocksConverterHOC from '../lib/ruby-to-blocks-converter-hoc.jsx';
 
+//kanirobo
+import RubyUploader from './ruby-uploader.jsx';
+
 class Controls extends React.Component {
     constructor (props) {
         super(props);
@@ -18,10 +21,10 @@ class Controls extends React.Component {
             'handleStopAllClick'
         ]);
     }
-    async handleGreenFlagClick (e) {
+    handleGreenFlagClick (e) {
         e.preventDefault();
 
-        const converter = await this.props.targetCodeToBlocks(this.props.intl);
+        const converter = this.props.targetCodeToBlocks(this.props.intl);
         if (!converter.result) {
             return;
         }
@@ -52,6 +55,7 @@ class Controls extends React.Component {
             ...props
         } = this.props;
         return (
+/*
             <ControlsComponent
                 {...props}
                 active={projectRunning}
@@ -59,6 +63,21 @@ class Controls extends React.Component {
                 onGreenFlagClick={this.handleGreenFlagClick}
                 onStopAllClick={this.handleStopAllClick}
             />
+*/
+	    <RubyUploader>
+                 {(
+                     _1, _2, uploadProject
+                 ) => (
+                     <ControlsComponent
+                         {...props}
+                         active={projectRunning}
+                         turbo={turbo}
+                         onGreenFlagClick={uploadProject}
+                         onStopAllClick={this.handleStopAllClick}
+                     />
+                 )}
+             </RubyUploader>
+	    
         );
     }
 }

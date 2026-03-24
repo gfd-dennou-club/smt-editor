@@ -13,6 +13,7 @@ const builtinExtensions = {
     // but serves as a reference for loading core blocks as extensions.
     coreExample: () => require('../blocks/scratch3_core_example'),
     // These are the non-core built-in extensions.
+/*
     pen: () => require('../extensions/scratch3_pen'),
     wedo2: () => require('../extensions/scratch3_wedo2'),
     music: () => require('../extensions/scratch3_music'),
@@ -28,6 +29,13 @@ const builtinExtensions = {
     mesh: () => require('../extensions/scratch3_mesh'),
     meshV2: () => require('../extensions/scratch3_mesh_v2'),
     smalrubotS1: () => require('../extensions/scratch3_smalrubot_s1')
+*/
+    kanirobo:   () => require('../extensions/smt_kanirobo'),
+    kaniroboR:  () => require('../extensions/smt_kaniroboR'),
+    unifiedapi: () => require('../extensions/smt_unifiedapi'),
+    mctboard:   () => require('../extensions/smt_mctboard'),
+    rboard:     () => require('../extensions/smt_rboard'),
+    peripherals:() => require('../extensions/smt_peripherals'),    
 };
 
 /**
@@ -62,10 +70,20 @@ const builtinExtensions = {
  * @property {Function} reject - function to call on failed worker startup
  */
 
-// === Smalruby: Start of extension registration ===
-const registerSmalrubyExtensions = require('./smalruby-extensions');
-registerSmalrubyExtensions(builtinExtensions);
-// === Smalruby: End of extension registration ===
+builtinExtensions.microbitMore = () => {
+    const formatMessage = require('format-message');
+    const ext = require('../extensions/microbitMore/index.js');
+    const blockClass = ext.blockClass;
+    blockClass.formatMessage = formatMessage;
+    return blockClass;
+};
+
+builtinExtensions.koshien = () => {
+    const formatMessage = require('format-message');
+    const blockClass = require('../extensions/koshien/index.js');
+    blockClass.formatMessage = formatMessage;
+    return blockClass;
+};
 
 class ExtensionManager {
     constructor (runtime) {
