@@ -28,6 +28,23 @@ const registerSmalrubyExtensions = builtinExtensions => {
         return blockClass;
     };
 
+    // tm2scratch extension - Teachable Machine support
+    builtinExtensions.tm2scratch = () => {
+        const formatMessage = require('format-message');
+        const blockClass = require('../extensions/scratch3_tm2scratch/index.js');
+        blockClass.formatMessage = formatMessage;
+        return blockClass;
+    };
+
+    // g2s extension - AkaDako (Grove sensors/actuators) support
+    builtinExtensions.g2s = () => {
+        const formatMessage = require('format-message');
+        const ext = require('../extensions/scratch3_g2s/index.js');
+        const blockClass = ext.blockClass;
+        blockClass.formatMessage = formatMessage;
+        return blockClass;
+    };
+
     // ruby extension - Ruby String methods support
     builtinExtensions.smalrubyRuby = () => {
         const formatMessage = require('format-message');

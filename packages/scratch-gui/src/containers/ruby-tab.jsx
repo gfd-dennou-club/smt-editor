@@ -1,73 +1,73 @@
+// === Smalruby: This file is Smalruby-specific (Ruby tab with Monaco Editor, DNCL mode, furigana) ===
 import PropTypes from 'prop-types';
-import React, {useState, useRef, useCallback, useEffect} from 'react';
-import {injectIntl} from 'react-intl';
-import intlShape from '../lib/intlShape.js';
-import {connect} from 'react-redux';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { injectIntl } from 'react-intl';
+import { connect } from 'react-redux';
 import Editor from '@monaco-editor/react';
+import VM from '@smalruby/scratch-vm';
+import AutoCorrectModal from '../components/auto-correct-modal/auto-correct-modal.jsx';
+import cameraIcon from '../components/blocks-screenshot-button/icon--camera.svg';
+import RubyScriptPreview from '../components/ruby-script-preview/ruby-script-preview.jsx';
+import RubyToolbar from '../components/ruby-toolbar/ruby-toolbar.jsx';
+import { autoCorrect, defaultSettings as defaultAutoCorrectSettings } from '../lib/auto-correct';
+import collectMetadata from '../lib/collect-metadata.js';
+import { DnclSourceMap } from '../lib/dncl/dncl-source-map';
+import { dnclToRuby } from '../lib/dncl/dncl-to-ruby';
+import { rubyToDncl } from '../lib/dncl/ruby-to-dncl';
+import FuriganaAnnotator from '../lib/furigana-annotator';
+import { wrapCurrentCodeWithClass } from '../lib/insert-class';
+import intlShape from '../lib/intlShape.js';
+import { syncModules } from '../lib/module-sync';
+import { loadMonacoLocale } from '../lib/monaco-i18n-helper';
+import { getPrism, loadPrism } from '../lib/prism-parser';
+import RubyGenerator from '../lib/ruby-generator';
+import { downloadRubyAsImage } from '../lib/ruby-screenshot';
+import { generatePreviewCode } from '../lib/ruby-script-preview';
+import { targetCodeToBlocks } from '../lib/ruby-to-blocks-converter';
+import RubyToBlocksConverterHOC from '../lib/ruby-to-blocks-converter-hoc.jsx';
+import { containsV1Code } from '../lib/ruby-to-blocks-converter/v1-detection';
+import { getUrlParams } from '../lib/url-params';
+import { showAlertWithTimeout, closeAlertWithId } from '../reducers/alerts';
+import { setDnclMode as setDnclModeAction } from '../reducers/dncl-mode';
+import { BLOCKS_TAB_INDEX, RUBY_TAB_INDEX } from '../reducers/editor-tab';
+import { setAiSaveStatus, clearAiSaveStatus } from '../reducers/koshien-file';
+import { closeFileMenu } from '../reducers/menus.js';
+import { setProjectChanged } from '../reducers/project-changed';
 import {
     rubyCodeShape,
     updateRubyCode,
     updateRubyCodeErrors,
     updateRubyCodeTarget,
-    updateRubyFontSize
+    updateRubyFontSize,
 } from '../reducers/ruby-code';
-import {setRubyVersion, dismissV1Prompt} from '../reducers/settings';
-import {setProjectChanged} from '../reducers/project-changed';
-import {showAlertWithTimeout, closeAlertWithId} from '../reducers/alerts';
-import {markRubyTabUsed} from '../reducers/tutorial-onboarding';
-import VM from '@smalruby/scratch-vm';
-import {BLOCKS_TAB_INDEX, RUBY_TAB_INDEX} from '../reducers/editor-tab';
-
-import RubyToBlocksConverterHOC from '../lib/ruby-to-blocks-converter-hoc.jsx';
-import {targetCodeToBlocks} from '../lib/ruby-to-blocks-converter';
-import {containsV1Code} from '../lib/ruby-to-blocks-converter/v1-detection';
-// === Smalruby: Start of module editor update ===
-import RubyGenerator from '../lib/ruby-generator';
-// === Smalruby: End of module editor update ===
-// === Smalruby: Start of module sync ===
-import {syncModules} from '../lib/module-sync';
-// === Smalruby: End of module sync ===
-
-import QuickFixProvider from './ruby-tab/quick-fix-provider';
-import {
-    registerCustomPasteAction,
-    setupPasteDuplicateHider,
-    registerLanguageAndProviders
-} from './ruby-tab/editor-setup';
-
+import { setRubyVersion, dismissV1Prompt } from '../reducers/settings';
+import { markRubyTabUsed } from '../reducers/tutorial-onboarding';
 import RubyDownloader from './ruby-downloader.jsx';
-import RubyToolbar from '../components/ruby-toolbar/ruby-toolbar.jsx';
-import FuriganaAnnotator from '../lib/furigana-annotator';
-import FuriganaRenderer from './ruby-tab/furigana-renderer';
-import RubyteeModalHOC from './rubytee-modal-hoc.jsx';
-import collectMetadata from '../lib/collect-metadata.js';
-import {closeFileMenu} from '../reducers/menus.js';
-import {wrapCurrentCodeWithClass} from '../lib/insert-class';
-import {setAiSaveStatus, clearAiSaveStatus} from '../reducers/koshien-file';
-import AutoCorrectModal from '../components/auto-correct-modal/auto-correct-modal.jsx';
-import RubyScriptPreview from '../components/ruby-script-preview/ruby-script-preview.jsx';
-import {generatePreviewCode} from '../lib/ruby-script-preview';
-import {autoCorrect, defaultSettings as defaultAutoCorrectSettings} from '../lib/auto-correct';
-import {downloadRubyAsImage} from '../lib/ruby-screenshot';
-import cameraIcon from '../components/blocks-screenshot-button/icon--camera.svg';
-import styles from './ruby-tab/ruby-tab.css';
-import {loadMonacoLocale} from '../lib/monaco-i18n-helper';
-import {getPrism, loadPrism} from '../lib/prism-parser';
 import {
     FONT_SIZES,
     DEFAULT_FONT_SIZE,
     FURIGANA_ENABLED_KEY,
     AUTO_CORRECT_ENABLED_KEY,
-    AUTO_CORRECT_SETTINGS_KEY
+    AUTO_CORRECT_SETTINGS_KEY,
+    DNCL_MODE_KEY,
 } from './ruby-tab/constants';
 import updateDebugGlobals from './ruby-tab/debug-globals';
+import {
+    registerCustomPasteAction,
+    setupPasteDuplicateHider,
+    registerLanguageAndProviders,
+} from './ruby-tab/editor-setup';
 import {
     clearDecoration,
     highlightLine,
     highlightLineRange,
-    findExecutableLine
+    findExecutableLine,
 } from './ruby-tab/execution-highlighter';
-import {showBubble, dismissBubble, removeBubble} from './ruby-tab/visual-report-bubble';
+import FuriganaRenderer from './ruby-tab/furigana-renderer';
+import QuickFixProvider from './ruby-tab/quick-fix-provider';
+import styles from './ruby-tab/ruby-tab.css';
+import { showBubble, dismissBubble, removeBubble } from './ruby-tab/visual-report-bubble';
+import RubyteeModalHOC from './rubytee-modal-hoc.jsx';
 
 // === Initialization helpers ===
 
@@ -82,8 +82,10 @@ const loadAutoCorrectSettings = () => {
     if (typeof window !== 'undefined' && window.localStorage) {
         try {
             const raw = window.localStorage.getItem(AUTO_CORRECT_SETTINGS_KEY);
-            if (raw) return {...defaultAutoCorrectSettings, ...JSON.parse(raw)};
-        } catch (_e) { /* use defaults */ }
+            if (raw) return { ...defaultAutoCorrectSettings, ...JSON.parse(raw) };
+        } catch (_e) {
+            /* use defaults */
+        }
     }
     return defaultAutoCorrectSettings;
 };
@@ -92,17 +94,33 @@ const loadAutoCorrectSettings = () => {
 
 const RubyTab = props => {
     const {
-        vm, intl, rubyCode, rubyVersion, locale,
-        activeTabIndex, isVisible, editingTarget, blocksTabVisible,
-        onChange, updateRubyCodeErrorsState, updateRubyCodeTargetState,
+        vm,
+        intl,
+        rubyCode,
+        rubyVersion,
+        locale,
+        activeTabIndex,
+        isVisible,
+        editingTarget,
+        blocksTabVisible,
+        onChange,
+        updateRubyCodeErrorsState,
+        updateRubyCodeTargetState,
         targetCodeToBlocks: targetCodeToBlocksHOC,
-        onRevertRubyVersion, onShowAlert, onDismissAlert,
-        onRequestCloseFile, onProjectTelemetryEvent,
-        onSetAiSaveStatus, onClearAiSaveStatus,
-        onFontSizeChange, onMarkRubyTabUsed,
-        onOpenRubyteeModal, onRegisterRubyteeApply,
+        onRevertRubyVersion,
+        onShowAlert,
+        onDismissAlert,
+        onRequestCloseFile,
+        onProjectTelemetryEvent,
+        onSetAiSaveStatus,
+        onClearAiSaveStatus,
+        onFontSizeChange,
+        onMarkRubyTabUsed,
+        onOpenRubyteeModal,
+        onRegisterRubyteeApply,
         v1PromptDismissed,
-        onDismissV1Prompt
+        onDismissV1Prompt,
+        onSetDnclMode,
     } = props;
 
     // --- State ---
@@ -111,16 +129,33 @@ const RubyTab = props => {
     void executingLine;
     const [canUndo, setCanUndo] = useState(false);
     const [canRedo, setCanRedo] = useState(false);
-    const [furiganaEnabled, setFuriganaEnabled] = useState(
-        () => loadBool(FURIGANA_ENABLED_KEY, true)
-    );
-    const [autoCorrectEnabled, setAutoCorrectEnabled] = useState(
-        () => loadBool(AUTO_CORRECT_ENABLED_KEY, true)
-    );
+    const [furiganaEnabled, setFuriganaEnabled] = useState(() => {
+        const urlRubyMode = getUrlParams().rubyMode;
+        if (urlRubyMode === 'furigana') return true;
+        if (urlRubyMode === 'ruby' || urlRubyMode === 'dncl') return false;
+        return loadBool(FURIGANA_ENABLED_KEY, true);
+    });
+    const [autoCorrectEnabled, setAutoCorrectEnabled] = useState(() => loadBool(AUTO_CORRECT_ENABLED_KEY, true));
     const [autoCorrectSettings, setAutoCorrectSettings] = useState(loadAutoCorrectSettings);
     const [showAutoCorrectModal, setShowAutoCorrectModal] = useState(false);
     const [showScriptPreview, setShowScriptPreview] = useState(false);
     const [previewCode, setPreviewCode] = useState('');
+    const [dnclValidating, setDnclValidating] = useState(false);
+    const [dnclMode, setDnclMode] = useState(() => {
+        const urlRubyMode = getUrlParams().rubyMode;
+        if (urlRubyMode === 'dncl') return true;
+        if (urlRubyMode === 'furigana' || urlRubyMode === 'ruby') return false;
+        // loadBool treats missing keys as true; DNCL defaults to off
+        if (typeof window !== 'undefined' && window.localStorage) {
+            return window.localStorage.getItem(DNCL_MODE_KEY) === 'true';
+        }
+        return false;
+    });
+    // Separate DNCL display code to prevent editor from showing Ruby
+    const [dnclDisplayCode, setDnclDisplayCode] = useState('');
+    const dnclSourceMapRef = useRef(null);
+    const dnclModeRef = useRef(dnclMode);
+    dnclModeRef.current = dnclMode;
 
     // --- Instance refs ---
     const editorRef = useRef(null);
@@ -142,6 +177,7 @@ const RubyTab = props => {
     const furiganaDebounceTimerRef = useRef(null);
     const furiganaLastMsRef = useRef(0);
     const isAutoCorrectUpdateRef = useRef(false);
+    const isModeSwitchRef = useRef(false);
 
     // Lazy initialization of heavy objects
     if (!quickFixProviderRef.current) quickFixProviderRef.current = new QuickFixProvider();
@@ -176,9 +212,7 @@ const RubyTab = props => {
 
     const clearErrors = () => {
         if (editorRef.current && monacoRef.current) {
-            monacoRef.current.editor.setModelMarkers(
-                editorRef.current.getModel(), 'smalruby', []
-            );
+            monacoRef.current.editor.setModelMarkers(editorRef.current.getModel(), 'smalruby', []);
             editorRef.current.trigger('source', 'closeMarkersNavigation');
         }
         if (rubyCode.errors.length > 0) {
@@ -194,17 +228,16 @@ const RubyTab = props => {
                 startLineNumber: err.row + 1,
                 startColumn: err.column + 1,
                 endLineNumber: err.row + 1,
-                endColumn: (err.source ? err.column + err.source.length + 1 : 1000),
+                endColumn: err.source ? err.column + err.source.length + 1 : 1000,
                 message: err.text,
-                severity: monacoRef.current.MarkerSeverity.Error
+                severity: monacoRef.current.MarkerSeverity.Error,
             }));
-            monacoRef.current.editor.setModelMarkers(
-                editorRef.current.getModel(), 'smalruby', markers
-            );
+            monacoRef.current.editor.setModelMarkers(editorRef.current.getModel(), 'smalruby', markers);
             if (markers.length > 0) {
                 const error = errors[0];
                 editorRef.current.setPosition({
-                    lineNumber: error.row + 1, column: error.column + 1
+                    lineNumber: error.row + 1,
+                    column: error.column + 1,
                 });
                 editorRef.current.focus();
                 editorRef.current.trigger('source', 'editor.action.marker.next');
@@ -220,9 +253,7 @@ const RubyTab = props => {
             const t0 = performance.now();
             const parseResult = prism.parse(code);
             const annotations = furiganaAnnotatorRef.current.annotate(code, parseResult);
-            furiganaRendererRef.current.render(
-                editorRef.current, monacoRef.current, annotations
-            );
+            furiganaRendererRef.current.render(editorRef.current, monacoRef.current, annotations);
             furiganaLastMsRef.current = performance.now() - t0;
         } else {
             loadPrism().then(loadedPrism => {
@@ -231,12 +262,8 @@ const RubyTab = props => {
                 const currentCode = editorRef.current.getValue() || '';
                 const t0 = performance.now();
                 const parseResult = loadedPrism.parse(currentCode);
-                const annotations = furiganaAnnotatorRef.current.annotate(
-                    currentCode, parseResult
-                );
-                furiganaRendererRef.current.render(
-                    editorRef.current, monacoRef.current, annotations
-                );
+                const annotations = furiganaAnnotatorRef.current.annotate(currentCode, parseResult);
+                furiganaRendererRef.current.render(editorRef.current, monacoRef.current, annotations);
                 furiganaLastMsRef.current = performance.now() - t0;
             });
         }
@@ -270,16 +297,21 @@ const RubyTab = props => {
     const doHighlightLine = lineNumber => {
         if (!editorRef.current || !monacoRef.current) return;
         executingLineDecorationRef.current = highlightLine(
-            editorRef.current, monacoRef.current,
-            lineNumber, executingLineDecorationRef.current
+            editorRef.current,
+            monacoRef.current,
+            lineNumber,
+            executingLineDecorationRef.current,
         );
     };
 
     const doHighlightLineRange = (startLine, endLine) => {
         if (!editorRef.current || !monacoRef.current) return;
         executingLineDecorationRef.current = highlightLineRange(
-            editorRef.current, monacoRef.current,
-            startLine, endLine, executingLineDecorationRef.current
+            editorRef.current,
+            monacoRef.current,
+            startLine,
+            endLine,
+            executingLineDecorationRef.current,
         );
     };
 
@@ -309,36 +341,53 @@ const RubyTab = props => {
 
     // --- Stable Editor callbacks ---
 
-    const handleEditorChange = useCallback(value => {
-        if (isAutoCorrectUpdateRef.current) {
-            isAutoCorrectUpdateRef.current = false;
-            onChangeRef.current(value);
-            return;
-        }
-        if (autoCorrectEnabledRef.current && editorRef.current) {
-            const corrected = autoCorrect(value, autoCorrectSettingsRef.current);
-            if (corrected !== value) {
-                isAutoCorrectUpdateRef.current = true;
-                const position = editorRef.current.getPosition();
-                const model = editorRef.current.getModel();
-                const beforeCursor = value.substring(
-                    0, model.getOffsetAt(position)
-                );
-                const correctedBeforeCursor = autoCorrect(
-                    beforeCursor, autoCorrectSettingsRef.current
-                );
-                const offsetDiff = beforeCursor.length - correctedBeforeCursor.length;
-                model.setValue(corrected);
-                const newOffset = model.getOffsetAt(position) - offsetDiff;
-                const newPosition = model.getPositionAt(
-                    Math.max(0, newOffset)
-                );
-                editorRef.current.setPosition(newPosition);
+    const dispatchCode = useCallback(code => {
+        if (dnclModeRef.current) {
+            setDnclDisplayCode(code);
+            const result = dnclToRuby(code);
+            if (result.errors && result.errors.length > 0) {
+                // Show DNCL validation errors but don't dispatch invalid code
+                dnclSourceMapRef.current = null;
                 return;
             }
+            dnclSourceMapRef.current = new DnclSourceMap(code, result.ruby);
+            onChangeRef.current(result.ruby);
+        } else {
+            onChangeRef.current(code);
         }
-        onChangeRef.current(value);
     }, []);
+
+    const handleEditorChange = useCallback(
+        value => {
+            // Skip change events triggered by mode switch (Ruby↔DNCL) to
+            // prevent a Redux dispatch that causes a re-render race where
+            // the dnclMode state hasn't committed yet.
+            if (isModeSwitchRef.current) return;
+            if (isAutoCorrectUpdateRef.current) {
+                isAutoCorrectUpdateRef.current = false;
+                dispatchCode(value);
+                return;
+            }
+            if (autoCorrectEnabledRef.current && editorRef.current) {
+                const corrected = autoCorrect(value, autoCorrectSettingsRef.current);
+                if (corrected !== value) {
+                    isAutoCorrectUpdateRef.current = true;
+                    const position = editorRef.current.getPosition();
+                    const model = editorRef.current.getModel();
+                    const beforeCursor = value.substring(0, model.getOffsetAt(position));
+                    const correctedBeforeCursor = autoCorrect(beforeCursor, autoCorrectSettingsRef.current);
+                    const offsetDiff = beforeCursor.length - correctedBeforeCursor.length;
+                    model.setValue(corrected);
+                    const newOffset = model.getOffsetAt(position) - offsetDiff;
+                    const newPosition = model.getPositionAt(Math.max(0, newOffset));
+                    editorRef.current.setPosition(newPosition);
+                    return;
+                }
+            }
+            dispatchCode(value);
+        },
+        [dispatchCode],
+    );
 
     const handleEditorDidMount = useCallback((editor, monaco) => {
         editorRef.current = editor;
@@ -348,7 +397,7 @@ const RubyTab = props => {
 
         const pasteLabel = intlRef.current.formatMessage({
             id: 'gui.rubyTab.paste',
-            defaultMessage: 'Paste'
+            defaultMessage: 'Paste',
         });
         registerCustomPasteAction(editor, pasteLabel);
         const observers = setupPasteDuplicateHider();
@@ -356,8 +405,11 @@ const RubyTab = props => {
         bodyMutationObserverRef.current = observers.bodyMutationObserver;
 
         completionProviderManagerRef.current = registerLanguageAndProviders(
-            monaco, editor, vmRef.current,
-            quickFixProviderRef.current, completionProviderManagerRef.current
+            monaco,
+            editor,
+            vmRef.current,
+            quickFixProviderRef.current,
+            completionProviderManagerRef.current,
         );
 
         if (containerRef.current) {
@@ -402,7 +454,6 @@ const RubyTab = props => {
                 onChangeRef.current(code);
             });
         }
-
     }, []);
 
     // --- UI event handlers (useCallback for react/jsx-no-bind) ---
@@ -415,7 +466,8 @@ const RubyTab = props => {
 
     const handleZoomOut = useCallback(() => {
         const currentSize = rubyCode.fontSize || DEFAULT_FONT_SIZE;
-        const prevSize = FONT_SIZES.slice().reverse()
+        const prevSize = FONT_SIZES.slice()
+            .reverse()
             .find(s => s < currentSize);
         if (prevSize) onFontSizeChange(prevSize);
     }, [rubyCode.fontSize, onFontSizeChange]);
@@ -432,23 +484,24 @@ const RubyTab = props => {
         downloadRubyAsImage(editorRef.current, title, spriteName);
     }, [vm, props.projectTitle]);
 
-    const handleSelectTarget = useCallback(targetId => {
-        const target = vm.runtime.getTargetById(targetId);
-        if (target) vm.setEditingTarget(target.id);
-    }, [vm]);
+    const handleSelectTarget = useCallback(
+        targetId => {
+            const target = vm.runtime.getTargetById(targetId);
+            if (target) vm.setEditingTarget(target.id);
+        },
+        [vm],
+    );
 
     const getSaveToComputerHandler = useCallback(
         downloadProjectCallback => () => {
             onRequestCloseFile();
             downloadProjectCallback();
             if (onProjectTelemetryEvent) {
-                const metadata = collectMetadata(
-                    vm, props.projectTitle, locale
-                );
+                const metadata = collectMetadata(vm, props.projectTitle, locale);
                 onProjectTelemetryEvent('projectDidSave', metadata);
             }
         },
-        [onRequestCloseFile, onProjectTelemetryEvent, vm, props.projectTitle, locale]
+        [onRequestCloseFile, onProjectTelemetryEvent, vm, props.projectTitle, locale],
     );
 
     const handleDownload = useCallback(() => {
@@ -467,10 +520,12 @@ const RubyTab = props => {
         if (wrapped === null) return; // class already exists
         const model = editorRef.current.getModel();
         const fullRange = model.getFullModelRange();
-        editorRef.current.executeEdits('insertClass', [{
-            range: fullRange,
-            text: wrapped
-        }]);
+        editorRef.current.executeEdits('insertClass', [
+            {
+                range: fullRange,
+                text: wrapped,
+            },
+        ]);
     }, [vm]);
 
     const handleAISaveFinished = useCallback(() => {
@@ -484,11 +539,103 @@ const RubyTab = props => {
         onClearAiSaveStatus();
     }, [onClearAiSaveStatus]);
 
-    const handleConversionError = useCallback(errors => {
-        onShowAlert('convertRubyToBlocksError');
-        updateRubyCodeErrorsState(errors);
-        showErrors(errors);
-    }, [onShowAlert, updateRubyCodeErrorsState]); // showErrors uses refs, safe in stale closure
+    const handleConversionError = useCallback(
+        errors => {
+            onShowAlert('convertRubyToBlocksError');
+            updateRubyCodeErrorsState(errors);
+            showErrors(errors);
+        },
+        [onShowAlert, updateRubyCodeErrorsState],
+    ); // showErrors uses refs, safe in stale closure
+
+    const dnclValidationErrorMessage = intl.formatMessage({
+        id: 'gui.rubyTab.dnclValidationError',
+        defaultMessage:
+            'This code contains constructs not supported in Japanese mode.\nPlease use only supported instructions before switching modes.',
+    });
+
+    const handleToggleDnclMode = useCallback(async () => {
+        const enabling = !dnclModeRef.current;
+
+        // Clear any existing errors before mode switch attempt.
+        clearErrors();
+
+        // Validate before switching TO DNCL mode:
+        // Dry-run Ruby → DNCL → Ruby → Blocks to check for unsupported code.
+        if (enabling && editorRef.current && monacoRef.current) {
+            setDnclValidating(true);
+            try {
+                const currentRuby = editorRef.current.getModel().getValue();
+                const dnclResult = rubyToDncl(currentRuby);
+                const rubyResult = dnclToRuby(dnclResult.dncl);
+
+                // Check DNCL → Ruby conversion errors (e.g. @ or $ in DNCL)
+                if (rubyResult.errors && rubyResult.errors.length > 0) {
+                    const errors = rubyResult.errors.map(err => ({
+                        row: err.line - 1,
+                        column: err.column - 1,
+                        text: dnclValidationErrorMessage,
+                        type: 'error',
+                    }));
+                    showErrors(errors);
+                    return;
+                }
+
+                // Dry-run blocks conversion (no apply — no side effects)
+                const converter = await targetCodeToBlocks(vm, rubyCode.target, rubyResult.ruby, intl, {
+                    version: rubyVersion,
+                });
+                if (!converter.result) {
+                    const errors = converter.errors.map(err => ({
+                        ...err,
+                        text: dnclValidationErrorMessage,
+                    }));
+                    showErrors(errors);
+                    return;
+                }
+            } finally {
+                setDnclValidating(false);
+            }
+        }
+
+        // Suppress handleEditorChange during mode switch to prevent a
+        // re-render race: model.setValue triggers onChange synchronously,
+        // which dispatches to Redux, causing a re-render where dnclMode
+        // state hasn't committed yet — overwriting the editor content.
+        isModeSwitchRef.current = true;
+
+        dnclModeRef.current = enabling; // eslint-disable-line require-atomic-updates
+
+        if (typeof window !== 'undefined' && window.localStorage) {
+            window.localStorage.setItem(DNCL_MODE_KEY, enabling);
+        }
+
+        if (editorRef.current && monacoRef.current) {
+            const model = editorRef.current.getModel();
+            if (enabling) {
+                // Switching to DNCL: convert Ruby → DNCL
+                const currentRuby = model.getValue();
+                const result = rubyToDncl(currentRuby);
+                dnclSourceMapRef.current = new DnclSourceMap(result.dncl, currentRuby);
+                monacoRef.current.editor.setModelLanguage(model, 'dncl');
+                model.setValue(result.dncl);
+                setDnclDisplayCode(result.dncl);
+            } else {
+                // Switching to Ruby: convert DNCL → Ruby
+                const currentDncl = model.getValue();
+                const result = dnclToRuby(currentDncl);
+                dnclSourceMapRef.current = null;
+                monacoRef.current.editor.setModelLanguage(model, 'smalruby');
+                model.setValue(result.ruby);
+                setDnclDisplayCode('');
+                onChangeRef.current(result.ruby);
+            }
+        }
+
+        isModeSwitchRef.current = false;
+        setDnclMode(enabling);
+        onSetDnclMode(enabling);
+    }, [vm, rubyCode.target, intl, rubyVersion, dnclValidationErrorMessage, onSetDnclMode]);
 
     const handleToggleFurigana = useCallback(() => {
         setFuriganaEnabled(prev => {
@@ -509,9 +656,7 @@ const RubyTab = props => {
             if (enabled && editorRef.current) {
                 const value = editorRef.current.getValue();
                 if (value) {
-                    const corrected = autoCorrect(
-                        value, autoCorrectSettingsRef.current
-                    );
+                    const corrected = autoCorrect(value, autoCorrectSettingsRef.current);
                     if (corrected !== value) {
                         isAutoCorrectUpdateRef.current = true;
                         const model = editorRef.current.getModel();
@@ -534,10 +679,9 @@ const RubyTab = props => {
     const handlePreviewRubyScript = useCallback(async () => {
         // Validate and convert Ruby code to blocks (same as download flow)
         if (rubyCode.modified) {
-            const converter = await targetCodeToBlocks(
-                vm, rubyCode.target, rubyCode.code, intl,
-                {version: rubyVersion}
-            );
+            const converter = await targetCodeToBlocks(vm, rubyCode.target, rubyCode.code, intl, {
+                version: rubyVersion,
+            });
             if (!converter.result) {
                 onShowAlert('convertRubyToBlocksError');
                 updateRubyCodeErrorsState(converter.errors);
@@ -558,12 +702,9 @@ const RubyTab = props => {
 
     const handleAutoCorrectSettingChange = useCallback((key, value) => {
         setAutoCorrectSettings(prev => {
-            const newSettings = {...prev, [key]: value};
+            const newSettings = { ...prev, [key]: value };
             if (typeof window !== 'undefined' && window.localStorage) {
-                window.localStorage.setItem(
-                    AUTO_CORRECT_SETTINGS_KEY,
-                    JSON.stringify(newSettings)
-                );
+                window.localStorage.setItem(AUTO_CORRECT_SETTINGS_KEY, JSON.stringify(newSettings));
             }
             return newSettings;
         });
@@ -576,18 +717,14 @@ const RubyTab = props => {
             if (converter.result) {
                 converter.apply().then(async () => {
                     clearErrors();
-                    // === Smalruby: Start of module sync ===
                     if (rubyCode.target && String(newVersion) === '2') {
                         try {
-                            await syncModules(
-                                vm, rubyCode.target, intl, newVersion
-                            );
+                            await syncModules(vm, rubyCode.target, intl, newVersion);
                         } catch (e) {
                             // eslint-disable-next-line no-console
                             console.error('Module sync error:', e);
                         }
                     }
-                    // === Smalruby: End of module sync ===
                     updateRubyCodeTargetState(vm.editingTarget, newVersion);
                 });
             } else {
@@ -602,119 +739,144 @@ const RubyTab = props => {
         }
     };
 
-    const handleExecuteLine = useCallback(async lineNumber => {
-        if (runningBlockIdRef.current) {
-            vm.runtime.toggleScript(runningBlockIdRef.current, {
-                target: vm.editingTarget,
-                stackClick: true
-            });
-            return;
-        }
+    const handleExecuteLine = useCallback(
+        async lineNumber => {
+            if (runningBlockIdRef.current) {
+                vm.runtime.toggleScript(runningBlockIdRef.current, {
+                    target: vm.editingTarget,
+                    stackClick: true,
+                });
+                return;
+            }
 
-        clearErrors();
+            clearErrors();
 
-        const code = rubyCode.code;
-        const targetLine = findExecutableLine(code, lineNumber);
+            const code = rubyCode.code;
 
-        if (!targetLine) {
-            // eslint-disable-next-line no-console
-            console.warn('[handleExecuteLine] No non-empty line found');
-            onShowAlert('cannotExecuteLine');
-            return;
-        }
+            // In DNCL mode, execute all top-level scripts from top to bottom
+            // instead of just the cursor line.
+            const isDncl = dnclModeRef.current;
+            const targetLine = isDncl ? 1 : findExecutableLine(code, lineNumber);
 
-        const converter = await targetCodeToBlocks(
-            vm, rubyCode.target, code, intl,
-            {version: rubyVersion}
-        );
+            if (!targetLine) {
+                // eslint-disable-next-line no-console
+                console.warn('[handleExecuteLine] No non-empty line found');
+                onShowAlert('cannotExecuteLine');
+                return;
+            }
 
-        if (!converter.result) {
-            onShowAlert('convertRubyToBlocksError');
-            updateRubyCodeErrorsState(converter.errors);
-            showErrors(converter.errors);
-            return;
-        }
+            const converter = await targetCodeToBlocks(vm, rubyCode.target, code, intl, { version: rubyVersion });
 
-        converter.apply()
-            .then(() => {
-                // === Smalruby: Start of update editor after execute ===
-                // Regenerate Ruby code from blocks so that auto-imported
-                // modules are reflected in the editor immediately.
-                // Using direct editor setValue because Redux prop-driven
-                // updates via @monaco-editor/react may not take effect
-                // reliably within the same callback.
-                const regenerated = RubyGenerator.targetToCode(
-                    vm.editingTarget, {version: rubyVersion}
-                );
-                if (editorRef.current && regenerated !== code) {
-                    // Remember cursor content to restore position after setValue
-                    const cursorLine = editorRef.current.getPosition().lineNumber;
-                    const cursorContent = editorRef.current.getModel()
-                        .getLineContent(cursorLine)
-                        .trim();
+            if (!converter.result) {
+                onShowAlert('convertRubyToBlocksError');
+                updateRubyCodeErrorsState(converter.errors);
+                showErrors(converter.errors);
+                return;
+            }
 
-                    editorRef.current.setValue(regenerated);
+            converter
+                .apply()
+                .then(() => {
+                    // Regenerate Ruby code from blocks so that auto-imported
+                    // modules are reflected in the editor immediately.
+                    // Using direct editor setValue because Redux prop-driven
+                    // updates via @monaco-editor/react may not take effect
+                    // reliably within the same callback.
+                    const regenerated = RubyGenerator.targetToCode(vm.editingTarget, { version: rubyVersion });
+                    if (editorRef.current && regenerated !== code) {
+                        // Remember cursor content to restore position after setValue
+                        const cursorLine = editorRef.current.getPosition().lineNumber;
+                        const cursorContent = editorRef.current.getModel().getLineContent(cursorLine).trim();
 
-                    // Restore cursor to matching line in regenerated code
-                    if (typeof cursorContent === 'string' && cursorContent.length > 0) {
-                        const lines = regenerated.split('\n');
-                        for (let i = 0; i < lines.length; i++) {
-                            if (lines[i].trim() === cursorContent) {
-                                const newLine = i + 1;
-                                editorRef.current.setPosition({
-                                    lineNumber: newLine, column: 1
-                                });
-                                editorRef.current.revealLineInCenter(newLine);
-                                break;
+                        if (dnclModeRef.current) {
+                            // Convert regenerated Ruby back to DNCL for display
+                            const dnclResult = rubyToDncl(regenerated);
+                            setDnclDisplayCode(dnclResult.dncl);
+                            editorRef.current.setValue(dnclResult.dncl);
+                        } else {
+                            editorRef.current.setValue(regenerated);
+                        }
+
+                        // Restore cursor to matching line in regenerated code
+                        if (typeof cursorContent === 'string' && cursorContent.length > 0) {
+                            const currentValue = editorRef.current.getValue();
+                            const lines = currentValue.split('\n');
+                            for (let i = 0; i < lines.length; i++) {
+                                if (lines[i].trim() === cursorContent) {
+                                    const newLine = i + 1;
+                                    editorRef.current.setPosition({
+                                        lineNumber: newLine,
+                                        column: 1,
+                                    });
+                                    editorRef.current.revealLineInCenter(newLine);
+                                    break;
+                                }
                             }
                         }
                     }
-                }
-                // === Smalruby: End of update editor after execute ===
 
-                const blockId = converter.getBlockIdForLine(targetLine);
-                if (!blockId) {
+                    if (isDncl) {
+                        // Execute all top-level scripts sequentially
+                        const blocks = vm.editingTarget.blocks;
+                        const allTopBlocks = blocks.getScripts();
+                        if (allTopBlocks.length === 0) {
+                            onShowAlert('cannotExecuteLine');
+                            return;
+                        }
+
+                        // Highlight all lines
+                        const totalLines = code.split('\n').length;
+                        doHighlightLineRange(1, totalLines);
+
+                        // Execute each top-level script
+                        for (const topBlockId of allTopBlocks) {
+                            vm.runtime.toggleScript(topBlockId, {
+                                target: vm.editingTarget,
+                                stackClick: true,
+                            });
+                        }
+                        return;
+                    }
+
+                    const blockId = converter.getBlockIdForLine(targetLine);
+                    if (!blockId) {
+                        // eslint-disable-next-line no-console
+                        console.warn(`[handleExecuteLine] No executable block at line ${targetLine}`);
+                        onShowAlert('cannotExecuteLine');
+                        return;
+                    }
+
+                    const topBlockId = vm.editingTarget.blocks.getTopLevelScript(blockId);
+                    if (!topBlockId) {
+                        // eslint-disable-next-line no-console
+                        console.warn(`[handleExecuteLine] No top-level block for ${blockId}`);
+                        onShowAlert('cannotExecuteLine');
+                        return;
+                    }
+
+                    const blocks = vm.editingTarget.blocks;
+                    const lineRange = converter.getLineRangeForTopLevelScript(topBlockId, blocks);
+
+                    setExecutingLine(targetLine);
+                    if (lineRange) {
+                        doHighlightLineRange(lineRange.startLine, lineRange.endLine);
+                    } else {
+                        doHighlightLine(targetLine);
+                    }
+
+                    vm.runtime.toggleScript(topBlockId, {
+                        target: vm.editingTarget,
+                        stackClick: true,
+                    });
+                })
+                .catch(error => {
                     // eslint-disable-next-line no-console
-                    console.warn(
-                        `[handleExecuteLine] No executable block at line ${targetLine}`
-                    );
-                    onShowAlert('cannotExecuteLine');
-                    return;
-                }
-
-                const topBlockId = vm.editingTarget.blocks.getTopLevelScript(blockId);
-                if (!topBlockId) {
-                    // eslint-disable-next-line no-console
-                    console.warn(
-                        `[handleExecuteLine] No top-level block for ${blockId}`
-                    );
-                    onShowAlert('cannotExecuteLine');
-                    return;
-                }
-
-                const blocks = vm.editingTarget.blocks;
-                const lineRange = converter.getLineRangeForTopLevelScript(
-                    topBlockId, blocks
-                );
-
-                setExecutingLine(targetLine);
-                if (lineRange) {
-                    doHighlightLineRange(lineRange.startLine, lineRange.endLine);
-                } else {
-                    doHighlightLine(targetLine);
-                }
-
-                vm.runtime.toggleScript(topBlockId, {
-                    target: vm.editingTarget,
-                    stackClick: true
+                    console.error('[handleExecuteLine] Apply error:', error);
+                    onShowAlert('convertRubyToBlocksError');
                 });
-            })
-            .catch(error => {
-                // eslint-disable-next-line no-console
-                console.error('[handleExecuteLine] Apply error:', error);
-                onShowAlert('convertRubyToBlocksError');
-            });
-    }, [vm, rubyCode, intl, rubyVersion, onShowAlert, updateRubyCodeErrorsState, onDismissAlert]);
+        },
+        [vm, rubyCode, intl, rubyVersion, onShowAlert, updateRubyCodeErrorsState, onDismissAlert],
+    );
 
     const renderDownloaderChildren = useCallback((_, downloadProjectCallback) => {
         downloadCallbackRef.current = downloadProjectCallback;
@@ -733,7 +895,7 @@ const RubyTab = props => {
         window.smalruby.vm = vm;
         updateDebugGlobals(vm, {
             enabled: autoCorrectEnabledRef.current,
-            settings: autoCorrectSettingsRef.current
+            settings: autoCorrectSettingsRef.current,
         });
 
         return () => {
@@ -788,6 +950,21 @@ const RubyTab = props => {
         }
     }, [furiganaEnabled]);
 
+    // When code changes from blocks tab (Ruby → DNCL display), sync DNCL display
+    const rubyCodeStr = rubyCode.code;
+    useEffect(() => {
+        if (!dnclMode) return;
+        if (!editorRef.current || !monacoRef.current) return;
+        // Only sync when the Ruby code changed externally (e.g., from blocks)
+        // not from our own editor change (which already sets dnclDisplayCode)
+        const currentEditorValue = editorRef.current.getValue();
+        const currentRubyFromDncl = dnclToRuby(currentEditorValue).ruby;
+        if (currentRubyFromDncl !== rubyCodeStr && rubyCodeStr) {
+            const result = rubyToDncl(rubyCodeStr);
+            setDnclDisplayCode(result.dncl);
+        }
+    }, [rubyCodeStr, dnclMode]);
+
     // componentDidUpdate equivalent
     const prevPropsRef = useRef(null);
     useEffect(() => {
@@ -800,7 +977,7 @@ const RubyTab = props => {
                 isVisible,
                 editingTarget,
                 rubyCode,
-                blocksTabVisible
+                blocksTabVisible,
             };
         };
 
@@ -819,8 +996,7 @@ const RubyTab = props => {
         }
 
         // Tab switch away → dismiss bubble
-        if (prev.activeTabIndex === RUBY_TAB_INDEX &&
-            activeTabIndex !== RUBY_TAB_INDEX) {
+        if (prev.activeTabIndex === RUBY_TAB_INDEX && activeTabIndex !== RUBY_TAB_INDEX) {
             handleDismissBubbleStable();
         }
 
@@ -845,16 +1021,14 @@ const RubyTab = props => {
         let modified = rubyCode.modified;
         if (modified) {
             const targetId = rubyCode.target ? rubyCode.target.id : null;
-            const changedTarget = vm.editingTarget && rubyCode.target &&
-                vm.editingTarget.id !== targetId;
+            const changedTarget = vm.editingTarget && rubyCode.target && vm.editingTarget.id !== targetId;
             if (changedTarget || blocksTabVisible) {
-                if (String(rubyVersion) === '2' &&
-                    !v1PromptDismissed &&
-                    containsV1Code(rubyCode.code)) {
+                if (String(rubyVersion) === '2' && !v1PromptDismissed && containsV1Code(rubyCode.code)) {
                     const message = intlRef.current.formatMessage({
                         id: 'gui.rubyTab.v1CodeDetected',
-                        // eslint-disable-next-line max-len
-                        defaultMessage: 'Switch Ruby version to "v1"?\n\nThe code you entered uses the "v1" syntax found in textbooks. Switching to "v1" lets you program with the same syntax as the textbook.'
+
+                        defaultMessage:
+                            'Switch Ruby version to "v1"?\n\nThe code you entered uses the "v1" syntax found in textbooks. Switching to "v1" lets you program with the same syntax as the textbook.',
                     });
                     // eslint-disable-next-line no-alert
                     if (window.confirm(message)) {
@@ -868,25 +1042,18 @@ const RubyTab = props => {
                         converter.apply().then(async () => {
                             modified = false;
                             clearErrors();
-                            // === Smalruby: Start of module sync ===
                             if (rubyCode.target && String(rubyVersion) === '2') {
                                 try {
-                                    await syncModules(
-                                        vm, rubyCode.target, intl, rubyVersion
-                                    );
+                                    await syncModules(vm, rubyCode.target, intl, rubyVersion);
                                 } catch (e) {
                                     // eslint-disable-next-line no-console
                                     console.error('Module sync error:', e);
                                 }
                             }
-                            // === Smalruby: End of module sync ===
                             if (!modified) {
-                                const etChanged = editingTarget &&
-                                    editingTarget !== prev.editingTarget;
+                                const etChanged = editingTarget && editingTarget !== prev.editingTarget;
                                 if ((isVisible && !prev.isVisible) || etChanged) {
-                                    updateRubyCodeTargetState(
-                                        vm.editingTarget, rubyVersion
-                                    );
+                                    updateRubyCodeTargetState(vm.editingTarget, rubyVersion);
                                 }
                             }
                             if (isVisible && !prev.isVisible) {
@@ -904,10 +1071,35 @@ const RubyTab = props => {
         }
 
         if (!modified) {
-            const etChanged = editingTarget &&
-                editingTarget !== prev.editingTarget;
+            const etChanged = editingTarget && editingTarget !== prev.editingTarget;
             if ((isVisible && !prev.isVisible) || etChanged) {
+                // When switching to Ruby tab in DNCL mode, temporarily fall
+                // back to furigana mode so blocks→Ruby generation works.
+                // After the code is ready, attempt DNCL switch automatically.
+                const wasDncl = isVisible && !prev.isVisible && dnclModeRef.current;
+                if (wasDncl) {
+                    dnclModeRef.current = false;
+                    setDnclMode(false);
+                    onSetDnclMode(false);
+                    setFuriganaEnabled(true);
+                    if (typeof window !== 'undefined' && window.localStorage) {
+                        window.localStorage.setItem(DNCL_MODE_KEY, 'false');
+                        window.localStorage.setItem(FURIGANA_ENABLED_KEY, 'true');
+                    }
+                    if (editorRef.current && monacoRef.current) {
+                        monacoRef.current.editor.setModelLanguage(editorRef.current.getModel(), 'smalruby');
+                    }
+                }
                 updateRubyCodeTargetState(vm.editingTarget, rubyVersion);
+                // Schedule DNCL switch after React re-renders with the new
+                // Ruby code and the Monaco editor value prop is committed.
+                if (wasDncl) {
+                    requestAnimationFrame(() => {
+                        setTimeout(() => {
+                            handleToggleDnclMode();
+                        }, 0);
+                    });
+                }
             }
         }
 
@@ -921,21 +1113,18 @@ const RubyTab = props => {
 
         updateDebugGlobals(vm, {
             enabled: autoCorrectEnabled,
-            settings: autoCorrectSettings
+            settings: autoCorrectSettings,
         });
         savePrev();
     });
 
     // --- Render ---
 
-    const {code, fontSize} = rubyCode;
+    const { code, fontSize } = rubyCode;
 
     return (
         <>
-            <div
-                ref={containerRef}
-                className={styles.editorContainer}
-            >
+            <div ref={containerRef} className={styles.editorContainer}>
                 <RubyToolbar
                     editingTarget={vm.editingTarget}
                     vm={vm}
@@ -955,28 +1144,30 @@ const RubyTab = props => {
                     onOpenAutoCorrectSettings={handleOpenAutoCorrectSettings}
                     onPreviewRubyScript={handlePreviewRubyScript}
                     onOpenRubyteeModal={onOpenRubyteeModal}
+                    dnclMode={dnclMode}
+                    dnclValidating={dnclValidating}
+                    onToggleDnclMode={handleToggleDnclMode}
                 />
                 <div className={styles.editorWrapper}>
                     <Editor
                         key={locale}
                         height="100%"
-                        language="smalruby"
+                        language={dnclMode ? 'dncl' : 'smalruby'}
                         onMount={handleEditorDidMount}
                         onChange={handleEditorChange}
                         options={{
                             fontSize: fontSize || DEFAULT_FONT_SIZE,
-                            fontFamily: 'Monaco, Menlo, Consolas, ' +
-                                '"source-code-pro", monospace',
-                            minimap: {enabled: false},
+                            fontFamily: 'Monaco, Menlo, Consolas, "source-code-pro", monospace',
+                            minimap: { enabled: false },
                             renderWhitespace: 'all',
                             scrollBeyondLastLine: true,
                             tabSize: 2,
                             fixedOverflowWidgets: true,
                             wordBasedSuggestions: 'off',
-                            autoIndent: 'full'
+                            autoIndent: 'full',
                         }}
                         theme="vs"
-                        value={code}
+                        value={dnclMode ? dnclDisplayCode : code}
                         width="100%"
                     />
                 </div>
@@ -1003,35 +1194,14 @@ const RubyTab = props => {
                         src={cameraIcon}
                     />
                 </button>
-                <button
-                    className={styles.zoomButton}
-                    data-testid="ruby-zoom-in"
-                    onClick={handleZoomIn}
-                >
-                    <img
-                        src="./static/blocks-media/default/zoom-in.svg"
-                        className={styles.zoomIcon}
-                    />
+                <button className={styles.zoomButton} data-testid="ruby-zoom-in" onClick={handleZoomIn}>
+                    <img src="./static/blocks-media/default/zoom-in.svg" className={styles.zoomIcon} />
                 </button>
-                <button
-                    className={styles.zoomButton}
-                    data-testid="ruby-zoom-out"
-                    onClick={handleZoomOut}
-                >
-                    <img
-                        src="./static/blocks-media/default/zoom-out.svg"
-                        className={styles.zoomIcon}
-                    />
+                <button className={styles.zoomButton} data-testid="ruby-zoom-out" onClick={handleZoomOut}>
+                    <img src="./static/blocks-media/default/zoom-out.svg" className={styles.zoomIcon} />
                 </button>
-                <button
-                    className={styles.zoomButton}
-                    data-testid="ruby-zoom-reset"
-                    onClick={handleZoomReset}
-                >
-                    <img
-                        src="./static/blocks-media/default/zoom-reset.svg"
-                        className={styles.zoomIcon}
-                    />
+                <button className={styles.zoomButton} data-testid="ruby-zoom-reset" onClick={handleZoomReset}>
+                    <img src="./static/blocks-media/default/zoom-reset.svg" className={styles.zoomIcon} />
                 </button>
             </div>
             {showAutoCorrectModal && (
@@ -1041,12 +1211,7 @@ const RubyTab = props => {
                     onRequestClose={handleCloseAutoCorrectSettings}
                 />
             )}
-            {showScriptPreview && (
-                <RubyScriptPreview
-                    code={previewCode}
-                    onClose={handleCloseScriptPreview}
-                />
-            )}
+            {showScriptPreview && <RubyScriptPreview code={previewCode} onClose={handleCloseScriptPreview} />}
         </>
     );
 };
@@ -1078,7 +1243,8 @@ RubyTab.propTypes = {
     onOpenRubyteeModal: PropTypes.func,
     onRegisterRubyteeApply: PropTypes.func,
     v1PromptDismissed: PropTypes.bool,
-    onDismissV1Prompt: PropTypes.func
+    onDismissV1Prompt: PropTypes.func,
+    onSetDnclMode: PropTypes.func,
 };
 
 const mapStateToProps = state => ({
@@ -1090,7 +1256,7 @@ const mapStateToProps = state => ({
     projectTitle: state.scratchGui.projectTitle,
     locale: state.locales.locale,
     activeTabIndex: state.scratchGui.editorTab.activeTabIndex,
-    v1PromptDismissed: state.scratchGui.settings.v1PromptDismissed
+    v1PromptDismissed: state.scratchGui.settings.v1PromptDismissed,
 });
 
 const mapDispatchToProps = dispatch => ({
@@ -1108,12 +1274,12 @@ const mapDispatchToProps = dispatch => ({
     onClearAiSaveStatus: () => dispatch(clearAiSaveStatus()),
     onFontSizeChange: fontSize => dispatch(updateRubyFontSize(fontSize)),
     onMarkRubyTabUsed: () => dispatch(markRubyTabUsed()),
-    onDismissV1Prompt: () => dispatch(dismissV1Prompt())
+    onDismissV1Prompt: () => dispatch(dismissV1Prompt()),
+    onSetDnclMode: dnclMode => dispatch(setDnclModeAction(dnclMode)),
 });
 
-const ConnectedRubyTab = RubyteeModalHOC(RubyToBlocksConverterHOC(injectIntl(connect(
-    mapStateToProps,
-    mapDispatchToProps
-)(RubyTab))));
+const ConnectedRubyTab = RubyteeModalHOC(
+    RubyToBlocksConverterHOC(injectIntl(connect(mapStateToProps, mapDispatchToProps)(RubyTab))),
+);
 
 export default ConnectedRubyTab;

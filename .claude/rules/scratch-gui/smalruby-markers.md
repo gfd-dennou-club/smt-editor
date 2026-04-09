@@ -11,30 +11,15 @@ paths:
 description: "Smalruby マーカーコメントの一覧と規約。upstream ファイルへの Smalruby 固有コード追加や upstream merge 時に使用。"
 ---
 
-# Smalruby Marker Blocks
+# Smalruby Marker Blocks (scratch-gui)
 
-Smalruby のカスタムコードは upstream ファイルの中に **マーカーコメント** で囲んで配置する。
-upstream merge 時にコンフリクトを解決しやすくするための仕組み。
+upstream ファイルに追加した Smalruby 固有コードのマーカー一覧。
+マーカーの書式・ルールは `.claude/rules/code-style.md` の「Smalruby Marker Comments」を参照。
 
-## マーカーの書式
+**重要**: Smalruby 固有ファイル（`smalruby-prettier-files.md` に記載されたファイル）にはマーカー不要。
+このファイルに記載するのは **upstream ファイルに埋め込んだマーカーのみ**。
 
-```javascript
-// === Smalruby: Start of <機能名> ===
-// ... Smalruby 固有のコード ...
-// === Smalruby: End of <機能名> ===
-```
-
-ファイル全体が Smalruby 固有の場合:
-```javascript
-// === Smalruby: This file is Smalruby-specific (<説明>) ===
-```
-
-## ルール
-
-1. **upstream ファイルに Smalruby コードを追加するときは必ずマーカーで囲む**
-2. **マーカー内のコードだけを変更する** — マーカー外は upstream の管轄
-3. **新しいマーカーを追加したら、このセクションに記載する**
-4. **マーカーを削除する場合は、このセクションからも削除する**
+マーカーを追加・削除した場合は、下記の一覧を更新すること。
 
 ## 現在のマーカー一覧
 
@@ -44,14 +29,27 @@ upstream merge 時にコンフリクトを解決しやすくするための仕�
 | `src/reducers/gui.ts` | initial state | Smalruby 初期 state の展開 |
 | `src/reducers/gui.ts` | reducers | Smalruby reducer の登録 |
 | `src/containers/cards.jsx` | tutorial glow animation | チュートリアルのハイライトアニメーション |
+| `src/containers/connection-modal.jsx` | smalrubot firmware flash | SmalrubotS1 ファームウェア書き込みの import、ハンドラー、props |
 | `src/containers/connection-modal.jsx` | meshV2 initial step feature | Mesh v2 接続初期ステップ |
 | `src/containers/connection-modal.jsx` | meshV2 connected message feature | Mesh v2 接続済みメッセージ |
 | `src/containers/connection-modal.jsx` | meshV2 back button feature | Mesh v2 戻るボタン |
 | `src/components/cards/cards.jsx` | tutorial glow animation | チュートリアル UI のハイライト |
+| `src/components/connection-modal/connection-modal.jsx` | smalrubot firmware flash | SmalrubotS1 ファームウェアボタン propType |
 | `src/components/connection-modal/connection-modal.jsx` | network filter detection feature | ネットワークフィルター検出 |
+| `src/components/connection-modal/error-step.jsx` | smalrubot firmware flash | エラーステップのファームウェアボタン |
+| `src/reducers/modals.js` | smalrubot firmware modal | ファームウェアモーダル開時に接続モーダルを自動で閉じる |
 | `src/components/connection-modal/connection-modal.jsx` | meshV2 initial step feature | Mesh v2 初期ステップ UI |
 | `src/components/connection-modal/connected-step.jsx` | meshV2 connected message feature | Mesh v2 接続済みステップ UI |
+| `src/components/menu-bar/menu-bar.jsx` | smalrubot firmware menu | SmalrubotS1 メニューの import、ハンドラー、レンダリング、Redux 接続 |
+| `src/components/gui/gui.jsx` | smalrubot firmware modal | SmalrubotS1 ファームウェアモーダルの import と配置 |
+| `src/components/gui/gui.jsx` | classroom modal | クラスルームモーダルの import と配置 |
 | `src/components/gui/gui.jsx` | Redux action props prevention | Redux action props の伝播防止 |
+| `src/containers/gui.jsx` | smalrubot firmware modal | SmalrubotS1 ファームウェアモーダル state マッピング |
+| `src/containers/gui.jsx` | classroom modal | クラスルームモーダル state マッピング |
+| `src/containers/gui.jsx` | classcode auto-open | クラスコード URL パラメーターによるモーダル自動オープン |
+| `src/components/menu-bar/menu-bar.jsx` | classroom button | クラスルームボタンの import、レンダリング、Redux 接続 |
+| `src/components/menu-bar/settings-menu.jsx` | classroom management menu | クラス管理メニューアイテムの import、レンダリング、Redux 接続 |
+| `webpack.config.js` | classroom API | CLASSROOM_API_ENDPOINT 環境変数注入 |
 | `src/lib/blocks.js` | gesture recovery import | ジェスチャー復旧モジュールの import |
 | `src/lib/blocks.js` | gesture recovery | ジェスチャー復旧ハンドラーのインストール |
 | `src/playground/render-gui.jsx` | URL params for Playwright | URL パラメーター import |
@@ -67,24 +65,6 @@ upstream merge 時にコンフリクトを解決しやすくするための仕�
 | `src/reducers/editor-tab.js` | initial tab from URL param | 初期タブ URL パラメーター |
 | `src/reducers/settings.js` | URL params for Playwright | URL パラメーター import |
 | `src/reducers/settings.js` | ruby_version URL param | Ruby バージョン URL パラメーター |
-
-## Smalruby 固有ファイル（ファイル全体がマーカー）
-
-| ファイル | 説明 |
-|----------|------|
-| `src/components/connection-modal/mesh-v2-initial-step.jsx` | Mesh v2 初期接続ステップコンポーネント |
-| `src/components/connection-modal/mesh-v2-network-filtered-step.jsx` | Mesh v2 ネットワークフィルター検出コンポーネント |
-| `src/reducers/smalruby-registry.ts` | Smalruby reducer/state の一括エクスポート |
-| `src/lib/blocks-gesture-recovery.js` | ジェスチャー復旧ハンドラー（ブロックドラッグのスタック防止） |
-| `src/lib/url-params.js` | Playwright テスト用 URL パラメーター解析ユーティリティ |
-| `src/containers/ruby-tab/debug-globals.js` | Playwright MCP 用デバッググローバル変数 |
-| `src/lib/rubytee-api.js` | Rubytee Relay API クライアント |
-| `src/lib/rubytee-context.js` | Rubytee 状態コンテキスト構築 |
-| `src/containers/rubytee-modal-hoc.jsx` | Rubytee モーダル HOC（同意フロー + チャット） |
-| `src/components/rubytee-modal/rubytee-modal.jsx` | Rubytee チャット UI |
-| `src/components/rubytee-modal/rubytee-modal.css` | Rubytee チャット CSS |
-| `src/components/rubytee-consent/rubytee-consent.jsx` | Rubytee 同意確認ダイアログ |
-| `src/components/rubytee-consent/rubytee-consent.css` | Rubytee 同意確認 CSS |
 
 ## 関連ファイル
 

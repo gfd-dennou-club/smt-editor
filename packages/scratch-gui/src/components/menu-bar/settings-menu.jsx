@@ -25,6 +25,12 @@ import settingsIcon from './icon--settings.svg';
 import themeIcon from '../../lib/assets/icon--theme.svg';
 import rubyIcon from '../../containers/ruby-tab/icon--ruby.svg';
 import blockDisplayIcon from './block-display-icon.png';
+// === Smalruby: Start of classroom management menu ===
+import {isClassroomConfigured} from '../../lib/classroom-api';
+import {getUrlParams} from '../../lib/url-params';
+import {openTeacherModal} from '../../reducers/classroom';
+import googleClassroomIcon from '../classroom-teacher-modal/google-classroom-icon.png';
+// === Smalruby: End of classroom management menu ===
 import {
     colorModeMenuOpen,
     themeMenuOpen,
@@ -54,6 +60,7 @@ const SettingsMenu = ({
     onRequestOpenTheme,
     onRequestOpenRubyVersion,
     onOpenBlockDisplayModal,
+    onOpenTeacherModal,
     activeTheme,
     onChangeTheme,
     onRequestClose,
@@ -187,6 +194,23 @@ const SettingsMenu = ({
                             />
                         </div>
                     </MenuItem>
+                    {/* === Smalruby: Start of classroom management menu === */}
+                    {isClassroomConfigured() && getUrlParams().features.includes('classroom') && (
+                        <MenuItem onClick={onOpenTeacherModal}>
+                            <div className={styles.option}>
+                                <img
+                                    className={styles.icon}
+                                    src={googleClassroomIcon}
+                                />
+                                <FormattedMessage
+                                    defaultMessage="Class Management..."
+                                    description="Class management menu item"
+                                    id="gui.menuBar.classroomManagement"
+                                />
+                            </div>
+                        </MenuItem>
+                    )}
+                    {/* === Smalruby: End of classroom management menu === */}
                 </MenuSection>
             </MenuBarMenu>
         </div>
@@ -210,6 +234,7 @@ SettingsMenu.propTypes = {
     isColorModeMenuOpen: PropTypes.bool,
     isRubyVersionMenuOpen: PropTypes.bool,
     onOpenBlockDisplayModal: PropTypes.func,
+    onOpenTeacherModal: PropTypes.func,
     activeTheme: PropTypes.string,
     activeRubyVersion: PropTypes.string,
     onChangeTheme: PropTypes.func,
@@ -245,6 +270,12 @@ const mapDispatchToProps = (dispatch, ownProps) => ({
     onOpenBlockDisplayModal: () => {
         ownProps.onOpenBlockDisplayModal();
     },
+    // === Smalruby: Start of classroom management menu ===
+    onOpenTeacherModal: () => {
+        dispatch(openTeacherModal());
+        ownProps.onRequestClose();
+    },
+    // === Smalruby: End of classroom management menu ===
     onChangeColorMode: colorMode => {
         dispatch(setColorMode(colorMode));
         ownProps.onRequestClose();

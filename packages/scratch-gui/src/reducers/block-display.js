@@ -1,5 +1,5 @@
 import queryString from 'query-string';
-import {initializeBlockSelectionFromOnlyBlocks} from '../lib/block-utils';
+import { initializeBlockSelectionFromOnlyBlocks } from '../lib/block-utils';
 
 const SET_SELECTED_BLOCKS = 'scratch-gui/block-display/SET_SELECTED_BLOCKS';
 const SET_MODAL_VISIBLE = 'scratch-gui/block-display/SET_MODAL_VISIBLE';
@@ -8,8 +8,7 @@ const SET_SCRATCH_BLOCKS = 'scratch-gui/block-display/SET_SCRATCH_BLOCKS';
 // Initialize selectedBlocks based on only_blocks parameter if present
 const getInitialSelectedBlocks = () => {
     // Parse URL parameters
-    const urlParams = typeof window === 'undefined' ?
-        {} : queryString.parse(window.location.search);
+    const urlParams = typeof window === 'undefined' ? {} : queryString.parse(window.location.search);
 
     //const onlyBlocks = urlParams.only_blocks;
     //
@@ -55,40 +54,50 @@ const getInitialSelectedBlocks = () => {
 const initialState = {
     selectedBlocks: getInitialSelectedBlocks(),
     modalVisible: false,
-    scratchBlocks: null
+    scratchBlocks: null,
 };
 
 const reducer = function (state, action) {
     if (typeof state === 'undefined') state = initialState;
+
     switch (action.type) {
-    case SET_SELECTED_BLOCKS:
-        return Object.assign({}, state, {
-            selectedBlocks: action.blocks
-        });
-    case SET_MODAL_VISIBLE:
-        return Object.assign({}, state, {
-            modalVisible: action.visible
-        });
-    case SET_SCRATCH_BLOCKS:
-        return Object.assign({}, state, {
-            scratchBlocks: action.scratchBlocks
-        });
-    default:
-        return state;
+        case SET_SELECTED_BLOCKS:
+            return Object.assign({}, state, {
+                selectedBlocks: action.blocks,
+            });
+        case SET_MODAL_VISIBLE:
+            return Object.assign({}, state, {
+                modalVisible: action.visible,
+            });
+        case SET_SCRATCH_BLOCKS:
+            return Object.assign({}, state, {
+                scratchBlocks: action.scratchBlocks,
+            });
+        default:
+            return state;
     }
 };
 
 const setSelectedBlocks = function (blocks) {
+
+    // Migrate old 'events' key to 'event' for backward compatibility
+    let migratedBlocks = blocks;
+    if (blocks && blocks.events && !blocks.event) {
+        migratedBlocks = { ...blocks };
+        migratedBlocks.event = blocks.events;
+        delete migratedBlocks.events;
+    }
+
     return {
         type: SET_SELECTED_BLOCKS,
-        blocks: blocks
+        blocks: migratedBlocks,
     };
 };
 
 const setModalVisible = function (visible) {
     return {
         type: SET_MODAL_VISIBLE,
-        visible: visible
+        visible: visible,
     };
 };
 
@@ -103,7 +112,7 @@ const closeBlockDisplayModal = function () {
 const setScratchBlocks = function (scratchBlocks) {
     return {
         type: SET_SCRATCH_BLOCKS,
-        scratchBlocks: scratchBlocks
+        scratchBlocks: scratchBlocks,
     };
 };
 
@@ -113,5 +122,5 @@ export {
     setSelectedBlocks,
     openBlockDisplayModal,
     closeBlockDisplayModal,
-    setScratchBlocks
+    setScratchBlocks,
 };

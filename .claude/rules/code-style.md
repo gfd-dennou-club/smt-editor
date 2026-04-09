@@ -9,6 +9,29 @@
 - Fix linting errors and warnings automatically when possible: `npm run lint -- --fix`
 - **JSDoc warnings count as failures**: Missing `@param`, `@returns`, unescaped inline tags (`@ruby` → `` `@ruby` ``), and incorrect types (`Object` → `object`) must all be fixed.
 
+### Prettier (Code Formatting)
+
+- **Formatter**: Prettier with `prettierConfigScratch.recommended` from `eslint-config-scratch`
+- **対象**: Smalruby 固有ファイルのみ（upstream ファイルは対象外）
+- **設定**: `tabWidth: 4`, `semi: true`, `singleQuote: true`, `trailingComma: 'all'`, import sorting 有効
+- **`.prettierignore`**: ホワイトリスト方式 — デフォルトで全ファイルを無視し、Smalruby 固有ファイルのみ対象に含める
+- **ファイル一覧**: `.claude/rules/scratch-gui/smalruby-prettier-files.md` / `.claude/rules/scratch-vm/smalruby-prettier-files.md`
+
+**新しい Smalruby 固有ファイルを追加する際は、必ず以下の 2 つを更新すること:**
+1. 該当パッケージの `.prettierignore`（ホワイトリストに追加）
+2. `.claude/rules/<package>/smalruby-prettier-files.md`（一覧に追加）
+
+```bash
+# フォーマット実行
+docker compose run --rm app npm run format
+
+# フォーマットチェック（lint に含まれる）
+docker compose run --rm app npm run format:check
+
+# パッケージ単位
+docker compose run --rm app bash -c "cd packages/scratch-gui && npm run format"
+```
+
 ### Code Style Guidelines
 
 1. **Follow existing patterns**: When modifying code, match the style of surrounding code
@@ -60,6 +83,16 @@ export default MyComponent;
 
 ## Smalruby Marker Comments
 
+### マーカーが必要なファイル / 不要なファイルの判定
+
+**Smalruby 固有ファイル（＝ Prettier 対象ファイル）にはマーカー不要。**
+
+- Prettier 対象ファイル一覧（`smalruby-prettier-files.md`）に含まれるファイルは Smalruby 独自ファイル
+- これらのファイルを修正する際、`=== Smalruby:` マーカーは **一切不要**（ファイル内のどこにも付けない）
+- upstream（Scratch）のファイルを修正する際のみ、修正箇所にマーカーコメントを付ける
+
+### upstream ファイルのマーカー記法
+
 upstream のファイルに Smalruby 固有のコードを追加する際は、必ず **マーカーコメント** で囲む。
 
 ```javascript
@@ -70,11 +103,10 @@ upstream のファイルに Smalruby 固有のコードを追加する際は、�
 
 - Start と End は必ずペアにする
 - `<機能名>` は英語で、何の機能かわかる名前にする
-- ファイル全体が Smalruby 固有の場合はファイル冒頭に `// === Smalruby: This file is Smalruby-specific (<説明>) ===`
-- マーカーを追加・削除したら、該当パッケージの `development.md` のマーカー一覧を更新する
+- マーカーを追加・削除したら、該当パッケージのマーカー一覧を更新する
 
-詳細は各パッケージの development.md を参照:
-- `.claude/rules/scratch-gui/development.md` — scratch-gui のマーカー一覧
+マーカー一覧:
+- `.claude/rules/scratch-gui/smalruby-markers.md` — scratch-gui のマーカー一覧
 - `.claude/rules/scratch-vm/development.md` — scratch-vm のマーカー一覧
 
 ## Documentation
@@ -85,13 +117,13 @@ Use JSDoc for functions and classes:
 
 ```javascript
 /**
- * Transpile Ruby code to JavaScript using Opal.
- * @param {string} rubyCode - The Ruby source code to transpile.
- * @param {Object} options - Transpilation options.
- * @param {boolean} options.sourceMap - Whether to generate source maps.
- * @returns {string} The transpiled JavaScript code.
+ * Parse Ruby code into an AST using @ruby/prism.
+ * @param {string} rubyCode - The Ruby source code to parse.
+ * @param {object} options - Parser options.
+ * @param {boolean} options.verbose - Whether to include verbose output.
+ * @returns {object} The parsed AST node.
  */
-function transpileRuby(rubyCode, options = {}) {
+function parseRuby(rubyCode, options = {}) {
     // Implementation
 }
 ```

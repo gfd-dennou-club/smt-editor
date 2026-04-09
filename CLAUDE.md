@@ -20,6 +20,15 @@ The `infra/` directory contains AWS CDK infrastructure projects (independent fro
 
 - **`infra/smalruby-mesh-v2`**: AWS CDK project for the Mesh v2 networking service (AppSync + DynamoDB)
 - **`infra/smalruby-rubytee-relay`**: AWS CDK project for the Rubytee AI relay service (Anthropic Claude API + DynamoDB)
+- **`infra/smalruby-classroom`**: AWS CDK project for the Classroom service (API Gateway + Lambda + DynamoDB)
+
+The `ruby/` directory contains the smalruby3 Ruby gem and its native dependencies (git submodules):
+
+- **`ruby/smalruby3`**: scratch-vm の Ruby 実装。SDL2 ベースのデスクトップランタイム
+- **`ruby/ruby-sdl2`**: SDL2 の Ruby バインディング（[smalruby/ruby-sdl2](https://github.com/smalruby/ruby-sdl2) fork、upstream: [ohai/ruby-sdl2](https://github.com/ohai/ruby-sdl2)）
+- **`ruby/rsdl`**: macOS 用 SDL2 ラッパーコマンド（[smalruby/rsdl](https://github.com/smalruby/rsdl) fork、upstream: [knu/rsdl](https://github.com/knu/rsdl)）
+
+**ruby-sdl2, rsdl は git submodule**。変更時は origin (smalruby fork) に PR を作成し、動作確認後に upstream にも PR を作成する。upstream への PR を想定して機能ごとに細かくブランチ/PR を分けること。詳細は `.claude/rules/ruby/ruby-sdl2.md` と `.claude/rules/ruby/rsdl.md` を参照。
 
 **CRITICAL**: Before making changes to `infra/` projects, always read the corresponding rules in `.claude/rules/infra/`. In particular:
 - `.claude/rules/infra/development.md` — Stage switching via `.env` symlink (MUST use symlink, never override env vars on command line)
@@ -136,6 +145,20 @@ docker compose run --rm app npm run lint
 ```
 
 **IMPORTANT**: Lint must pass with **zero errors AND zero warnings**. The `scratch-gui` package uses `--max-warnings 0` to enforce this. Fix all warnings (including JSDoc issues) before committing.
+
+### Formatting (Prettier)
+
+Prettier is applied to **Smalruby-specific files only** (not upstream Scratch files). The `lint` script includes `prettier --check .` automatically.
+
+```bash
+# Format all Smalruby-specific files
+docker compose run --rm app npm run format
+
+# Check formatting without modifying files
+docker compose run --rm app npm run format:check
+```
+
+**When adding new Smalruby-specific files**, update the `.prettierignore` whitelist and `.claude/rules/<package>/smalruby-prettier-files.md`. See `.claude/rules/code-style.md` for details.
 
 ### Clean
 
@@ -289,6 +312,7 @@ Follow TDD (Test-Driven Development) approach:
 - `infra/`: AWS CDK infrastructure projects (independent projects, not workspaces)
   - `infra/smalruby-mesh-v2/`: Mesh v2 networking service (AppSync + DynamoDB)
   - `infra/smalruby-rubytee-relay/`: Rubytee AI relay service (Anthropic Claude + DynamoDB)
+  - `infra/smalruby-classroom/`: Classroom service (API Gateway + Lambda + DynamoDB)
 - `scripts/`: Monorepo-level build scripts
 - `.github/workflows/`: CI/CD configuration
 - `.claude/rules/`: Package-specific development rules

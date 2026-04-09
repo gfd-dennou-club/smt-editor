@@ -13,9 +13,9 @@ import iconSearch from './icon--search.svg';
 import iconUndo from './icon--undo.svg';
 import iconRedo from './icon--redo.svg';
 import iconDownload from './icon--download.svg';
-import iconFurigana from './icon--furigana.svg';
 import iconAutoCorrect from './icon--auto-correct.svg';
 import iconRubytee from './icon--rubytee.svg';
+import Spinner from '../spinner/spinner.jsx';
 
 const RubyToolbar = props => {
     const intl = useIntl();
@@ -69,6 +69,28 @@ const RubyToolbar = props => {
         if (props.onToggleFurigana) props.onToggleFurigana();
     }, [props]);
 
+    // === Smalruby: Start of mode selection handlers ===
+    const handleSelectFuriganaMode = useCallback(() => {
+        if (props.onDismissBubble) props.onDismissBubble();
+        // Switch to Ruby mode with furigana ON
+        if (props.dnclMode && props.onToggleDnclMode) props.onToggleDnclMode();
+        if (!props.furiganaEnabled && props.onToggleFurigana) props.onToggleFurigana();
+    }, [props]);
+
+    const handleSelectRubyMode = useCallback(() => {
+        if (props.onDismissBubble) props.onDismissBubble();
+        // Switch to Ruby mode with furigana OFF
+        if (props.dnclMode && props.onToggleDnclMode) props.onToggleDnclMode();
+        if (props.furiganaEnabled && props.onToggleFurigana) props.onToggleFurigana();
+    }, [props]);
+
+    const handleSelectDnclMode = useCallback(() => {
+        if (props.onDismissBubble) props.onDismissBubble();
+        // Switch to DNCL mode
+        if (!props.dnclMode && props.onToggleDnclMode) props.onToggleDnclMode();
+    }, [props]);
+    // === Smalruby: End of mode selection handlers ===
+
     const handleToggleAutoCorrect = useCallback(() => {
         if (props.onDismissBubble) props.onDismissBubble();
         if (props.onToggleAutoCorrect) props.onToggleAutoCorrect();
@@ -101,20 +123,25 @@ const RubyToolbar = props => {
         if (props.onExecuteLine) props.onExecuteLine(position.lineNumber);
     }, [props]);
 
+    // === Smalruby: Start of DNCL execute button label ===
+    const executeMessage = props.isRunning
+        ? messages.stopExecution
+        : props.dnclMode
+            ? messages.executeAll
+            : messages.executeLine;
+    // === Smalruby: End of DNCL execute button label ===
+
     return (
         <div className={styles.toolbar}>
             {/* Run Part */}
             <div className={`${styles.toolbarPart} ${styles.modDashedBorder}`}>
                 <button
                     className={styles.iconButton}
+                    data-testid="ruby-toolbar-execute"
                     onClick={handleExecuteLine}
                     disabled={!props.editorRef}
-                    aria-label={intl.formatMessage(
-                        props.isRunning ? messages.stopExecution : messages.executeLine
-                    )}
-                    title={intl.formatMessage(
-                        props.isRunning ? messages.stopExecution : messages.executeLine
-                    )}
+                    aria-label={intl.formatMessage(executeMessage)}
+                    title={intl.formatMessage(executeMessage)}
                 >
                     <img
                         src={props.isRunning ? iconStop : iconPlay}
@@ -128,6 +155,7 @@ const RubyToolbar = props => {
                 <div className={styles.buttonGroup}>
                     <button
                         className={styles.iconButton}
+                        data-testid="ruby-toolbar-undo"
                         onClick={handleUndo}
                         disabled={!props.editorRef || !props.canUndo}
                         aria-label={intl.formatMessage(messages.undo)}
@@ -140,6 +168,7 @@ const RubyToolbar = props => {
                     </button>
                     <button
                         className={styles.iconButton}
+                        data-testid="ruby-toolbar-redo"
                         onClick={handleRedo}
                         disabled={!props.editorRef || !props.canRedo}
                         aria-label={intl.formatMessage(messages.redo)}
@@ -153,6 +182,7 @@ const RubyToolbar = props => {
                 </div>
                 <button
                     className={styles.iconButton}
+                    data-testid="ruby-toolbar-search"
                     onClick={handleSearch}
                     disabled={!props.editorRef}
                     aria-label={intl.formatMessage(messages.search)}
@@ -165,30 +195,13 @@ const RubyToolbar = props => {
                 </button>
             </div>
 
-            {/* Furigana Toggle & Auto Correct Toggle */}
+            {/* Auto Correct Toggle */}
             <div className={`${styles.toolbarPart} ${styles.modDashedBorder}`}>
-                <button
-                    className={`${styles.furiganaButton} ${
-                        props.furiganaEnabled ? styles.furiganaButtonActive : ''
-                    }`}
-                    onClick={handleToggleFurigana}
-                    aria-label={intl.formatMessage(
-                        props.furiganaEnabled ? messages.furiganaOn : messages.furiganaOff
-                    )}
-                    aria-pressed={props.furiganaEnabled}
-                    title={intl.formatMessage(
-                        props.furiganaEnabled ? messages.furiganaOn : messages.furiganaOff
-                    )}
-                >
-                    <img
-                        src={iconFurigana}
-                        alt=""
-                    />
-                </button>
                 <button
                     className={`${styles.autoCorrectButton} ${
                         props.autoCorrectEnabled ? styles.autoCorrectButtonActive : ''
                     }`}
+                    data-testid="ruby-toolbar-auto-correct"
                     onClick={handleToggleAutoCorrect}
                     aria-label={intl.formatMessage(
                         props.autoCorrectEnabled ? messages.autoCorrectOn : messages.autoCorrectOff
@@ -205,7 +218,7 @@ const RubyToolbar = props => {
                 </button>
             </div>
 
-            {/* Navigation & Command Part + Rubytee AI Assistant */}
+            {/* Center: Navigation + AI */}
             <div className={`${styles.toolbarPart} ${styles.modDashedBorder} ${styles.modCenter}`}>
                 <TargetSelector
                     editingTarget={props.editingTarget}
@@ -213,10 +226,14 @@ const RubyToolbar = props => {
                     onSelectTarget={props.onSelectTarget}
                     onDismissBubble={props.onDismissBubble}
                 />
+
+                {/* Rubytee AI Assistant — disabled in DNCL mode */}
                 {props.onOpenRubyteeModal && (
                     <button
                         className={styles.iconButton}
-                        onClick={props.onOpenRubyteeModal}
+                        data-testid="ruby-toolbar-rubytee"
+                        onClick={props.dnclMode ? null : props.onOpenRubyteeModal}
+                        disabled={props.dnclMode}
                         aria-label={intl.formatMessage(messages.aiAssistant)}
                         title={intl.formatMessage(messages.aiAssistant)}
                     >
@@ -228,6 +245,59 @@ const RubyToolbar = props => {
                 )}
             </div>
 
+            {/* === Smalruby: Start of mode toggle group === */}
+            <div className={`${styles.toolbarPart} ${styles.modDashedBorder}`}>
+                <div className={styles.modeToggleGroup}>
+                    <button
+                        className={`${styles.modeToggleItem} ${
+                            !props.dnclMode && props.furiganaEnabled
+                                ? styles.modeToggleItemActive : ''
+                        }`}
+                        data-testid="ruby-toolbar-mode-furigana"
+                        disabled={props.dnclValidating}
+                        onClick={handleSelectFuriganaMode}
+                        title={intl.formatMessage(messages.modeFurigana)}
+                    >
+                        <span className={styles.modeToggleFuriganaLabel}>
+                            <span className={styles.modeToggleFuriganaLine1}>
+                                {intl.formatMessage(messages.modeFuriganaLine1)}
+                            </span>
+                            <span className={styles.modeToggleFuriganaLine2}>
+                                {intl.formatMessage(messages.modeFuriganaLine2)}
+                            </span>
+                        </span>
+                    </button>
+                    <button
+                        className={`${styles.modeToggleItem} ${
+                            !props.dnclMode && !props.furiganaEnabled
+                                ? styles.modeToggleItemActive : ''
+                        }`}
+                        data-testid="ruby-toolbar-mode-ruby"
+                        disabled={props.dnclValidating}
+                        onClick={handleSelectRubyMode}
+                        title={intl.formatMessage(messages.modeRuby)}
+                    >
+                        {'Ruby'}
+                    </button>
+                    <button
+                        className={`${styles.modeToggleItem} ${
+                            props.dnclMode ? styles.modeToggleItemActive : ''
+                        }`}
+                        data-testid="ruby-toolbar-mode-dncl"
+                        disabled={props.dnclValidating}
+                        onClick={handleSelectDnclMode}
+                        title={intl.formatMessage(messages.modeDncl)}
+                    >
+                        {props.dnclValidating ? (
+                            <Spinner small level="info" />
+                        ) : (
+                            intl.formatMessage(messages.dnclLabel)
+                        )}
+                    </button>
+                </div>
+            </div>
+            {/* === Smalruby: End of mode toggle group === */}
+
             {/* More Menu Part */}
             <div className={styles.toolbarPart}>
                 <div
@@ -236,6 +306,7 @@ const RubyToolbar = props => {
                 >
                     <button
                         className={styles.iconButton}
+                        data-testid="ruby-toolbar-more-menu"
                         onClick={handleToggleMoreMenu}
                         aria-label={intl.formatMessage(messages.moreOptions)}
                         title={intl.formatMessage(messages.moreOptions)}
@@ -246,6 +317,7 @@ const RubyToolbar = props => {
                         <div className={styles.moreMenu}>
                             <div
                                 className={styles.moreMenuItem}
+                                data-testid="ruby-toolbar-menu-download"
                                 onClick={handleDownload}
                             >
                                 <img
@@ -257,6 +329,7 @@ const RubyToolbar = props => {
                             </div>
                             <div
                                 className={styles.moreMenuItem}
+                                data-testid="ruby-toolbar-menu-insert-class"
                                 onClick={handleInsertClass}
                             >
                                 <span className={styles.moreMenuIcon}>{'{ }'}</span>
@@ -264,6 +337,7 @@ const RubyToolbar = props => {
                             </div>
                             <div
                                 className={styles.moreMenuItem}
+                                data-testid="ruby-toolbar-menu-preview"
                                 onClick={handlePreviewRubyScript}
                             >
                                 <span className={styles.moreMenuIcon}>{'</>'}</span>
@@ -271,6 +345,7 @@ const RubyToolbar = props => {
                             </div>
                             <div
                                 className={styles.moreMenuItem}
+                                data-testid="ruby-toolbar-menu-auto-correct-settings"
                                 onClick={handleOpenAutoCorrectSettings}
                             >
                                 <img
@@ -300,6 +375,9 @@ RubyToolbar.propTypes = {
     isRunning: PropTypes.bool,
     canUndo: PropTypes.bool,
     canRedo: PropTypes.bool,
+    dnclMode: PropTypes.bool,
+    dnclValidating: PropTypes.bool,
+    onToggleDnclMode: PropTypes.func,
     furiganaEnabled: PropTypes.bool,
     onToggleFurigana: PropTypes.func,
     autoCorrectEnabled: PropTypes.bool,

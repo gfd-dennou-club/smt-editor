@@ -3,27 +3,29 @@
  * Tests round-trip conversion: Ruby → Blocks → Ruby
  */
 import path from 'path';
-import SeleniumHelper from '../helpers/selenium-helper';
 import RubyHelper from '../helpers/ruby-helper';
+import SeleniumHelper from '../helpers/selenium-helper';
 
 const seleniumHelper = new SeleniumHelper();
-const {
-    clickText,
-    getDriver,
-    loadUri
-} = seleniumHelper;
+const { clickText, getDriver, loadUri } = seleniumHelper;
 const rubyHelper = new RubyHelper(seleniumHelper);
-const {
-    expectInterconvertBetweenCodeAndRuby
-} = rubyHelper;
+const { expectInterconvertBetweenCodeAndRuby } = rubyHelper;
 
 const uri = `${path.resolve(__dirname, '../../build/index.html')}?ruby_version=2`;
 
 let driver;
 
+/**
+ * Stub window.confirm to return false, preventing the v1 detection
+ * prompt from blocking Selenium. The test code uses v1 syntax
+ * (self.when(:flag_clicked)) which triggers a native confirm dialog
+ * in v2 mode; declining it allows conversion to proceed in v2 mode.
+ */
+const stubConfirmToDecline = () => driver.executeScript('window.confirm = () => false;');
+
 describe('Ruby module/include round-trip', () => {
-    beforeAll(() => {
-        driver = getDriver();
+    beforeAll(async () => {
+        driver = await getDriver();
     });
 
     afterAll(async () => {
@@ -32,157 +34,162 @@ describe('Ruby module/include round-trip', () => {
 
     test('module with single method', async () => {
         await loadUri(uri);
+        await stubConfirmToDecline();
         await expectInterconvertBetweenCodeAndRuby(
             'module Utils\n' +
-            '  def add(a, b)\n' +
-            '    a + b\n' +
-            '  end\n' +
-            'end\n' +
-            '\n' +
-            'class Sprite1\n' +
-            '  include Utils\n' +
-            '\n' +
-            '  self.when(:flag_clicked) do\n' +
-            '    say(add(1, 5))\n' +
-            '  end\n' +
-            'end',
+                '  def add(a, b)\n' +
+                '    a + b\n' +
+                '  end\n' +
+                'end\n' +
+                '\n' +
+                'class Sprite1\n' +
+                '  include Utils\n' +
+                '\n' +
+                '  self.when(:flag_clicked) do\n' +
+                '    say(add(1, 5))\n' +
+                '  end\n' +
+                'end',
             // Generator outputs when_flag_clicked instead of self.when(:flag_clicked)
             'module Utils\n' +
-            '  def add(a, b)\n' +
-            '    a + b\n' +
-            '  end\n' +
-            'end\n' +
-            '\n' +
-            'class Sprite1\n' +
-            '  include Utils\n' +
-            '\n' +
-            '  when_flag_clicked do\n' +
-            '    say(add(1, 5))\n' +
-            '  end\n' +
-            'end'
+                '  def add(a, b)\n' +
+                '    a + b\n' +
+                '  end\n' +
+                'end\n' +
+                '\n' +
+                'class Sprite1\n' +
+                '  include Utils\n' +
+                '\n' +
+                '  when_flag_clicked do\n' +
+                '    say(add(1, 5))\n' +
+                '  end\n' +
+                'end',
         );
     });
 
     test('module with multiple methods', async () => {
         await loadUri(uri);
+        await stubConfirmToDecline();
         await expectInterconvertBetweenCodeAndRuby(
             'module Utils\n' +
-            '  def add(a, b)\n' +
-            '    a + b\n' +
-            '  end\n' +
-            '\n' +
-            '  def multiply(a, b)\n' +
-            '    a * b\n' +
-            '  end\n' +
-            'end\n' +
-            '\n' +
-            'class Sprite1\n' +
-            '  include Utils\n' +
-            '\n' +
-            '  self.when(:flag_clicked) do\n' +
-            '    say(add(1, 5))\n' +
-            '  end\n' +
-            'end',
+                '  def add(a, b)\n' +
+                '    a + b\n' +
+                '  end\n' +
+                '\n' +
+                '  def multiply(a, b)\n' +
+                '    a * b\n' +
+                '  end\n' +
+                'end\n' +
+                '\n' +
+                'class Sprite1\n' +
+                '  include Utils\n' +
+                '\n' +
+                '  self.when(:flag_clicked) do\n' +
+                '    say(add(1, 5))\n' +
+                '  end\n' +
+                'end',
             'module Utils\n' +
-            '  def add(a, b)\n' +
-            '    a + b\n' +
-            '  end\n' +
-            '\n' +
-            '  def multiply(a, b)\n' +
-            '    a * b\n' +
-            '  end\n' +
-            'end\n' +
-            '\n' +
-            'class Sprite1\n' +
-            '  include Utils\n' +
-            '\n' +
-            '  when_flag_clicked do\n' +
-            '    say(add(1, 5))\n' +
-            '  end\n' +
-            'end'
+                '  def add(a, b)\n' +
+                '    a + b\n' +
+                '  end\n' +
+                '\n' +
+                '  def multiply(a, b)\n' +
+                '    a * b\n' +
+                '  end\n' +
+                'end\n' +
+                '\n' +
+                'class Sprite1\n' +
+                '  include Utils\n' +
+                '\n' +
+                '  when_flag_clicked do\n' +
+                '    say(add(1, 5))\n' +
+                '  end\n' +
+                'end',
         );
     });
 
     test('multiple modules with include', async () => {
         await loadUri(uri);
+        await stubConfirmToDecline();
         await expectInterconvertBetweenCodeAndRuby(
             'module Utils\n' +
-            '  def add(a, b)\n' +
-            '    a + b\n' +
-            '  end\n' +
-            'end\n' +
-            '\n' +
-            'module Helpers\n' +
-            '  def greet\n' +
-            '    say("hello")\n' +
-            '  end\n' +
-            'end\n' +
-            '\n' +
-            'class Sprite1\n' +
-            '  include Utils\n' +
-            '  include Helpers\n' +
-            '\n' +
-            '  self.when(:flag_clicked) do\n' +
-            '    move(10)\n' +
-            '  end\n' +
-            'end',
+                '  def add(a, b)\n' +
+                '    a + b\n' +
+                '  end\n' +
+                'end\n' +
+                '\n' +
+                'module Helpers\n' +
+                '  def greet\n' +
+                '    say("hello")\n' +
+                '  end\n' +
+                'end\n' +
+                '\n' +
+                'class Sprite1\n' +
+                '  include Utils\n' +
+                '  include Helpers\n' +
+                '\n' +
+                '  self.when(:flag_clicked) do\n' +
+                '    move(10)\n' +
+                '  end\n' +
+                'end',
             'module Utils\n' +
-            '  def add(a, b)\n' +
-            '    a + b\n' +
-            '  end\n' +
-            'end\n' +
-            '\n' +
-            'module Helpers\n' +
-            '  def greet\n' +
-            '    say("hello")\n' +
-            '  end\n' +
-            'end\n' +
-            '\n' +
-            'class Sprite1\n' +
-            '  include Utils\n' +
-            '  include Helpers\n' +
-            '\n' +
-            '  when_flag_clicked do\n' +
-            '    move(10)\n' +
-            '  end\n' +
-            'end'
+                '  def add(a, b)\n' +
+                '    a + b\n' +
+                '  end\n' +
+                'end\n' +
+                '\n' +
+                'module Helpers\n' +
+                '  def greet\n' +
+                '    say("hello")\n' +
+                '  end\n' +
+                'end\n' +
+                '\n' +
+                'class Sprite1\n' +
+                '  include Utils\n' +
+                '  include Helpers\n' +
+                '\n' +
+                '  when_flag_clicked do\n' +
+                '    move(10)\n' +
+                '  end\n' +
+                'end',
         );
     });
 
     test('module method with no arguments', async () => {
         await loadUri(uri);
+        await stubConfirmToDecline();
         await expectInterconvertBetweenCodeAndRuby(
             'module Utils\n' +
-            '  def greet\n' +
-            '    say("hello")\n' +
-            '  end\n' +
-            'end\n' +
-            '\n' +
-            'class Sprite1\n' +
-            '  include Utils\n' +
-            'end'
+                '  def greet\n' +
+                '    say("hello")\n' +
+                '  end\n' +
+                'end\n' +
+                '\n' +
+                'class Sprite1\n' +
+                '  include Utils\n' +
+                'end',
         );
     });
 
     test('module sync: adding sprite with same module gets synced definition', async () => {
         await loadUri(uri);
+        await stubConfirmToDecline();
 
         // Set module code on Sprite1 and convert
         await clickText('Ruby', '*[@role="tab"]');
         await rubyHelper.fillInRubyProgram(
             'module Utils\n' +
-            '  def add(a, b)\n' +
-            '    a + b\n' +
-            '  end\n' +
-            'end\n' +
-            '\n' +
-            'class Sprite1\n' +
-            '  include Utils\n' +
-            '\n' +
-            '  self.when(:flag_clicked) do\n' +
-            '    say(add(1, 5))\n' +
-            '  end\n' +
-            'end'
+                '  def add(a, b)\n' +
+                '    a + b\n' +
+                '  end\n' +
+                'end\n' +
+                '\n' +
+                'class Sprite1\n' +
+                '  include Utils\n' +
+                '\n' +
+                '  self.when(:flag_clicked) do\n' +
+                '    say(add(1, 5))\n' +
+                '  end\n' +
+                'end',
         );
         await clickText('Code', '*[@role="tab"]');
 
@@ -220,18 +227,18 @@ describe('Ruby module/include round-trip', () => {
         await clickText('Ruby', '*[@role="tab"]');
         await rubyHelper.fillInRubyProgram(
             'module Utils\n' +
-            '  def add(a, b)\n' +
-            '    a + b\n' +
-            '  end\n' +
-            'end\n' +
-            '\n' +
-            'class Sprite2\n' +
-            '  include Utils\n' +
-            '\n' +
-            '  self.when(:flag_clicked) do\n' +
-            '    say(add(1, 5))\n' +
-            '  end\n' +
-            'end'
+                '  def add(a, b)\n' +
+                '    a + b\n' +
+                '  end\n' +
+                'end\n' +
+                '\n' +
+                'class Sprite2\n' +
+                '  include Utils\n' +
+                '\n' +
+                '  self.when(:flag_clicked) do\n' +
+                '    say(add(1, 5))\n' +
+                '  end\n' +
+                'end',
         );
         await clickText('Code', '*[@role="tab"]');
         await driver.sleep(3000);
@@ -257,22 +264,22 @@ describe('Ruby module/include round-trip', () => {
         await clickText('Ruby', '*[@role="tab"]');
         await rubyHelper.fillInRubyProgram(
             'module Utils\n' +
-            '  def add(a, b)\n' +
-            '    a + b\n' +
-            '  end\n' +
-            '\n' +
-            '  def multiply(a, b)\n' +
-            '    a * b\n' +
-            '  end\n' +
-            'end\n' +
-            '\n' +
-            'class Sprite1\n' +
-            '  include Utils\n' +
-            '\n' +
-            '  self.when(:flag_clicked) do\n' +
-            '    say(add(1, 5))\n' +
-            '  end\n' +
-            'end'
+                '  def add(a, b)\n' +
+                '    a + b\n' +
+                '  end\n' +
+                '\n' +
+                '  def multiply(a, b)\n' +
+                '    a * b\n' +
+                '  end\n' +
+                'end\n' +
+                '\n' +
+                'class Sprite1\n' +
+                '  include Utils\n' +
+                '\n' +
+                '  self.when(:flag_clicked) do\n' +
+                '    say(add(1, 5))\n' +
+                '  end\n' +
+                'end',
         );
         await clickText('Code', '*[@role="tab"]');
         await driver.sleep(3000);

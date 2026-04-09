@@ -101,13 +101,13 @@ The VM uses the `tap` test framework.
   - `fixtures/`: Test fixtures and project files
 - `playground/`: Development playground interface
 
-## Ruby Integration with Opal
+## Ruby Integration with @ruby/prism
 
-The VM executes Ruby code transpiled by Opal. Key files:
+Ruby code is parsed by @ruby/prism (WebAssembly) in the browser and converted to/from Scratch blocks:
 
-- Ruby execution is handled through Opal runtime integration
-- The VM expects `Opal` to be available globally
-- Ruby blocks are converted to JavaScript via Opal before execution
+- Ruby parsing is handled by @ruby/prism in scratch-gui
+- Ruby-to-blocks conversion: `scratch-gui/src/lib/ruby-to-blocks-converter/`
+- Blocks-to-Ruby generation: `scratch-gui/src/lib/ruby-generator/`
 
 ## Extension Development
 
@@ -203,23 +203,10 @@ The mesh v2 extension uses AWS AppSync for real-time collaboration:
 
 ## Smalruby Marker Blocks
 
-Smalruby のカスタムコードは upstream ファイルの中に **マーカーコメント** で囲んで配置する。
-upstream merge 時にコンフリクトを解決しやすくするための仕組み。
+マーカーの書式・ルールは `.claude/rules/code-style.md` の「Smalruby Marker Comments」を参照。
 
-### マーカーの書式
-
-```javascript
-// === Smalruby: Start of <機能名> ===
-// ... Smalruby 固有のコード ...
-// === Smalruby: End of <機能名> ===
-```
-
-### ルール
-
-1. **upstream ファイルに Smalruby コードを追加するときは必ずマーカーで囲む**
-2. **マーカー内のコードだけを変更する** — マーカー外は upstream の管轄
-3. **新しいマーカーを追加したら、このセクションに記載する**
-4. **マーカーを削除する場合は、このセクションからも削除する**
+**重要**: Smalruby 固有ファイル（`smalruby-prettier-files.md` に記載されたファイル）にはマーカー不要。
+このセクションに記載するのは **upstream ファイルに埋め込んだマーカーのみ**。
 
 ### 現在のマーカー一覧
 
@@ -233,6 +220,22 @@ upstream merge 時にコンフリクトを解決しやすくするための仕�
 マーカーで囲まれたコードが参照するファイル:
 - `src/extension-support/smalruby-extensions.js` — extension-manager.js のマーカーから参照
 - `test/unit/blocks_operators_regex.js` — scratch3_operators.js の regex support のテスト
+
+## Prettier (Code Formatting)
+
+Smalruby 固有ファイルのみに Prettier を適用。upstream ファイルは `.prettierignore` で除外。
+
+**新しい Smalruby 固有ファイルを追加した場合は、必ず以下を更新すること:**
+1. `packages/scratch-vm/.prettierignore` — ホワイトリストに追加
+2. `.claude/rules/scratch-vm/smalruby-prettier-files.md` — 一覧に追加
+
+```bash
+# フォーマット実行
+docker compose run --rm app bash -c "cd packages/scratch-vm && npm run format"
+
+# フォーマットチェック
+docker compose run --rm app bash -c "cd packages/scratch-vm && npm run format:check"
+```
 
 ## Development Notes
 

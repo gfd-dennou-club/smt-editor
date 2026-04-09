@@ -1,19 +1,15 @@
 import path from 'path';
 import SeleniumHelper from '../helpers/selenium-helper';
 
-const {
-    findByText,
-    getDriver,
-    loadUri
-} = new SeleniumHelper();
+const { findByText, getDriver, loadUri } = new SeleniumHelper();
 
 const uri = path.resolve(__dirname, '../../build/index.html');
 
 let driver;
 
 describe('Feedback link', () => {
-    beforeAll(() => {
-        driver = getDriver();
+    beforeAll(async () => {
+        driver = await getDriver();
     });
 
     afterAll(async () => {

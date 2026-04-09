@@ -59,11 +59,12 @@ const baseConfig = new ScratchWebpackConfigBuilder(
                 Buffer: require.resolve('buffer/'),
                 stream: require.resolve('stream-browserify'),
                 process: require.resolve('process/browser'),
-                // Node.js built-ins used by prism-parser.js in Node.js environment only
+                // Node.js built-ins used by prism-parser.js and @tensorflow-models/speech-commands
                 // Provide false fallback so webpack doesn't try to polyfill them for browser
                 wasi: false,
                 fs: false,
-                path: false
+                path: false,
+                util: false
             },
             alias: {}
         }
@@ -111,6 +112,10 @@ const baseConfig = new ScratchWebpackConfigBuilder(
         'process.env.MESH_PERIODIC_DATA_SYNC_INTERVAL_MS': `"${process.env.MESH_PERIODIC_DATA_SYNC_INTERVAL_MS || ''}"`,
         'process.env.MESH_NETWORK_FILTER': `"${process.env.MESH_NETWORK_FILTER || ''}"`,
         'process.env.RUBYTEE_RELAY_ENDPOINT': `"${process.env.RUBYTEE_RELAY_ENDPOINT || ''}"`,
+        // === Smalruby: Start of classroom API ===
+        'process.env.CLASSROOM_API_ENDPOINT': `"${process.env.CLASSROOM_API_ENDPOINT || ''}"`,
+        'process.env.CLASSROOM_REFRESH_INTERVAL_MS': `"${process.env.CLASSROOM_REFRESH_INTERVAL_MS || '30000'}"`,
+        // === Smalruby: End of classroom API ===
         'process.env.MAX_USER_MESSAGE_LENGTH': `"${process.env.MAX_USER_MESSAGE_LENGTH || '250'}"`,
         'process.env.MIN_USER_MESSAGE_LENGTH': `"${process.env.MIN_USER_MESSAGE_LENGTH || '10'}"`,
         // === Smalruby: version update notification ===

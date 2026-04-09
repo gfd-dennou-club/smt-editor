@@ -19,6 +19,7 @@ on:
       - 'Release.md'
       - 'TRADEMARK'
       - 'infra/**'
+      - 'ruby/**'
   push:
     branches: [main, master, develop, hotfix/*]
     paths-ignore:
@@ -38,6 +39,7 @@ on:
       - 'Release.md'
       - 'TRADEMARK'
       - 'infra/**'
+      - 'ruby/**'
   workflow_dispatch:
 
 concurrency:
@@ -198,11 +200,16 @@ jobs:
         with:
           cache: 'npm'
           node-version-file: '.nvmrc'
+      - uses: browser-actions/setup-chrome@c785b87e244131f27c9f19c1a33e2ead956ab7ce # v1
+        id: setup-chrome
+        with:
+          chrome-version: stable
       - name: Info
         run: |
           cat <<EOF
           Node version: $(node --version)
           NPM version: $(npm --version)
+          Chrome: ${{ steps.setup-chrome.outputs.chrome-path }} ($(${{ steps.setup-chrome.outputs.chrome-path }} --version))
           GitHub ref: ${{ github.ref }}
           GitHub head ref: ${{ github.head_ref }}
           EOF
@@ -255,6 +262,7 @@ jobs:
           MESH_EVENT_BATCH_INTERVAL_MS: ${{ vars.MESH_EVENT_BATCH_INTERVAL_MS }}
           MESH_PERIODIC_DATA_SYNC_INTERVAL_MS: ${{ vars.MESH_PERIODIC_DATA_SYNC_INTERVAL_MS }}
           RUBYTEE_RELAY_ENDPOINT: ${{ secrets.RUBYTEE_RELAY_ENDPOINT }}
+          CLASSROOM_API_ENDPOINT: ${{ secrets.CLASSROOM_API_ENDPOINT }}
           MAX_USER_MESSAGE_LENGTH: ${{ vars.MAX_USER_MESSAGE_LENGTH }}
           MIN_USER_MESSAGE_LENGTH: ${{ vars.MIN_USER_MESSAGE_LENGTH }}
           GTM_ID: ${{ github.ref == 'refs/heads/develop' && secrets.GTM_ID || '' }}
@@ -300,6 +308,7 @@ jobs:
           MESH_EVENT_BATCH_INTERVAL_MS: ${{ vars.MESH_EVENT_BATCH_INTERVAL_MS }}
           MESH_PERIODIC_DATA_SYNC_INTERVAL_MS: ${{ vars.MESH_PERIODIC_DATA_SYNC_INTERVAL_MS }}
           RUBYTEE_RELAY_ENDPOINT: ${{ secrets.RUBYTEE_RELAY_ENDPOINT }}
+          CLASSROOM_API_ENDPOINT: ${{ secrets.CLASSROOM_API_ENDPOINT }}
           MAX_USER_MESSAGE_LENGTH: ${{ vars.MAX_USER_MESSAGE_LENGTH }}
           MIN_USER_MESSAGE_LENGTH: ${{ vars.MIN_USER_MESSAGE_LENGTH }}
           GTM_ID: ''
@@ -339,6 +348,7 @@ jobs:
           MESH_EVENT_BATCH_INTERVAL_MS: ${{ vars.MESH_EVENT_BATCH_INTERVAL_MS }}
           MESH_PERIODIC_DATA_SYNC_INTERVAL_MS: ${{ vars.MESH_PERIODIC_DATA_SYNC_INTERVAL_MS }}
           RUBYTEE_RELAY_ENDPOINT: ${{ secrets.RUBYTEE_RELAY_ENDPOINT }}
+          CLASSROOM_API_ENDPOINT: ${{ secrets.CLASSROOM_API_ENDPOINT }}
           MAX_USER_MESSAGE_LENGTH: ${{ vars.MAX_USER_MESSAGE_LENGTH }}
           MIN_USER_MESSAGE_LENGTH: ${{ vars.MIN_USER_MESSAGE_LENGTH }}
           GTM_ID: ''

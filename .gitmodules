@@ -1,0 +1,4 @@
+[submodule "ruby/ruby-sdl2"]
+	path = ruby/ruby-sdl2
+	url = https://github.com/smalruby/ruby-sdl2.git
+	branch = smalruby/add-read-pixels

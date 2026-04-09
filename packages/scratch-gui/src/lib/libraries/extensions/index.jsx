@@ -19,7 +19,6 @@ import unifiedapiInsetIconURL from './smt/unifiedapi-small.png';
 import peripherals              from './smt/peripherals.png';
 import peripheralsInsetIconURL  from './smt/peripherals-small.png';
 
-
 export default [
     {
         name: (

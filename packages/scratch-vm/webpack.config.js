@@ -42,7 +42,13 @@ const webBuilder = new ScratchWebpackConfigBuilder(common)
         },
         resolve: {
             fallback: {
-                Buffer: require.resolve('buffer/')
+                Buffer: require.resolve('buffer/'),
+                // @tensorflow-models/speech-commands references Node.js built-ins
+                fs: false,
+                // @serialport/stream (used by AkaDako/g2s extension) requires util
+                util: require.resolve('util/'),
+                // @serialport/stream (used by AkaDako/g2s extension) requires stream
+                stream: require.resolve('stream-browserify')
             }
         },
         output: {

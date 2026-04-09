@@ -27,6 +27,8 @@
     "build-monorepo": "cross-env-shell ./scripts/build-monorepo.sh",
     "clean": "npm run --workspaces clean",
     "lint": "npm run lint --workspace=packages/scratch-vm --workspace=packages/scratch-gui",
+    "format": "npm run format --workspace=packages/scratch-vm --workspace=packages/scratch-gui",
+    "format:check": "npm run format:check --workspace=packages/scratch-vm --workspace=packages/scratch-gui",
     "prepare": "husky install",
     "refresh-gh-workflow": "ts-node scripts/build-gha-workflows.ts",
     "test": "npm run build:dev && npm run test:unit && npm run test:integration",
@@ -53,6 +55,10 @@
     "globals": "16.5.0",
     "husky": "8.0.3",
     "npm": "10.9.5",
+    "serialport": "^13.0.0",
     "ts-node": "10.9.2"
+  },
+  "dependencies": {
+    "jszip": "^3.10.1"
   }
 }

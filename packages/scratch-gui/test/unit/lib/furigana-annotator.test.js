@@ -1,5 +1,5 @@
-import {loadPrism} from '../../../src/lib/prism-parser';
 import FuriganaAnnotator from '../../../src/lib/furigana-annotator';
+import { loadPrism } from '../../../src/lib/prism-parser';
 
 describe('FuriganaAnnotator', () => {
     let prism;
@@ -558,8 +558,9 @@ describe('FuriganaAnnotator', () => {
             expect(labelsAt(annotate('touching_color?("#ff0000")'), 1)).toContain('色に触れているか');
         });
         test('color_is_touching_color? annotates as 色が色に触れているか', () => {
-            expect(labelsAt(annotate('color_is_touching_color?("#ff0000", "#00ff00")'), 1))
-                .toContain('色が色に触れているか');
+            expect(labelsAt(annotate('color_is_touching_color?("#ff0000", "#00ff00")'), 1)).toContain(
+                '色が色に触れているか',
+            );
         });
         test('distance annotates as 距離', () => {
             expect(labelsAt(annotate('distance("_mouse_")'), 1)).toContain('距離');
@@ -1052,11 +1053,7 @@ describe('FuriganaAnnotator', () => {
 
     describe('multiline program from book examples', () => {
         test('kakaku example', () => {
-            const code = [
-                'kakaku = 100',
-                'urine = kakaku * 0.7',
-                'puts urine'
-            ].join('\n');
+            const code = ['kakaku = 100', 'urine = kakaku * 0.7', 'puts urine'].join('\n');
             const anns = annotate(code);
             // line 1: kakaku = 100
             expect(labelsAt(anns, 1)).toContain('変数kakaku');
@@ -1129,7 +1126,9 @@ describe('FuriganaAnnotator', () => {
                 expect(labelsAt(annotate('stop("this script")'), 1)).toContain('このスクリプト');
             });
             test('"other scripts in sprite" → スプライトの他のスクリプト', () => {
-                expect(labelsAt(annotate('stop("other scripts in sprite")'), 1)).toContain('スプライトの他のスクリプト');
+                expect(labelsAt(annotate('stop("other scripts in sprite")'), 1)).toContain(
+                    'スプライトの他のスクリプト',
+                );
             });
         });
 
@@ -1141,7 +1140,7 @@ describe('FuriganaAnnotator', () => {
                 expect(labelsAt(annotate('self.rotation_style = "left-right"'), 1)).toContain('左右のみ');
             });
             test('"don\'t rotate" → 回転しない', () => {
-                expect(labelsAt(annotate("self.rotation_style = \"don't rotate\""), 1)).toContain('回転しない');
+                expect(labelsAt(annotate('self.rotation_style = "don\'t rotate"'), 1)).toContain('回転しない');
             });
         });
 
@@ -1215,8 +1214,7 @@ describe('FuriganaAnnotator', () => {
             expect(labelsAt(annotate('video_sensing.video_turn("on-flipped")'), 1)).toContain('左右反転');
         });
         test('video_sensing.video_transparency = 50 → ビデオの透明度を設定', () => {
-            expect(labelsAt(annotate('video_sensing.video_transparency = 50'), 1))
-                .toContain('ビデオの透明度を設定');
+            expect(labelsAt(annotate('video_sensing.video_transparency = 50'), 1)).toContain('ビデオの透明度を設定');
         });
         test('video_sensing.video_on("motion", "this sprite") → ビデオの値 + 動き + このスプライト', () => {
             const labels = labelsAt(annotate('video_sensing.video_on("motion", "this sprite")'), 1);
@@ -1281,8 +1279,7 @@ describe('FuriganaAnnotator', () => {
             expect(labelsAt(annotate('microbit.play_tone(440, 100)'), 1)).toContain('音を鳴らす');
         });
         test('microbit.send_data_to_microbit("data", "label") → データ送信', () => {
-            expect(labelsAt(annotate('microbit.send_data_to_microbit("data", "label")'), 1))
-                .toContain('データ送信');
+            expect(labelsAt(annotate('microbit.send_data_to_microbit("data", "label")'), 1)).toContain('データ送信');
         });
     });
 
@@ -1457,4 +1454,166 @@ describe('FuriganaAnnotator', () => {
         });
     });
     // === Smalruby: End of array/hash/super furigana tests ===
+
+    // === Smalruby: Start of tm2scratch furigana tests ===
+    describe('tm methods (Teachable Machine extension)', () => {
+        test('tm.classify_video_image annotates receiver and method', () => {
+            const labels = labelsAt(annotate('tm.classify_video_image'), 1);
+            expect(labels).toContain('機械学習');
+            expect(labels).toContain('画像を分類する');
+        });
+
+        test('tm.image_label annotates receiver and method', () => {
+            const labels = labelsAt(annotate('tm.image_label'), 1);
+            expect(labels).toContain('機械学習');
+            expect(labels).toContain('画像ラベル');
+        });
+
+        test('tm.sound_label annotates receiver and method', () => {
+            const labels = labelsAt(annotate('tm.sound_label'), 1);
+            expect(labels).toContain('機械学習');
+            expect(labels).toContain('音声ラベル');
+        });
+
+        test('tm.when_image_label_received("cat") annotates hat block', () => {
+            const labels = labelsAt(annotate('tm.when_image_label_received("cat") do; end'), 1);
+            expect(labels).toContain('機械学習');
+            expect(labels).toContain('画像ラベルを受け取ったとき');
+        });
+
+        test('tm.when_sound_label_received("clap") annotates hat block', () => {
+            const labels = labelsAt(annotate('tm.when_sound_label_received("clap") do; end'), 1);
+            expect(labels).toContain('機械学習');
+            expect(labels).toContain('音声ラベルを受け取ったとき');
+        });
+
+        test('tm.image_label_detected?("dog") annotates boolean', () => {
+            const labels = labelsAt(annotate('tm.image_label_detected?("dog")'), 1);
+            expect(labels).toContain('機械学習');
+            expect(labels).toContain('画像ラベル？');
+        });
+
+        test('tm.set_image_classification_model_url("url") annotates command', () => {
+            const labels = labelsAt(annotate('tm.set_image_classification_model_url("https://example.com/")'), 1);
+            expect(labels).toContain('機械学習');
+            expect(labels).toContain('画像分類モデルURLを設定');
+        });
+
+        test('tm.toggle_classification("on") annotates with menu label', () => {
+            const labels = labelsAt(annotate('tm.toggle_classification("on")'), 1);
+            expect(labels).toContain('機械学習');
+            expect(labels).toContain('分類を切り替え');
+            expect(labels).toContain('オン');
+        });
+
+        test('tm.video_toggle("on-flipped") annotates with video state label', () => {
+            const labels = labelsAt(annotate('tm.video_toggle("on-flipped")'), 1);
+            expect(labels).toContain('機械学習');
+            expect(labels).toContain('ビデオを切り替え');
+            expect(labels).toContain('オン（左右反転）');
+        });
+
+        test('tm.confidence_threshold annotates getter', () => {
+            const labels = labelsAt(annotate('tm.confidence_threshold'), 1);
+            expect(labels).toContain('機械学習');
+            expect(labels).toContain('確信度のしきい値');
+        });
+
+        test('tm.confidence_threshold = 0.8 annotates setter', () => {
+            const labels = labelsAt(annotate('tm.confidence_threshold = 0.8'), 1);
+            expect(labels).toContain('機械学習');
+            expect(labels).toContain('確信度のしきい値を設定');
+        });
+
+        test('tm.classification_interval = "0.5" annotates setter', () => {
+            const labels = labelsAt(annotate('tm.classification_interval = "0.5"'), 1);
+            expect(labels).toContain('機械学習');
+            expect(labels).toContain('分類間隔を設定');
+        });
+
+        test('tm menu labels do not leak to other contexts', () => {
+            const labels = labelsAt(annotate('toggle_classification("on")'), 1);
+            expect(labels).not.toContain('オン');
+        });
+    });
+    // === Smalruby: End of tm2scratch furigana tests ===
+
+    // === Smalruby: Start of g2s furigana tests ===
+    describe('akadako methods (AkaDako extension)', () => {
+        test('akadako.connect_board annotates receiver and method', () => {
+            const labels = labelsAt(annotate('akadako.connect_board'), 1);
+            expect(labels).toContain('AkaDako');
+            expect(labels).toContain('ボードを接続');
+        });
+
+        test('akadako.connected? annotates boolean', () => {
+            const labels = labelsAt(annotate('akadako.connected?'), 1);
+            expect(labels).toContain('AkaDako');
+            expect(labels).toContain('接続している');
+        });
+
+        test('akadako.when_board_state_changed("connected") annotates with menu label', () => {
+            const labels = labelsAt(annotate('akadako.when_board_state_changed("connected") do; end'), 1);
+            expect(labels).toContain('AkaDako');
+            expect(labels).toContain('ボードが変わったとき');
+            expect(labels).toContain('接続された');
+        });
+
+        test('akadako.analog_level_a1 annotates sensor', () => {
+            const labels = labelsAt(annotate('akadako.analog_level_a1'), 1);
+            expect(labels).toContain('AkaDako');
+            expect(labels).toContain('アナログA(A1)の値');
+        });
+
+        test('akadako.when_shaken annotates hat block', () => {
+            const labels = labelsAt(annotate('akadako.when_shaken do; end'), 1);
+            expect(labels).toContain('AkaDako');
+            expect(labels).toContain('ゆさぶられたとき');
+        });
+
+        test('akadako.temperature annotates sensor', () => {
+            const labels = labelsAt(annotate('akadako.temperature'), 1);
+            expect(labels).toContain('AkaDako');
+            expect(labels).toContain('温度(°C)');
+        });
+
+        test('akadako.neopixel_fill_color("10", "red", 100) annotates with color label', () => {
+            const labels = labelsAt(annotate('akadako.neopixel_fill_color("10", "red", 100)'), 1);
+            expect(labels).toContain('AkaDako');
+            expect(labels).toContain('カラーLEDの全色を設定');
+            expect(labels).toContain('赤');
+        });
+
+        test('akadako.neopixel_shift_color("10", 1, "true") annotates with loop label', () => {
+            const labels = labelsAt(annotate('akadako.neopixel_shift_color("10", 1, "true")'), 1);
+            expect(labels).toContain('AkaDako');
+            expect(labels).toContain('カラーLEDをずらす');
+            expect(labels).toContain('回転する');
+        });
+
+        test('akadako.set_input_bias("10", "pullUp") annotates with bias label', () => {
+            const labels = labelsAt(annotate('akadako.set_input_bias("10", "pullUp")'), 1);
+            expect(labels).toContain('AkaDako');
+            expect(labels).toContain('入力バイアス設定');
+            expect(labels).toContain('プルアップする');
+        });
+
+        test('akadako.i2c_write("0x10", "0x01", "0xAB") annotates command', () => {
+            const labels = labelsAt(annotate('akadako.i2c_write("0x10", "0x01", "0xAB")'), 1);
+            expect(labels).toContain('AkaDako');
+            expect(labels).toContain('I2C書き込み');
+        });
+
+        test('akadako.bit_not("0x01") annotates bitwise op', () => {
+            const labels = labelsAt(annotate('akadako.bit_not("0x01")'), 1);
+            expect(labels).toContain('AkaDako');
+            expect(labels).toContain('ビットNOT');
+        });
+
+        test('akadako menu labels do not leak to other contexts', () => {
+            const labels = labelsAt(annotate('set_input_bias("pullUp")'), 1);
+            expect(labels).not.toContain('プルアップする');
+        });
+    });
+    // === Smalruby: End of g2s furigana tests ===
 });

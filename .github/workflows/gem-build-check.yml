@@ -1,0 +1,135 @@
+name: Gem Build Check (cross-platform)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ruby-version:
+        description: 'Ruby version to test'
+        required: false
+        default: '3.4'
+        type: choice
+        options:
+          - '3.3'
+          - '3.4'
+          - '4.0'
+
+concurrency:
+  group: "${{ github.workflow }} @ ${{ github.head_ref || github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  build-linux:
+    name: "Build gem (Linux / Ruby ${{ inputs.ruby-version || '3.4' }})"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ruby/smalruby3
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+
+      - name: Install SDL2 development libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev
+
+      - name: Setup Ruby and Rust
+        uses: oxidize-rb/actions/setup-ruby-and-rust@v1
+        with:
+          ruby-version: ${{ inputs.ruby-version || '3.4' }}
+          rustup-toolchain: stable
+          bundler-cache: true
+          cargo-cache: true
+          working-directory: ruby/smalruby3
+
+      - name: Cache native extension build
+        uses: actions/cache@v4
+        with:
+          path: ruby/smalruby3/ext/smalruby3_imageutil/target
+          key: native-ext-linux-${{ inputs.ruby-version || '3.4' }}-${{ hashFiles('ruby/smalruby3/ext/smalruby3_imageutil/Cargo.toml', 'ruby/smalruby3/ext/smalruby3_imageutil/src/**') }}
+          restore-keys: |
+            native-ext-linux-${{ inputs.ruby-version || '3.4' }}-
+
+      - name: Build gem
+        run: gem build smalruby3.gemspec
+
+      - name: Compile native extension
+        run: bundle exec rake compile
+
+      - name: Run tests
+        run: bundle exec rake test
+
+      - name: Verify smalruby3 loads
+        env:
+          SMALRUBY3_TESTING: '1'
+        run: bundle exec ruby -e 'require "smalruby3"; puts "smalruby3 v#{Smalruby3::VERSION} loaded OK"'
+
+      - name: Upload gem artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: smalruby3-gem-linux
+          path: ruby/smalruby3/smalruby3-*.gem
+
+  build-windows:
+    name: "Build gem (Windows / Ruby ${{ inputs.ruby-version || '3.4' }})"
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: ruby/smalruby3
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+
+      - name: Install SDL2 via MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          install: >-
+            mingw-w64-ucrt-x86_64-SDL2
+            mingw-w64-ucrt-x86_64-SDL2_image
+            mingw-w64-ucrt-x86_64-SDL2_mixer
+            mingw-w64-ucrt-x86_64-SDL2_ttf
+
+      - name: Setup Ruby and Rust
+        uses: oxidize-rb/actions/setup-ruby-and-rust@v1
+        with:
+          ruby-version: ${{ inputs.ruby-version || '3.4' }}
+          rustup-toolchain: stable
+          bundler-cache: true
+          cargo-cache: true
+          working-directory: ruby/smalruby3
+
+      - name: Add MSYS2 SDL2 to paths
+        shell: pwsh
+        run: |
+          echo "C:\msys64\ucrt64\bin" >> $env:GITHUB_PATH
+          echo "CPATH=C:\msys64\ucrt64\include" >> $env:GITHUB_ENV
+          echo "LIBRARY_PATH=C:\msys64\ucrt64\lib" >> $env:GITHUB_ENV
+          echo "PKG_CONFIG_PATH=C:\msys64\ucrt64\lib\pkgconfig" >> $env:GITHUB_ENV
+
+      - name: Cache native extension build
+        uses: actions/cache@v4
+        with:
+          path: ruby/smalruby3/ext/smalruby3_imageutil/target
+          key: native-ext-windows-${{ inputs.ruby-version || '3.4' }}-${{ hashFiles('ruby/smalruby3/ext/smalruby3_imageutil/Cargo.toml', 'ruby/smalruby3/ext/smalruby3_imageutil/src/**') }}
+          restore-keys: |
+            native-ext-windows-${{ inputs.ruby-version || '3.4' }}-
+
+      - name: Build gem
+        run: gem build smalruby3.gemspec
+
+      - name: Compile native extension
+        run: bundle exec rake compile
+
+      - name: Run tests
+        run: bundle exec rake test
+
+      - name: Verify smalruby3 loads
+        shell: bash
+        env:
+          SMALRUBY3_TESTING: '1'
+        run: bundle exec ruby -e 'require "smalruby3"; puts "smalruby3 v#{Smalruby3::VERSION} loaded OK"'
+
+      - name: Upload gem artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: smalruby3-gem-windows
+          path: ruby/smalruby3/smalruby3-*.gem
