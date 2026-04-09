@@ -46,7 +46,7 @@ const SmT_SPI_SDcard_Converter = {
             if (converter._instanceTypeMap[varName] !== "SDSPI") return null;
 	    
             const opcode = "peripherals_sd_umount";             		
-            const block = converter.createBlock(opcode, "value", node);
+            const block = converter.createBlock(opcode, "statement", node);
 	    
             if (block) {	
                 Utils.attachVariableBlock(converter, block, "INSTANCE", receiver);	
@@ -91,7 +91,7 @@ const SmT_SPI_SDcard_Converter = {
             if (converter._instanceTypeMap[varName] !== "SDSPI_FILE") return null;
 	    
             const opcode = "peripherals_sd_close";             		
-            const block = converter.createBlock(opcode, "value", node);
+            const block = converter.createBlock(opcode, "statement", node);
 	    
             if (block) {	
                 Utils.attachVariableBlock(converter, block, "INSTANCE", receiver);	
@@ -126,7 +126,7 @@ const SmT_SPI_SDcard_Converter = {
             if (converter._instanceTypeMap[varName] !== "SDSPI_FILE") return null;
 	    
             const opcode = "peripherals_sd_puts";
-            const block = converter.createBlock(opcode, "value", node);
+            const block = converter.createBlock(opcode, "statement", node);
 	    
             if (block) {	
                 Utils.attachVariableBlock(converter, block, "INSTANCE", receiver);

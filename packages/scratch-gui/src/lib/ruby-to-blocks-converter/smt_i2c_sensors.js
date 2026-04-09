@@ -50,7 +50,7 @@ const SmT_I2C_Sensors_Converter = {
             if (converter._instanceTypeMap[varName] !== "I2C_SENSOR") return null;
 
 	    const opcode = "peripherals_i2c_sensor_read"; 
-            const block = converter.createBlock(opcode, "value", node);
+            const block = converter.createBlock(opcode, "statement", node);
 
             if (block) {
                 Utils.attachVariableBlock(converter, block, "INSTANCE", receiver);

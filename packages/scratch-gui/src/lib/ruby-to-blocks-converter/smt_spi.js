@@ -49,7 +49,7 @@ const SmT_SPI_Converter = {
             if (converter._instanceTypeMap[varName] !== "SPI") return null;
 	    
             const opcode = "unifiedapi_spi_write";
-            const block = converter.createBlock(opcode, "value", node);
+            const block = converter.createBlock(opcode, "statement", node);
 	    
             if (block) {
                 Utils.attachVariableBlock(converter, block, "INSTANCE", receiver);

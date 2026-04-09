@@ -47,7 +47,7 @@ const SmT_UART_Converter = {
 	    // メソッド名に対応する Opcode の決定
             const opcode = "unifiedapi_uart_puts"
 	    
-            const block = converter.createBlock(opcode, "value", node);
+            const block = converter.createBlock(opcode, "statement", node);
             if (block) {
                 Utils.attachVariableBlock(converter, block, "INSTANCE", receiver);
 		converter.addTextInput(block, "COMM", args[0], '');
@@ -85,7 +85,7 @@ const SmT_UART_Converter = {
 		// メソッド名に対応する Opcode の決定
                 const opcode = "unifiedapi_uart_clear"
 		
-                const block = converter.createBlock(opcode, "value", node);
+                const block = converter.createBlock(opcode, "statement", node);
                 if (block) {
                     Utils.attachVariableBlock(converter, block, "INSTANCE", receiver);
 		    converter.addField(block, "TXRX", method);

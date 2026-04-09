@@ -47,7 +47,7 @@ const SmT_I2C_LCD_Converter = {
             if (converter._instanceTypeMap[varName] !== "I2C_LCD") return null;
 
 	    const opcode = "peripherals_lcd_cursor"; 
-            const block = converter.createBlock(opcode, "value", node);
+            const block = converter.createBlock(opcode, "statement", node);
 
             if (block) {
 		Utils.attachVariableBlock(converter, block, "INSTANCE", receiver);
@@ -67,12 +67,12 @@ const SmT_I2C_LCD_Converter = {
             if (converter._instanceTypeMap[varName] !== "I2C_LCD") return null;
 
 	    const opcode = "peripherals_lcd_print"; 
-            const block = converter.createBlock(opcode, "value", node);
+            const block = converter.createBlock(opcode, "statement", node);
 
             if (block) {
 		Utils.attachVariableBlock(converter, block, "INSTANCE", receiver);
 
-                converter.addTextInput(block, "TEXT", args[0].value, "");
+                converter.addTextInput(block, "TEXT", args[0], "");
                 return block;
             }
             return null;
@@ -86,7 +86,7 @@ const SmT_I2C_LCD_Converter = {
             if (converter._instanceTypeMap[varName] !== "I2C_LCD") return null;
 
 	    const opcode = "peripherals_lcd_clear"; 
-            const block = converter.createBlock(opcode, "value", node);
+            const block = converter.createBlock(opcode, "statement", node);
 
             if (block) {
 		Utils.attachVariableBlock(converter, block, "INSTANCE", receiver);

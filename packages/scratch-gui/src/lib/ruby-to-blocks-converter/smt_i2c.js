@@ -39,7 +39,7 @@ const SmT_I2C_Converter = {
             if (converter._instanceTypeMap[varName] !== "I2C") return null;
 	    
             const opcode = "unifiedapi_i2c_write";
-            const block = converter.createBlock(opcode, "value", node);
+            const block = converter.createBlock(opcode, "statement", node);
 	    
             if (block) {
                 Utils.attachVariableBlock(converter, block, "INSTANCE", receiver);
@@ -63,7 +63,7 @@ const SmT_I2C_Converter = {
             if (converter._instanceTypeMap[varName] !== "I2C") return null;
 	    
             const opcode = "unifiedapi_i2c_write";
-            const block = converter.createBlock(opcode, "value", node);
+            const block = converter.createBlock(opcode, "statement", node);
 	    
             if (block) {
                 Utils.attachVariableBlock(converter, block, "INSTANCE", receiver);

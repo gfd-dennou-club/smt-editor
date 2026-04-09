@@ -39,7 +39,7 @@ const SmT_Network_Converter = {
             if (converter._instanceTypeMap[varName] !== "WLAN") return null;
 
 	    const opcode = "peripherals_wifi_connect"; 
-            const block = converter.createBlock(opcode, "value", node);
+            const block = converter.createBlock(opcode, "statement", node);
 
             if (block) {
                 Utils.attachVariableBlock(converter, block, "INSTANCE", receiver);

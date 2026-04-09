@@ -24,9 +24,14 @@ const SmT_ADC_Converter = {
             const block = converter.createBlock("unifiedapi_adc_init", "statement", node);
             
             Utils.fixLocationToLineStart(block);
-	    
+
+	    // PIN は正の整数（0以上）であることの保証
             if (block && converter.isNumber(args[0])) {
-                converter.addNumberInput(block, "PIN", "math_integer", Number(args[0].value), 39);
+		if (args[0] && args[0].type === "int" && Number(args[0].value) >= 0) {
+                    converter.addNumberInput(block, "PIN", "math_integer", Number(args[0].value), 39);
+		} else {
+                    throw new Error(Utils.getErrorMessage('ONLY_POSITIVE_INTEGER', 1));
+		}
                 return block;
             }
             return null;
@@ -38,11 +43,16 @@ const SmT_ADC_Converter = {
                 const { receiver, node } = params;
                 const varName = receiver.fields?.VARIABLE?.value || "";
 
+		// 念のため varName が空（変数ブロックとして認識されていない）場合はエラー
+                if (!varName) {
+                    throw new Error(Utils.getErrorMessage('ONLY_VARIABLE'));
+                }
+		
                 if (converter._instanceTypeMap[varName] !== "ADC") return null;
-
+		
                 const opcode = method === "read" ? "unifiedapi_adc_volt" : "unifiedapi_adc_raw";
                 const block = converter.createBlock(opcode, "value", node);
-
+		
                 if (block) {
                     Utils.attachVariableBlock(converter, block, "INSTANCE", receiver);
                     return block;

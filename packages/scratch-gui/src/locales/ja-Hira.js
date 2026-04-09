@@ -422,7 +422,7 @@ export default {
     "unifiedapi.pwm_duty": "PWM: [INSTANCE] のデューティ比を [DUTY]% にする",
     "unifiedapi.pwm_frequency": "PWM: [INSTANCE] の周波数を [FREQ]Hz にする",
     "unifiedapi.pwm_pulse": "PWM: [INSTANCE] のパルス幅を [PULSE]us にする",
-    "unifiedapi.adc_init": "ADC: ピン[PIN] を [INSTANCE] という名前で準備する",
+    "unifiedapi.adc_init": "ADC: ピン[PIN] を [INSTANCE] という名前で初期化する",
     "unifiedapi.adc_raw": "ADC: [INSTANCE] の値を読み込む (生データ)",
     "unifiedapi.adc_volt": "ADC: [INSTANCE] の電圧を読み込む",
     "unifiedapi.i2c_init": "I2C: [INSTANCE] という名前で初期化する",
