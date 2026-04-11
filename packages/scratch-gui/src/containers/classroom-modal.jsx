@@ -8,6 +8,7 @@ import { renderBlocksToCanvas } from '../lib/blocks-screenshot.js';
 import classroomAPI from '../lib/classroom-api.js';
 import { getProjectThumbnail } from '../lib/store-project-thumbnail.js';
 import { getUrlParams, clearClasscode } from '../lib/url-params.js';
+import { showAlertWithTimeout } from '../reducers/alerts.js';
 import {
     closeClassroomModal,
     closeTeacherModal,
@@ -108,29 +109,19 @@ const ClassroomModal = ({ mode = 'student' }) => {
         setPhase(mode === 'teacher' ? 'teacher-login' : 'student-join');
     }, [mode, clearError, dispatch, teacher]);
 
-    // Show error with session-expired action link
-    const showSessionExpiredError = useCallback(
-        (message, title = null) => {
-            setError(message);
-            setErrorTitle(title);
-            const label =
-                mode === 'teacher'
-                    ? intl.formatMessage({
-                          defaultMessage: 'Go to login screen',
-                          description: 'Link to go back to the login screen after session expiry',
-                          id: 'gui.classroom.error.goToLogin',
-                      })
-                    : intl.formatMessage({
-                          defaultMessage: 'Go to join screen',
-                          description: 'Link to go back to the join screen after session expiry',
-                          id: 'gui.classroom.error.goToJoin',
-                      });
-            setErrorActionLabel(label);
-            // useState setter with function form to store the callback
-            setErrorActionHandler(() => handleGoToLogin);
-        },
-        [mode, intl, handleGoToLogin],
-    );
+    // Handle relogin request from Alert "参加しなおす" button
+    useEffect(() => {
+        if (classroomState.reloginRequested) {
+            dispatch(clearClassroomSession()); // clears flag + student session
+            handleGoToLogin();
+        }
+    }, [classroomState.reloginRequested, dispatch, handleGoToLogin]);
+
+    // Show session-expired alert banner (replaces inline error)
+    const showSessionExpiredError = useCallback(() => {
+        const alertId = mode === 'teacher' ? 'classroomTeacherSessionExpired' : 'classroomSessionExpired';
+        showAlertWithTimeout(dispatch, alertId);
+    }, [dispatch, mode]);
     showSessionExpiredErrorRef.current = showSessionExpiredError;
 
     const handleClose = useCallback(() => {
@@ -487,7 +478,8 @@ const ClassroomModal = ({ mode = 'student' }) => {
         onShowPostAssignment: teacher.handleShowPostAssignment,
         onBackToDetail: teacher.handleBackToDetail,
         onPostAssignment: teacher.handlePostAssignment,
-        onGoogleClassroomImport: teacher.handleGoogleClassroomImport,
+        onShowGoogleCourses: teacher.handleShowGoogleCourses,
+        onLoadGoogleCourses: teacher.handleLoadGoogleCourses,
         onSelectGoogleCourse: teacher.handleSelectGoogleCourse,
         onConfirmGoogleImport: teacher.handleConfirmGoogleImport,
         onUpdateAssignmentName: teacher.handleUpdateAssignmentName,
@@ -551,7 +543,8 @@ const ClassroomModal = ({ mode = 'student' }) => {
             onToggleCodeFullscreen={teacher.handleToggleCodeFullscreen}
             googleCourses={teacher.googleCourses}
             selectedGoogleCourse={teacher.selectedGoogleCourse}
-            onGoogleClassroomImport={teacher.handleGoogleClassroomImport}
+            onShowGoogleCourses={teacher.handleShowGoogleCourses}
+            onLoadGoogleCourses={teacher.handleLoadGoogleCourses}
             onSelectGoogleCourse={teacher.handleSelectGoogleCourse}
             onConfirmGoogleImport={teacher.handleConfirmGoogleImport}
             onPostAssignment={teacher.handlePostAssignment}

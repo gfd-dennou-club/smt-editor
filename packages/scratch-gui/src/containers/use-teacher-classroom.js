@@ -157,9 +157,81 @@ const useTeacherClassroom = ({
         setPhase(mode === 'teacher' ? 'teacher-login' : 'student-join');
     }, [mode, clearError, setPhase]);
 
+    // --- Teacher: Silent re-authentication on 401 ---
+
+    const attemptSilentReauth = useCallback(async () => {
+        try {
+            await loadGoogleIdentity();
+            const REAUTH_TIMEOUT_MS = 5000;
+            const newToken = await Promise.race([
+                new Promise((resolve, reject) => {
+                    google.accounts.id.initialize({
+                        client_id: GOOGLE_CLIENT_ID,
+                        auto_select: true,
+                        callback: response => {
+                            if (response.credential) {
+                                resolve(response.credential);
+                            } else {
+                                reject(new Error('Silent reauth failed'));
+                            }
+                        },
+                    });
+                    google.accounts.id.prompt(notification => {
+                        // Only accept truly automatic sign-in (no UI shown)
+                        if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+                            reject(new Error('Silent reauth not available'));
+                        }
+                        if (notification.isDismissedMoment()) {
+                            reject(new Error('User dismissed reauth'));
+                        }
+                        // If One Tap UI is displayed, cancel it — we only want silent
+                        if (notification.isDisplayMoment() && !notification.isNotDisplayed()) {
+                            google.accounts.id.cancel();
+                            reject(new Error('One Tap displayed, not silent'));
+                        }
+                    });
+                }),
+                new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error('Silent reauth timeout')), REAUTH_TIMEOUT_MS),
+                ),
+            ]);
+            setIdToken(newToken);
+            return newToken;
+        } catch {
+            // Ensure One Tap UI is closed on any failure
+            try {
+                google.accounts.id.cancel();
+            } catch {
+                // google may not be loaded
+            }
+            return null;
+        }
+    }, []);
+
+    /**
+     * Handle a 401 error from a teacher API call.
+     * Tries silent re-authentication first; falls back to alert if that fails.
+     * @returns {string|null} new ID token if reauth succeeded, null otherwise
+     */
+    const handleTeacher401 = useCallback(async () => {
+        const newToken = await attemptSilentReauth();
+        if (newToken) {
+            return newToken;
+        }
+        showSessionExpiredError();
+        return null;
+    }, [attemptSilentReauth, showSessionExpiredError]);
+
     // --- Google Classroom: Import flow ---
 
-    const handleGoogleClassroomImport = useCallback(async () => {
+    const handleShowGoogleCourses = useCallback(() => {
+        clearError();
+        setGoogleCourses([]);
+        setSelectedGoogleCourse(null);
+        setPhase('teacher-google-courses');
+    }, [clearError, setPhase]);
+
+    const handleLoadGoogleCourses = useCallback(async () => {
         clearError();
         setIsLoading(true);
         try {
@@ -168,7 +240,6 @@ const useTeacherClassroom = ({
             const data = await classroomAPI.listGoogleCourses(idToken, accessToken);
             setGoogleCourses(data.courses || []);
             setSelectedGoogleCourse(null);
-            setPhase('teacher-google-courses');
         } catch (err) {
             if (err.status === 401) {
                 clearClassroomAccessToken();
@@ -177,7 +248,7 @@ const useTeacherClassroom = ({
         } finally {
             setIsLoading(false);
         }
-    }, [idToken, clearError, showError, intl, setIsLoading, setPhase]);
+    }, [idToken, clearError, showError, intl, setIsLoading]);
 
     const handleSelectGoogleCourse = useCallback(course => {
         setSelectedGoogleCourse(course);
@@ -256,19 +327,30 @@ const useTeacherClassroom = ({
         if (phase === 'teacher-dashboard' && idToken) {
             setIsLoading(true);
             clearError();
-            classroomAPI
-                .listClassrooms(idToken)
-                .then(data => {
+            (async () => {
+                try {
+                    const data = await classroomAPI.listClassrooms(idToken);
                     setClassrooms(data.classrooms || []);
-                })
-                .catch(err => {
-                    showError(translateError(intl, err));
-                })
-                .finally(() => {
+                } catch (err) {
+                    if (err.status === 401) {
+                        const newToken = await handleTeacher401();
+                        if (newToken) {
+                            try {
+                                const data = await classroomAPI.listClassrooms(newToken);
+                                setClassrooms(data.classrooms || []);
+                            } catch {
+                                // Retry also failed
+                            }
+                        }
+                    } else {
+                        showError(translateError(intl, err));
+                    }
+                } finally {
                     setIsLoading(false);
-                });
+                }
+            })();
         }
-    }, [phase, idToken, clearError, showError, intl, setIsLoading]);
+    }, [phase, idToken, clearError, showError, handleTeacher401, intl, setIsLoading]);
 
     // --- Teacher: Create classroom ---
 
@@ -292,12 +374,16 @@ const useTeacherClassroom = ({
                 setSelectedGoogleCourse(null);
                 setPhase('teacher-dashboard');
             } catch (err) {
-                showError(translateError(intl, err));
+                if (err.status === 401) {
+                    await handleTeacher401();
+                } else {
+                    showError(translateError(intl, err));
+                }
             } finally {
                 setIsLoading(false);
             }
         },
-        [idToken, selectedGoogleCourse, clearError, showError, intl, setIsLoading, setPhase],
+        [idToken, selectedGoogleCourse, clearError, showError, handleTeacher401, intl, setIsLoading, setPhase],
     );
 
     // --- Teacher: Delete classroom ---
@@ -312,81 +398,94 @@ const useTeacherClassroom = ({
                 setMembers([]);
                 setPhase('teacher-dashboard');
             } catch (err) {
-                showError(translateError(intl, err));
+                if (err.status === 401) {
+                    await handleTeacher401();
+                } else {
+                    showError(translateError(intl, err));
+                }
             } finally {
                 setIsLoading(false);
             }
         },
-        [idToken, clearError, showError, intl, setIsLoading, setPhase],
+        [idToken, clearError, showError, handleTeacher401, intl, setIsLoading, setPhase],
     );
 
     // --- Teacher: Select classroom to view details ---
 
+    const fetchClassroomDetail = useCallback(async (token, classroomId) => {
+        const [classroomData, membersData, submissionsData] = await Promise.all([
+            classroomAPI.getClassroom(token, classroomId),
+            classroomAPI.listMembers(token, classroomId),
+            classroomAPI.listSubmissions(token, classroomId),
+        ]);
+        const subMap = {};
+        for (const sub of submissionsData.submissions || []) {
+            const existing = subMap[sub.memberId];
+            if (!existing || sub.submittedAt > existing.submittedAt) {
+                subMap[sub.memberId] = sub;
+            }
+        }
+        const memberIds = new Set();
+        const enrichedMembers = (membersData.members || []).map(m => {
+            memberIds.add(m.memberId);
+            const sub = subMap[m.memberId];
+            return sub
+                ? {
+                      ...m,
+                      submissionId: sub.submissionId,
+                      submissionStatus: sub.status || 'submitted',
+                      thumbnailUrl: sub.thumbnailUrl || null,
+                      projectUrl: sub.projectUrl || null,
+                      projectName: sub.projectName || null,
+                      screenshotUrls: sub.screenshotUrls || [],
+                      teacherComment: sub.teacherComment || '',
+                  }
+                : m;
+        });
+        for (const [memberId, sub] of Object.entries(subMap)) {
+            if (!memberIds.has(memberId)) {
+                enrichedMembers.push({
+                    memberId,
+                    hasSubmission: true,
+                    submissionId: sub.submissionId,
+                    submissionStatus: sub.status || 'submitted',
+                    submittedAt: sub.submittedAt || null,
+                    thumbnailUrl: sub.thumbnailUrl || null,
+                    projectUrl: sub.projectUrl || null,
+                    projectName: sub.projectName || null,
+                    screenshotUrls: sub.screenshotUrls || [],
+                    teacherComment: sub.teacherComment || '',
+                    left: true,
+                });
+            }
+        }
+        setSelectedClassroom(classroomData);
+        setMembers(enrichedMembers);
+    }, []);
+
     const loadClassroomDetail = useCallback(
         async classroomId => {
             try {
-                const [classroomData, membersData, submissionsData] = await Promise.all([
-                    classroomAPI.getClassroom(idToken, classroomId),
-                    classroomAPI.listMembers(idToken, classroomId),
-                    classroomAPI.listSubmissions(idToken, classroomId),
-                ]);
-                // Merge submission thumbnailUrl/projectUrl into members
-                const subMap = {};
-                for (const sub of submissionsData.submissions || []) {
-                    const existing = subMap[sub.memberId];
-                    if (!existing || sub.submittedAt > existing.submittedAt) {
-                        subMap[sub.memberId] = sub;
-                    }
-                }
-                const memberIds = new Set();
-                const enrichedMembers = (membersData.members || []).map(m => {
-                    memberIds.add(m.memberId);
-                    const sub = subMap[m.memberId];
-                    if (sub) {
-                        return {
-                            ...m,
-                            submissionId: sub.submissionId,
-                            submissionStatus: sub.status || 'submitted',
-                            thumbnailUrl: sub.thumbnailUrl || null,
-                            projectUrl: sub.projectUrl || null,
-                            projectName: sub.projectName || null,
-                            screenshotUrls: sub.screenshotUrls || [],
-                            teacherComment: sub.teacherComment || '',
-                        };
-                    }
-                    return m;
-                });
-                // Add submissions from members who have left
-                for (const [memberId, sub] of Object.entries(subMap)) {
-                    if (!memberIds.has(memberId)) {
-                        enrichedMembers.push({
-                            memberId,
-                            hasSubmission: true,
-                            submissionId: sub.submissionId,
-                            submissionStatus: sub.status || 'submitted',
-                            submittedAt: sub.submittedAt || null,
-                            thumbnailUrl: sub.thumbnailUrl || null,
-                            projectUrl: sub.projectUrl || null,
-                            projectName: sub.projectName || null,
-                            screenshotUrls: sub.screenshotUrls || [],
-                            teacherComment: sub.teacherComment || '',
-                            left: true,
-                        });
-                    }
-                }
-                setSelectedClassroom(classroomData);
-                setMembers(enrichedMembers);
+                await fetchClassroomDetail(idToken, classroomId);
                 return true;
             } catch (err) {
                 if (err.status === 401) {
-                    showSessionExpiredError(translateError(intl, err, 'session'));
-                } else {
-                    showError(translateError(intl, err));
+                    const newToken = await handleTeacher401();
+                    if (newToken) {
+                        try {
+                            await fetchClassroomDetail(newToken, classroomId);
+                            return true;
+                        } catch {
+                            // Retry also failed
+                        }
+                    }
+                    return false;
                 }
+                showError(translateError(intl, err));
                 return false;
             }
         },
-        [idToken, showError, showSessionExpiredError, intl],
+        [idToken, fetchClassroomDetail, showError, handleTeacher401, intl],
     );
 
     const handleSelectClassroom = useCallback(
@@ -449,10 +548,14 @@ const useTeacherClassroom = ({
                 setMembers(prev => prev.filter(m => m.memberId !== memberId));
                 setSelectedMember(null);
             } catch (err) {
-                showError(translateError(intl, err));
+                if (err.status === 401) {
+                    await handleTeacher401();
+                } else {
+                    showError(translateError(intl, err));
+                }
             }
         },
-        [idToken, selectedClassroom, clearError, showError, intl],
+        [idToken, selectedClassroom, clearError, showError, handleTeacher401, intl],
     );
 
     // --- Teacher: Open student submission ---
@@ -530,12 +633,25 @@ const useTeacherClassroom = ({
                 // Refresh to show updated status
                 await loadClassroomDetail(selectedClassroom.classroomId);
             } catch (err) {
-                showError(translateError(intl, err));
+                if (err.status === 401) {
+                    await handleTeacher401();
+                } else {
+                    showError(translateError(intl, err));
+                }
             } finally {
                 setIsLoading(false);
             }
         },
-        [idToken, selectedClassroom, clearError, showError, intl, loadClassroomDetail, setIsLoading],
+        [
+            idToken,
+            selectedClassroom,
+            clearError,
+            showError,
+            handleTeacher401,
+            intl,
+            loadClassroomDetail,
+            setIsLoading,
+        ],
     );
 
     // --- Teacher: Download all submissions as ZIP ---
@@ -627,10 +743,14 @@ const useTeacherClassroom = ({
                     assignmentName,
                 }));
             } catch (err) {
-                showError(translateError(intl, err));
+                if (err.status === 401) {
+                    await handleTeacher401();
+                } else {
+                    showError(translateError(intl, err));
+                }
             }
         },
-        [idToken, selectedClassroom, clearError, showError, intl],
+        [idToken, selectedClassroom, clearError, showError, handleTeacher401, intl],
     );
 
     const handleUpdateStudentCount = useCallback(
@@ -646,10 +766,14 @@ const useTeacherClassroom = ({
                 setSelectedClassroom(detail);
                 setMembers(memberList.members || []);
             } catch (err) {
-                showError(translateError(intl, err));
+                if (err.status === 401) {
+                    await handleTeacher401();
+                } else {
+                    showError(translateError(intl, err));
+                }
             }
         },
-        [idToken, selectedClassroom, clearError, showError, intl],
+        [idToken, selectedClassroom, clearError, showError, handleTeacher401, intl],
     );
 
     // --- Teacher: Select member ---
@@ -695,7 +819,8 @@ const useTeacherClassroom = ({
         handleDownloadAll,
         handleOpenSubmission,
         handleReturnSubmission,
-        handleGoogleClassroomImport,
+        handleShowGoogleCourses,
+        handleLoadGoogleCourses,
         handleSelectGoogleCourse,
         handleConfirmGoogleImport,
         handleShowPostAssignment,
