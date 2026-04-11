@@ -1,135 +1,28 @@
-# smalruby3-editor: The Smalruby 3 Editor Monorepo
+# smt-editor
+#### SmT GUI is forked from [smalruby3/smalruby-editor](https://github.com/smalruby/smalruby3-editor). 
 
-This is the development repository for **Smalruby 3**, a Ruby-based visual programming environment forked from [Scratch 3.0](https://github.com/scratchfoundation/scratch-editor).
+## 利用方法・開発方法
 
-If you'd like to use Scratch, please visit the [Scratch website](https://scratch.mit.edu/). You can build your own
-Scratch project by pressing "Create" on that website or by visiting <https://scratch.mit.edu/projects/editor/>.
+[smt-editor wiki](https://github.com/gfd-dennou-club/smt-editor/wiki) をご覧ください．
 
-This is a source code repository for the packages that make up the Smalruby editor and a few additional support
-packages. Use this if you'd like to learn about how the Smalruby editor works or to contribute to its development.
+## 動作検証サイト
 
-## What's in this repository?
+https://ceres.epi.it.matsue-ct.ac.jp/smt/
 
-The `packages` directory in this repository contains:
+## demonstration
 
-- `scratch-gui`: **Smalruby 3 GUI**. The React-based web interface, customized for Smalruby (e.g., Ruby mode, custom extensions). Forked from `scratch-gui`.
-- `scratch-vm`: **Smalruby 3 VM**. The virtual machine that runs projects, with @ruby/prism integration for Ruby parsing. Forked from `scratch-vm`.
-- `scratch-render` draws backdrops, sprites, and clones on the stage.
-- `scratch-svg-renderer` processes SVG (vector) images for use with projects.
+1. 松江高専マイコン基板にて，L チカを実行する例．マイコン基板用のブロックを利用．
 
-_Please add to this list as more packages are migrated to the monorepo._
+https://github.com/user-attachments/assets/dad6f164-4ad9-4464-ab28-cfa6f8ca1160
 
-The `infra` directory contains AWS CDK infrastructure projects:
+2. Ruby コードからブロックに変換できることを示す例．[共通 I/O API ガイドライン](https://github.com/mruby/microcontroller-peripheral-interface-guide) に準拠した Ruby コードは変換可能．
 
-- `infra/smalruby-mesh-v2`: **Mesh v2**. AWS CDK project for the serverless mesh networking service (AppSync + DynamoDB), enabling real-time communication between Smalruby instances.
+https://github.com/user-attachments/assets/702a4bbb-c2df-4cf3-8b4b-8abd0afb0876
 
-Each package has its own `README.md` file with more information about that package.
+3. 各種基板専用のブロックは，逆変換すると，[共通 I/O API ガイドライン](https://github.com/mruby/microcontroller-peripheral-interface-guide) に準拠したブロックへ変換される
 
-## Development
+https://github.com/user-attachments/assets/cd830869-f9e2-470d-9468-f047a0008bd2
 
-### Installation
+4. 「ステージ」にコメントで Ruby コードを貼り付けておくと，それを合体させたコードが生成される．周辺機器用のクラスを Ruby で自作した場合などに利用できる．
 
-To install dependencies for all packages in the monorepo:
-
-```bash
-npm install
-```
-
-**Note**: We strictly recommend using the Docker environment for development to ensure consistency. Please refer to the [root README](../../README.md) for Docker instructions.
-
-### Build
-
-To build all packages:
-
-```bash
-npm run build
-```
-
-To build in development mode (faster, with source maps):
-
-```bash
-npm run build:dev
-```
-
-### Running the Development Server
-
-To start the GUI development server (typically on http://localhost:8601):
-
-```bash
-npm start
-```
-
-### Testing
-
-To run all tests (lint, unit, integration):
-
-```bash
-npm test
-```
-
-To run unit tests only:
-
-```bash
-npm run test:unit
-```
-
-To run integration tests only:
-
-```bash
-npm run test:integration
-```
-
-## Smalruby Specific Features
-
-### Language Specification
-
-Smalruby supports a subset of Ruby syntax. See the language specification for details:
-
-- **[Language Specification](docs/smalruby-language-spec.md)** ([Japanese](docs/smalruby-language-spec.ja.md)) — Core syntax and built-in methods
-- **[Extension Methods](docs/smalruby-language-spec-extensions.md)** ([Japanese](docs/smalruby-language-spec-extensions.ja.md)) — Pen, Music, Translate, micro:bit, and more
-- **[Version 1 API Differences](docs/smalruby-language-spec-v1-diff.md)** ([Japanese](docs/smalruby-language-spec-v1-diff.ja.md)) — Changes from v1 to v2
-
-### Ruby Mode
-Smalruby 3 integrates [@ruby/prism](https://github.com/ruby/prism) to parse Ruby code within the browser. The `scratch-gui` package provides the Ruby code editor (using Monaco Editor) with Ruby-to-blocks conversion and blocks-to-Ruby generation.
-
-### Google Drive Integration
-Smalruby 3 supports loading and saving projects directly to Google Drive.
-For setup instructions, please see [Google API Setup Guide](packages/scratch-gui/docs/google-api-setup.md).
-
-### AWS Infrastructure (infra/)
-
-AWS CDK infrastructure projects are managed in the `infra/` directory. Use the `infra` Docker service for CDK operations:
-
-```bash
-# Install dependencies
-docker compose run --rm infra npm install
-
-# Deploy Mesh v2 to staging
-docker compose run --rm infra npx cdk deploy --context stage=stg
-
-# Show deployment diff
-docker compose run --rm infra npx cdk diff --context stage=stg
-```
-
-AWS credentials must be set via environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION`) before running these commands.
-
-## Monorepo migration
-
-### What's going on?
-
-We're migrating the Smalruby editor packages into this monorepo, following the upstream Scratch Editor structure. This allows us to manage all packages in one place.
-
-### Why are there only a few packages in this repo?
-
-We're migrating packages in stages.
-
-## Thank you!
-
-Smalruby is based on Scratch from the Scratch Foundation.
-Scratch would not be what it is today without help from the global community of Scratchers and open-source contributors. Thank you for your contributions and support. _[Scratch on!](https://scratch.mit.edu/projects/65347738/fullscreen/)_
-
-## Donate
-
-We provide [Scratch](https://scratch.mit.edu) free of charge, and want to keep it that way! Please consider making a
-[donation](https://secure.donationpay.org/scratchfoundation/) to support our continued engineering, design, community,
-and resource development efforts. Donations of any size are appreciated. Thank you!
+https://github.com/user-attachments/assets/7a1b4d9a-2aa0-4885-9197-ffdffb0ef76c
