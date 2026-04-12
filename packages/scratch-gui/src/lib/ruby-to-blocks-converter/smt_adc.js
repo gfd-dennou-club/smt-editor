@@ -12,8 +12,8 @@ const SmT_ADC_Converter = {
         converter.registerOnVasgn((scope, variable, rh) => {
             if (rh?.opcode !== "unifiedapi_adc_init") return null;
 
-            // 共通関数で変数ブロックを接続
             const varName = Utils.attachVariableBlock(converter, rh, "INSTANCE", variable);
+
             converter._instanceTypeMap[varName] = "ADC";
             return rh;
         });
@@ -25,13 +25,22 @@ const SmT_ADC_Converter = {
             
             Utils.fixLocationToLineStart(block);
 
-	    // PIN は正の整数（0以上）であることの保証
-            if (block && converter.isNumber(args[0])) {
-		if (args[0] && args[0].type === "int" && Number(args[0].value) >= 0) {
-                    converter.addNumberInput(block, "PIN", "math_integer", Number(args[0].value), 39);
-		} else {
-                    throw new Error(Utils.getErrorMessage('ONLY_POSITIVE_INTEGER', 1));
-		}
+	    if (block){
+		if (!args[0]) return null;
+                if (args[0].type === "int") {
+		    // 整数の場合は正であることを保証
+		    if (Number(args[0].value) >= 0) {
+			converter.addNumberInput(block, "PIN", "math_integer", Number(args[0].value), 12);
+		    } else {
+			throw new Error(Utils.getErrorMessage('ONLY_POSITIVE_INTEGER', 1));
+		    }
+                } else if (args[0].type === "str") {
+                    // 文字列の場合
+                    converter.addTextInput(block, "PIN", args[0].value, "a1"); 
+                } else {
+                    // 整数・文字列以外の場合
+                    converter.addInput(block, "PIN", args[0]); 
+                }
                 return block;
             }
             return null;
@@ -43,7 +52,7 @@ const SmT_ADC_Converter = {
                 const { receiver, node } = params;
                 const varName = receiver.fields?.VARIABLE?.value || "";
 
-		// 念のため varName が空（変数ブロックとして認識されていない）場合はエラー
+		// 念のため varName が空の場合はエラー
                 if (!varName) {
                     throw new Error(Utils.getErrorMessage('ONLY_VARIABLE'));
                 }

@@ -56,6 +56,14 @@ const SmT_Common = {
         const argTextEn = argIndex ? `Argument ${argIndex}` : `This argument`;
 	
         switch (errorId) {
+        case 'NOT_STRING':
+            return isJapanese 
+                ? `エラー：${argTextJa}文字列は指定できません。` 
+                : `Error: ${argTextEn} must not be a string.`;
+        case 'ONLY_POSITIVE_INTEGER_STRING_VARIABLE':
+            return isJapanese 
+                ? `エラー：${argTextJa}正の整数，文字列，変数のいずれかを指定してください。` 
+                : `Error: ${argTextEn} must be an positive integer or string or variable.`;
         case 'ONLY_VARIABLE':
             return isJapanese 
                 ? `エラー：${argTextJa}変数しか指定できません。` 
@@ -76,10 +84,10 @@ const SmT_Common = {
             return isJapanese 
                 ? `エラー：${argTextJa}「GPIO::IN」「GPIO::OUT」「GPIO::IN|GPIO::PULL_UP」「GPIO::PULL_DOWN」のいずれかを指定してください。` 
                 : `Error: ${argTextEn} must be GPIO::IN, GPIO::OUT, GPIO::IN|GPIO::PULL_UP, or GPIO::PULL_DOWN.`;
-        case 'ONLY_ZERO_OR_ONE':
+        case 'ONLY_ZERO_OR_ONE_OR_VARIABLE':
             return isJapanese 
-                ? `エラー：${argTextJa} 0 か 1 を指定してください。` 
-                : `Error: ${argTextEn} must be 0 or 1.`;
+                ? `エラー：${argTextJa} 0 か 1，もしくは変数を指定してください。` 
+                : `Error: ${argTextEn} must be 0 or 1 or variable.`;
         case 'ONLY_POSITIVE_INTEGER':
             return isJapanese
                 ? `エラー：${argTextJa} 0以上の整数（ピン番号）を指定してください。`
