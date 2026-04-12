@@ -1,4 +1,4 @@
-import { FormattedMessage } from 'react-intl';
+import { FormattedMessage, useIntl } from 'react-intl';
 import PropTypes from 'prop-types';
 import React, { useCallback } from 'react';
 
@@ -6,36 +6,87 @@ import ErrorDisplay from './error-display.jsx';
 
 import styles from './classroom-modal.css';
 
+/**
+ * Normalize input for join code: full-width to half-width, then keep only [a-z0-9].
+ * @param {string} raw - Raw input string
+ * @returns {string} Normalized lowercase alphanumeric string
+ */
+const normalizeJoinCodeInput = (raw) => {
+    let result = '';
+    for (let i = 0; i < raw.length; i++) {
+        const cp = raw.charCodeAt(i);
+        let ch;
+        if (cp >= 0xff10 && cp <= 0xff19) {
+            // Full-width digits -> half-width
+            ch = String.fromCharCode(cp - 0xff10 + 0x30);
+        } else if (cp >= 0xff21 && cp <= 0xff3a) {
+            // Full-width uppercase -> half-width lowercase
+            ch = String.fromCharCode(cp - 0xff21 + 0x61);
+        } else if (cp >= 0xff41 && cp <= 0xff5a) {
+            // Full-width lowercase -> half-width lowercase
+            ch = String.fromCharCode(cp - 0xff41 + 0x61);
+        } else {
+            ch = raw[i].toLowerCase();
+        }
+        if (/[a-z0-9]/.test(ch)) {
+            result += ch;
+        }
+    }
+    return result;
+};
+
 const StudentJoinForm = ({
     error,
     errorActionLabel,
     errorActionHandler,
     errorTitle,
     isLoading,
+    joinCodeHistory,
     noBackButton,
     onBack,
     onJoin,
+    onTeacherLink,
 }) => {
+    const intl = useIntl();
     const [code, setCode] = React.useState('');
 
     const handleCodeChange = useCallback((e) => {
-        setCode(e.target.value.toLowerCase());
+        setCode(normalizeJoinCodeInput(e.target.value));
     }, []);
 
     const handleSubmit = useCallback(() => {
         if (code.trim().length === 6) {
-            onJoin(code.trim().toUpperCase());
+            onJoin(code.trim());
         }
     }, [code, onJoin]);
 
     const handleKeyDown = useCallback(
         (e) => {
             if (e.key === 'Enter' && code.trim().length === 6) {
-                onJoin(code.trim().toUpperCase());
+                onJoin(code.trim());
             }
         },
         [code, onJoin],
     );
+
+    const handleHistorySelect = useCallback(
+        (e) => {
+            const selectedCode = e.target.value;
+            if (selectedCode) {
+                setCode(selectedCode);
+            }
+        },
+        [],
+    );
+
+    const hasHistory =
+        Array.isArray(joinCodeHistory) && joinCodeHistory.length > 0;
+
+    // Show selected state if current code matches a history entry
+    const historySelectValue =
+        hasHistory && joinCodeHistory.some((e) => e.joinCode === code)
+            ? code
+            : '';
 
     return (
         <div data-testid="classroom-phase-student-join">
@@ -78,6 +129,30 @@ const StudentJoinForm = ({
                 />
             </div>
             <div className={styles.buttonRow}>
+                {hasHistory && (
+                    <select
+                        className={styles.historySelect}
+                        data-testid="classroom-join-history"
+                        value={historySelectValue}
+                        onChange={handleHistorySelect}
+                    >
+                        <option value="">
+                            {intl.formatMessage({
+                                defaultMessage: 'Join codes from previously joined classes',
+                                description: 'Placeholder for join code history dropdown',
+                                id: 'gui.classroom.studentJoin.historyPlaceholder',
+                            })}
+                        </option>
+                        {joinCodeHistory.map((entry) => (
+                            <option
+                                key={entry.joinCode}
+                                value={entry.joinCode}
+                            >
+                                {`${entry.className}${entry.assignmentName ? `/${entry.assignmentName}` : ''} ${entry.joinCode}`}
+                            </option>
+                        ))}
+                    </select>
+                )}
                 <button
                     className={styles.primaryButton}
                     data-testid="classroom-join-submit"
@@ -130,6 +205,19 @@ const StudentJoinForm = ({
                         }}
                     />
                 </div>
+                {onTeacherLink && (
+                    <button
+                        className={styles.teacherLink}
+                        data-testid="classroom-teacher-link"
+                        onClick={onTeacherLink}
+                    >
+                        <FormattedMessage
+                            defaultMessage="For teachers: Go to Class Management"
+                            description="Link for teachers to access class management from student join form"
+                            id="gui.classroom.studentJoin.teacherLink"
+                        />
+                    </button>
+                )}
             </div>
         </div>
     );
@@ -141,9 +229,19 @@ StudentJoinForm.propTypes = {
     errorActionLabel: PropTypes.string,
     errorTitle: PropTypes.string,
     isLoading: PropTypes.bool,
+    joinCodeHistory: PropTypes.arrayOf(
+        PropTypes.shape({
+            joinCode: PropTypes.string.isRequired,
+            className: PropTypes.string,
+            assignmentName: PropTypes.string,
+            expiresAt: PropTypes.string,
+            joinedAt: PropTypes.string,
+        }),
+    ),
     noBackButton: PropTypes.bool,
     onBack: PropTypes.func,
     onJoin: PropTypes.func.isRequired,
+    onTeacherLink: PropTypes.func,
 };
 
 export default StudentJoinForm;

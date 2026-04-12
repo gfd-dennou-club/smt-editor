@@ -22,19 +22,25 @@ const SUBMISSIONS_TABLE = process.env.SUBMISSIONS_TABLE_NAME || 'ClassroomSubmis
 const SUBMISSIONS_BUCKET = process.env.SUBMISSIONS_BUCKET_NAME || 'smalruby-classroom-submissions';
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const DEV_BYPASS_TOKEN = process.env.DEV_BYPASS_TOKEN || '';
+const STAGE = process.env.STAGE || 'stg';
 const CORS_ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS || '').split(',').map(o => o.trim());
 
 const MAX_CLASS_NAME_LENGTH = 50;
 const MAX_STUDENT_COUNT = parseInt(process.env.MAX_STUDENT_COUNT || '50', 10);
 const MAX_NICKNAME_LENGTH = 20;
 // 6-digit alphanumeric, excluding confusing chars (I, O, 0, 1)
-const JOIN_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const JOIN_CODE_CHARS = 'abcdefghjklmnpqrstuvwxyz23456789';
 const JOIN_CODE_LENGTH = 6;
 // Classroom TTL from environment (default 30 days)
 const CLASSROOM_TTL_DAYS = parseInt(process.env.CLASSROOM_TTL_DAYS || '30', 10);
 const CLASSROOM_TTL_SECONDS = CLASSROOM_TTL_DAYS * 24 * 60 * 60;
 // Session and membership TTL matches classroom TTL
 const SESSION_TTL_SECONDS = CLASSROOM_TTL_SECONDS;
+// Google ID Token max age override (seconds). Default: undefined (use Google's standard 1-hour).
+// Set to e.g. 120 for testing session expiry quickly.
+const ID_TOKEN_MAX_AGE_SECONDS = process.env.ID_TOKEN_MAX_AGE_SECONDS
+  ? parseInt(process.env.ID_TOKEN_MAX_AGE_SECONDS, 10)
+  : undefined;
 // Rate limiting for join endpoint (per IP)
 const JOIN_RATE_LIMIT_WINDOW_SECONDS = parseInt(process.env.JOIN_RATE_LIMIT_WINDOW_SECONDS || '60', 10);
 const JOIN_RATE_LIMIT_MAX_ATTEMPTS = parseInt(process.env.JOIN_RATE_LIMIT_MAX_ATTEMPTS || '50', 10);
@@ -132,11 +138,11 @@ export function validateJoinCode(code: unknown): string {
   if (typeof code !== 'string' || code.trim().length !== JOIN_CODE_LENGTH) {
     throw new ValidationError(`Join code must be ${JOIN_CODE_LENGTH} characters`);
   }
-  const upper = code.trim().toUpperCase();
-  if (!JOIN_CODE_REGEX.test(upper)) {
+  const lower = code.trim().toLowerCase();
+  if (!JOIN_CODE_REGEX.test(lower)) {
     throw new ValidationError('Join code contains invalid characters');
   }
-  return upper;
+  return lower;
 }
 
 // --- Error classes ---
@@ -212,8 +218,8 @@ function extractGoogleAccessToken(headers: Record<string, string | undefined>): 
 // --- Auth helpers ---
 
 export async function verifyGoogleIdToken(idToken: string): Promise<string> {
-  // Dev bypass: accept DEV_BYPASS_TOKEN in non-production environments
-  if (DEV_BYPASS_TOKEN && idToken === DEV_BYPASS_TOKEN) {
+  // Dev bypass: accept DEV_BYPASS_TOKEN in non-production environments only
+  if (DEV_BYPASS_TOKEN && idToken === DEV_BYPASS_TOKEN && STAGE !== 'prod') {
     return 'dev-test-teacher';
   }
 
@@ -225,6 +231,13 @@ export async function verifyGoogleIdToken(idToken: string): Promise<string> {
     const payload = ticket.getPayload();
     if (!payload || !payload.sub) {
       throw new AuthError('Invalid token payload');
+    }
+    // Custom max age check: reject tokens older than ID_TOKEN_MAX_AGE_SECONDS
+    if (ID_TOKEN_MAX_AGE_SECONDS && payload.iat) {
+      const tokenAge = Math.floor(Date.now() / 1000) - payload.iat;
+      if (tokenAge > ID_TOKEN_MAX_AGE_SECONDS) {
+        throw new AuthError(`Token too old: ${tokenAge}s > ${ID_TOKEN_MAX_AGE_SECONDS}s`);
+      }
     }
     return payload.sub;
   } catch (err) {
@@ -244,9 +257,29 @@ function extractBearerToken(authHeader?: string): string {
 
 async function handleCreateClassroom(teacherSub: string, body: Record<string, unknown>): Promise<APIGatewayProxyStructuredResultV2> {
   const className = validateClassName(body.className);
-  const assignmentName = validateClassName(body.assignmentName); // reuse same validator (1-50 chars)
+  let assignmentName = validateClassName(body.assignmentName); // reuse same validator (1-50 chars)
   const studentCount = validateStudentCount(body.studentCount);
   const googleClassroomCourseId = typeof body.googleClassroomCourseId === 'string' ? body.googleClassroomCourseId.trim() : undefined;
+
+  // Auto-number duplicate assignment names within the same class
+  const existingClassrooms = await docClient.send(new QueryCommand({
+    TableName: CLASSROOMS_TABLE,
+    IndexName: 'teacherSub-index',
+    KeyConditionExpression: 'teacherSub = :ts',
+    ExpressionAttributeValues: { ':ts': teacherSub },
+  }));
+  if (existingClassrooms.Items) {
+    const sameClassAssignments = existingClassrooms.Items
+      .filter(item => item.className === className && item.status === 'active')
+      .map(item => item.assignmentName as string);
+    if (sameClassAssignments.includes(assignmentName)) {
+      let suffix = 2;
+      while (sameClassAssignments.includes(`${assignmentName} (${suffix})`)) {
+        suffix++;
+      }
+      assignmentName = `${assignmentName} (${suffix})`;
+    }
+  }
 
   // Generate unique join code (retry up to 5 times)
   let joinCode = '';
@@ -648,8 +681,11 @@ async function handleLookupClassroom(sourceIp: string, body: Record<string, unkn
     statusCode: 200,
     body: JSON.stringify({
       classroomId: classroom.classroomId,
+      className: classroom.className,
+      assignmentName: classroom.assignmentName || null,
       studentCount: classroom.studentCount,
       takenSeats,
+      expiresAt: classroom.ttl ? new Date((classroom.ttl as number) * 1000).toISOString() : null,
     }),
   };
 }

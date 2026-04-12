@@ -158,15 +158,27 @@ http://localhost:8601?no_beforeunload=1&tab=ruby&ruby_version=2&rubyMode=ruby
 | `tab` | `ruby` | Ruby タブを初期表示 |
 | `ruby_version` | `2` | Ruby バージョン |
 | `rubyMode` | `ruby`, `furigana`, `dncl` | Ruby タブの初期モード |
-| `features` | カンマ区切り（例: `classroom`) | 隠し機能の有効化 |
+| `features` | カンマ区切り | 隠し機能の有効化（現在は未使用） |
 
-### Feature Flags
+### クラスルーム機能
 
-`?features=xxx` で隠し機能を有効化できる。カンマ区切りで複数指定可能。
+クラスルーム機能は `CLASSROOM_API_ENDPOINT` 環境変数が設定されていれば常に有効です（`?features=classroom` は不要）。
 
-| Flag | 機能 |
-|------|------|
-| `classroom` | クラスルーム機能（メニューバーに「クラス」ボタン表示） |
+### ブロックパレットの文字化け回避
+
+Playwright でルビータブ（またはコスチューム/音タブ）からコードタブに切り替えると、ブロックパレットの文字が乱れることがある。これはコードタブ非表示中に Blockly が SVG を再構築する際、`getBBox()` が `0` を返すためブロックパスの幅が最小値で固定されることが原因。
+
+**回避策**: タブ切り替え後に `resize` イベントを発火してブロックを再描画させる:
+
+```javascript
+// コードタブに切り替えた後
+await page.locator('[role="tab"]').first().click();
+await page.waitForTimeout(500);
+await page.evaluate(() => window.dispatchEvent(new Event('resize')));
+await page.waitForTimeout(500);
+```
+
+この問題は通常のブラウザ操作では発生しない（Playwright 環境固有）。
 
 ## Monaco Editor の操作
 

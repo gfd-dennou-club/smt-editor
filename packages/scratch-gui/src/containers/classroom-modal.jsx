@@ -6,12 +6,14 @@ import ClassroomModalComponent from '../components/classroom-modal/classroom-mod
 import ClassroomTeacherModalComponent from '../components/classroom-teacher-modal/classroom-teacher-modal.jsx';
 import { renderBlocksToCanvas } from '../lib/blocks-screenshot.js';
 import classroomAPI from '../lib/classroom-api.js';
+import { loadHistory, addToHistory } from '../lib/join-code-history.js';
 import { getProjectThumbnail } from '../lib/store-project-thumbnail.js';
 import { getUrlParams, clearClasscode } from '../lib/url-params.js';
 import { showAlertWithTimeout } from '../reducers/alerts.js';
 import {
     closeClassroomModal,
     closeTeacherModal,
+    openTeacherModal,
     setClassroomSession,
     clearClassroomSession,
     setSubmissionStatus,
@@ -29,9 +31,11 @@ const ClassroomModal = ({ mode = 'student' }) => {
     const scratchBlocks = useSelector(state => state.scratchGui.blockDisplay?.scratchBlocks);
 
     // Auto-login with dev bypass token from URL (e.g. ?devlogin=<secret>)
-    const urlParams = getUrlParams();
-    if (mode === 'teacher' && urlParams.devlogin && !getCachedTeacherIdToken()) {
-        setCachedTeacherIdToken(urlParams.devlogin);
+    if (mode === 'teacher') {
+        const urlParams = getUrlParams();
+        if (urlParams.devlogin && !getCachedTeacherIdToken()) {
+            setCachedTeacherIdToken(urlParams.devlogin);
+        }
     }
 
     // Determine initial phase based on mode and persisted session
@@ -40,7 +44,6 @@ const ClassroomModal = ({ mode = 'student' }) => {
             if (getCachedTeacherIdToken()) return 'teacher-dashboard';
             return 'teacher-login';
         }
-        // Student mode
         if (classroomState.role === 'student' && classroomState.sessionToken) {
             return 'student-status';
         }
@@ -52,12 +55,9 @@ const ClassroomModal = ({ mode = 'student' }) => {
     const [error, setError] = useState(null);
     const [errorTitle, setErrorTitle] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
-
-    // Error action state (link shown alongside the error message)
     const [errorActionLabel, setErrorActionLabel] = useState(null);
     const [errorActionHandler, setErrorActionHandler] = useState(null);
 
-    // Helper to set error with optional title
     const showError = useCallback((message, title = null) => {
         setError(message);
         setErrorTitle(title);
@@ -72,14 +72,11 @@ const ClassroomModal = ({ mode = 'student' }) => {
         setErrorActionHandler(null);
     }, []);
 
-    // Use a ref-based wrapper for showSessionExpiredError to break the circular
-    // dependency: the hook needs showSessionExpiredError, but
-    // showSessionExpiredError needs handleGoToLogin, which needs teacher state.
-    // The ref is updated after showSessionExpiredError is defined below.
+    // Ref-based wrapper for showSessionExpiredError to break circular dependency
     const showSessionExpiredErrorRef = useRef(null);
     const stableShowSessionExpiredError = useCallback((...args) => showSessionExpiredErrorRef.current?.(...args), []);
 
-    // Teacher hook (must be called unconditionally)
+    // Teacher hook (called unconditionally — required for teacher modal rendering)
     const teacher = useTeacherClassroom({
         mode,
         dispatch,
@@ -102,22 +99,22 @@ const ClassroomModal = ({ mode = 'student' }) => {
             teacher.setClassrooms([]);
             teacher.setSelectedClassroom(null);
             teacher.setMembers([]);
+            setPhase('teacher-login');
         } else {
             dispatch(clearClassroomSession());
+            clearError();
+            setPhase('student-join');
         }
-        clearError();
-        setPhase(mode === 'teacher' ? 'teacher-login' : 'student-join');
     }, [mode, clearError, dispatch, teacher]);
 
     // Handle relogin request from Alert "参加しなおす" button
     useEffect(() => {
         if (classroomState.reloginRequested) {
-            dispatch(clearClassroomSession()); // clears flag + student session
+            dispatch(clearClassroomSession());
             handleGoToLogin();
         }
     }, [classroomState.reloginRequested, dispatch, handleGoToLogin]);
 
-    // Show session-expired alert banner (replaces inline error)
     const showSessionExpiredError = useCallback(() => {
         const alertId = mode === 'teacher' ? 'classroomTeacherSessionExpired' : 'classroomSessionExpired';
         showAlertWithTimeout(dispatch, alertId);
@@ -128,35 +125,26 @@ const ClassroomModal = ({ mode = 'student' }) => {
         dispatch(mode === 'teacher' ? closeTeacherModal() : closeClassroomModal());
     }, [dispatch, mode]);
 
-    // --- Role selection ---
+    // --- Student: open teacher management modal ---
 
     const handleSelectTeacher = useCallback(() => {
-        clearError();
-        if (teacher.idToken) {
-            setPhase('teacher-dashboard');
-        } else {
-            setPhase('teacher-login');
-        }
-    }, [teacher.idToken, clearError]);
-
-    const handleSelectStudent = useCallback(() => {
-        clearError();
-        setPhase('student-join');
-    }, [clearError]);
+        dispatch(closeClassroomModal());
+        dispatch(openTeacherModal());
+    }, [dispatch]);
 
     // --- Student state ---
 
+    const [joinCodeHistory, setJoinCodeHistory] = useState(() => loadHistory());
     const [pendingJoinCode, setPendingJoinCode] = useState(null);
     const [seatCount, setSeatCount] = useState(0);
     const [takenSeats, setTakenSeats] = useState([]);
     const [selectedSeat, setSelectedSeat] = useState(null);
+    const [pendingClassroomInfo, setPendingClassroomInfo] = useState(null);
     const [joinedInfo, setJoinedInfo] = useState(null);
-
-    // Submission state
     const [thumbnailDataUrl, setThumbnailDataUrl] = useState(null);
     const [submitProgress, setSubmitProgress] = useState(null);
 
-    // --- Student: Join with code (validate first) ---
+    // --- Student: Join with code ---
 
     const handleJoinWithCode = useCallback(
         async joinCode => {
@@ -165,6 +153,11 @@ const ClassroomModal = ({ mode = 'student' }) => {
             try {
                 const data = await classroomAPI.lookupClassroom(joinCode);
                 setPendingJoinCode(joinCode);
+                setPendingClassroomInfo({
+                    className: data.className || '',
+                    assignmentName: data.assignmentName || '',
+                    expiresAt: data.expiresAt || null,
+                });
                 setSeatCount(data.studentCount);
                 setTakenSeats(data.takenSeats || []);
                 setSelectedSeat(null);
@@ -211,6 +204,13 @@ const ClassroomModal = ({ mode = 'student' }) => {
             if (data.assignmentName) {
                 dispatch(setProjectTitle(data.assignmentName));
             }
+            addToHistory({
+                joinCode: pendingJoinCode,
+                className: data.className,
+                assignmentName: data.assignmentName || '',
+                expiresAt: pendingClassroomInfo?.expiresAt || null,
+            });
+            setJoinCodeHistory(loadHistory());
             setJoinedInfo({
                 className: data.className,
                 assignmentName: data.assignmentName || null,
@@ -249,12 +249,11 @@ const ClassroomModal = ({ mode = 'student' }) => {
         }
     }, [classroomState.sessionToken, dispatch, showSessionExpiredError, intl]);
 
-    // Fetch on student-status phase display
     useEffect(() => {
         if (phase === 'student-status' && classroomState.sessionToken) {
             refreshStudentStatus();
         }
-    }, [phase]); // Only on phase change, not on every render
+    }, [phase]); // Only on phase change
 
     // --- Student: Leave classroom ---
 
@@ -270,7 +269,7 @@ const ClassroomModal = ({ mode = 'student' }) => {
         setPhase('student-join');
     }, [classroomState.sessionToken, classroomState.classroomId, dispatch]);
 
-    // --- Student: Start submit flow ---
+    // --- Student: Submit flow ---
 
     const handleStartSubmit = useCallback(() => {
         clearError();
@@ -283,15 +282,8 @@ const ClassroomModal = ({ mode = 'student' }) => {
         setPhase('student-submit-confirm');
     }, [vm, clearError]);
 
-    // --- Student: Confirm submit ---
-
-    /**
-     * Capture block screenshots for all targets that have blocks.
-     * @returns {Promise<Blob[]>} Array of PNG blobs
-     */
     const captureBlockScreenshots = useCallback(async () => {
         if (!vm || !scratchBlocks) return [];
-
         const workspace = scratchBlocks.getMainWorkspace();
         if (!workspace) return [];
 
@@ -440,115 +432,86 @@ const ClassroomModal = ({ mode = 'student' }) => {
         }
 
         handleJoinWithCode(code);
-    }, []); // Run once on mount — intentionally omit deps
+    }, []); // Run once on mount
 
-    const teacherContainerProps = {
-        phase,
-        classrooms: teacher.classrooms,
-        selectedClassroom: teacher.selectedClassroom,
-        members: teacher.members,
-        error,
-        errorTitle,
-        errorActionLabel,
-        errorActionHandler,
-        isLoading,
-        selectedMember: teacher.selectedMember,
-        codeDisplayClassroom: teacher.codeDisplayClassroom,
-        codeDisplayFullscreen: teacher.codeDisplayFullscreen,
-        downloadProgress: teacher.downloadProgress,
-        googleCourses: teacher.googleCourses,
-        selectedGoogleCourse: teacher.selectedGoogleCourse,
-        onTeacherLogin: teacher.handleTeacherLogin,
-        onTeacherLogout: teacher.handleTeacherLogout,
-        onShowCreateForm: teacher.handleShowCreateForm,
-        onCreateClassroom: teacher.handleCreateClassroom,
-        onSelectClassroom: teacher.handleSelectClassroom,
-        onBackToDashboard: teacher.handleBackToDashboard,
-        onDeleteClassroom: teacher.handleDeleteClassroom,
-        onDeleteMember: teacher.handleDeleteMember,
-        onRefreshDetail: teacher.handleRefreshDetail,
-        onSelectMember: teacher.handleSelectMember,
-        onOpenSubmission: teacher.handleOpenSubmission,
-        onReturnSubmission: teacher.handleReturnSubmission,
-        onDownloadAll: teacher.handleDownloadAll,
-        onShowCodeDisplay: teacher.handleShowCodeDisplay,
-        onCloseCodeDisplay: teacher.handleCloseCodeDisplay,
-        onCopyInviteLink: teacher.handleCopyInviteLink,
-        onToggleCodeFullscreen: teacher.handleToggleCodeFullscreen,
-        onShowPostAssignment: teacher.handleShowPostAssignment,
-        onBackToDetail: teacher.handleBackToDetail,
-        onPostAssignment: teacher.handlePostAssignment,
-        onShowGoogleCourses: teacher.handleShowGoogleCourses,
-        onLoadGoogleCourses: teacher.handleLoadGoogleCourses,
-        onSelectGoogleCourse: teacher.handleSelectGoogleCourse,
-        onConfirmGoogleImport: teacher.handleConfirmGoogleImport,
-        onUpdateAssignmentName: teacher.handleUpdateAssignmentName,
-        onUpdateStudentCount: teacher.handleUpdateStudentCount,
-    };
+    // --- Teacher modal (separate fullscreen modal) ---
 
     if (mode === 'teacher') {
+        const teacherContainerProps = {
+            phase,
+            classrooms: teacher.classrooms,
+            selectedClassroom: teacher.selectedClassroom,
+            members: teacher.members,
+            error,
+            errorTitle,
+            errorActionLabel,
+            errorActionHandler,
+            isLoading,
+            selectedMember: teacher.selectedMember,
+            codeDisplayClassroom: teacher.codeDisplayClassroom,
+            codeDisplayFullscreen: teacher.codeDisplayFullscreen,
+            downloadProgress: teacher.downloadProgress,
+            googleCourses: teacher.googleCourses,
+            selectedGoogleCourse: teacher.selectedGoogleCourse,
+            onTeacherLogin: teacher.handleTeacherLogin,
+            onTeacherLogout: teacher.handleTeacherLogout,
+            onShowCreateForm: teacher.handleShowCreateForm,
+            onCreateClassroom: teacher.handleCreateClassroom,
+            onSelectClassroom: teacher.handleSelectClassroom,
+            onBackToDashboard: teacher.handleBackToDashboard,
+            onDeleteClassroom: teacher.handleDeleteClassroom,
+            onDeleteMember: teacher.handleDeleteMember,
+            onRefreshDetail: teacher.handleRefreshDetail,
+            onSelectMember: teacher.handleSelectMember,
+            onOpenSubmission: teacher.handleOpenSubmission,
+            onReturnSubmission: teacher.handleReturnSubmission,
+            onDownloadAll: teacher.handleDownloadAll,
+            onShowCodeDisplay: teacher.handleShowCodeDisplay,
+            onCloseCodeDisplay: teacher.handleCloseCodeDisplay,
+            onCopyInviteLink: teacher.handleCopyInviteLink,
+            onToggleCodeFullscreen: teacher.handleToggleCodeFullscreen,
+            onShowPostAssignment: teacher.handleShowPostAssignment,
+            onBackToDetail: teacher.handleBackToDetail,
+            onPostAssignment: teacher.handlePostAssignment,
+            onShowGoogleCourses: teacher.handleShowGoogleCourses,
+            onLoadGoogleCourses: teacher.handleLoadGoogleCourses,
+            onSelectGoogleCourse: teacher.handleSelectGoogleCourse,
+            onConfirmGoogleImport: teacher.handleConfirmGoogleImport,
+            onUpdateAssignmentName: teacher.handleUpdateAssignmentName,
+            onUpdateStudentCount: teacher.handleUpdateStudentCount,
+        };
         return <ClassroomTeacherModalComponent containerProps={teacherContainerProps} onClose={handleClose} />;
     }
 
+    // --- Student modal ---
+
     return (
         <ClassroomModalComponent
-            classrooms={teacher.classrooms}
             classroomState={classroomState}
             error={error}
             errorActionHandler={errorActionHandler}
             errorActionLabel={errorActionLabel}
             errorTitle={errorTitle}
             isLoading={isLoading}
+            joinCodeHistory={joinCodeHistory}
             joinedInfo={joinedInfo}
-            members={teacher.members}
             phase={phase}
             seatCount={seatCount}
-            selectedClassroom={teacher.selectedClassroom}
-            selectedMember={teacher.selectedMember}
             selectedSeat={selectedSeat}
+            submitProgress={submitProgress}
             takenSeats={takenSeats}
+            teacherComment={studentTeacherComment}
             thumbnailDataUrl={thumbnailDataUrl}
-            codeDisplayClassroom={teacher.codeDisplayClassroom}
-            codeDisplayFullscreen={teacher.codeDisplayFullscreen}
-            onBackToDashboard={teacher.handleBackToDashboard}
-            onCloseCodeDisplay={teacher.handleCloseCodeDisplay}
+            onCancelSubmit={handleCancelSubmit}
             onClose={handleClose}
             onConfirmJoin={handleConfirmJoin}
-            onCopyInviteLink={teacher.handleCopyInviteLink}
-            onCreateClassroom={teacher.handleCreateClassroom}
-            onDeleteClassroom={teacher.handleDeleteClassroom}
-            onDeleteMember={teacher.handleDeleteMember}
-            onDownloadAll={teacher.handleDownloadAll}
-            downloadProgress={teacher.downloadProgress}
+            onConfirmSubmit={handleConfirmSubmit}
             onJoinWithCode={handleJoinWithCode}
             onLeaveClassroom={handleLeaveClassroom}
-            submitProgress={submitProgress}
-            onOpenSubmission={teacher.handleOpenSubmission}
-            onRefreshDetail={teacher.handleRefreshDetail}
-            onReturnSubmission={teacher.handleReturnSubmission}
-            teacherComment={studentTeacherComment}
             onRefreshStudentStatus={refreshStudentStatus}
-            onStartSubmit={handleStartSubmit}
-            onConfirmSubmit={handleConfirmSubmit}
-            onCancelSubmit={handleCancelSubmit}
-            onShowCodeDisplay={teacher.handleShowCodeDisplay}
-            onSelectClassroom={teacher.handleSelectClassroom}
-            onSelectMember={teacher.handleSelectMember}
             onSelectSeat={handleSelectSeat}
-            onSelectStudent={handleSelectStudent}
             onSelectTeacher={handleSelectTeacher}
-            onShowCreateForm={teacher.handleShowCreateForm}
-            onTeacherLogin={teacher.handleTeacherLogin}
-            onTeacherLogout={teacher.handleTeacherLogout}
-            onToggleCodeFullscreen={teacher.handleToggleCodeFullscreen}
-            googleCourses={teacher.googleCourses}
-            selectedGoogleCourse={teacher.selectedGoogleCourse}
-            onShowGoogleCourses={teacher.handleShowGoogleCourses}
-            onLoadGoogleCourses={teacher.handleLoadGoogleCourses}
-            onSelectGoogleCourse={teacher.handleSelectGoogleCourse}
-            onConfirmGoogleImport={teacher.handleConfirmGoogleImport}
-            onPostAssignment={teacher.handlePostAssignment}
-            onShowPostAssignment={teacher.handleShowPostAssignment}
+            onStartSubmit={handleStartSubmit}
         />
     );
 };

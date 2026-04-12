@@ -35,6 +35,9 @@ export class ClassroomStack extends cdk.Stack {
 
     // Dev bypass token (stg only — allows skipping Google auth for automated testing)
     const devBypassToken = process.env.DEV_BYPASS_TOKEN || '';
+    if (stage === 'prod' && devBypassToken) {
+      throw new Error('DEV_BYPASS_TOKEN must not be set in production. Remove it from .env.prod.');
+    }
 
     // Classroom TTL in days (default 30, configurable via env)
     const classroomTtlDays = parseInt(process.env.CLASSROOM_TTL_DAYS || '30', 10);
@@ -207,6 +210,7 @@ export class ClassroomStack extends cdk.Stack {
         JOIN_RATE_LIMIT_WINDOW_SECONDS: process.env.JOIN_RATE_LIMIT_WINDOW_SECONDS || '60',
         JOIN_RATE_LIMIT_MAX_ATTEMPTS: process.env.JOIN_RATE_LIMIT_MAX_ATTEMPTS || '50',
         STAGE: stage,
+        ...(process.env.ID_TOKEN_MAX_AGE_SECONDS ? { ID_TOKEN_MAX_AGE_SECONDS: process.env.ID_TOKEN_MAX_AGE_SECONDS } : {}),
       },
       bundling: {
         minify: true,
