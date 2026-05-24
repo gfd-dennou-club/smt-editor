@@ -66,8 +66,9 @@ describe('Ruby tab furigana zoom follow', () => {
     });
 
     test('furigana zones persist with correct labels after zoom in', async () => {
-        await loadUri(uri);
-        await clickText('Ruby', '*[@role="tab"]');
+        // locale=ja is required because furigana mode is only available in Japanese locales
+        // tab=ruby to open Ruby tab directly (avoids locale-dependent tab label)
+        await loadUri(`${uri}?locale=ja&tab=ruby`);
         await fillInRubyProgram('x = 10\nputs(x)');
 
         // Wait for furigana to render
@@ -75,7 +76,7 @@ describe('Ruby tab furigana zoom follow', () => {
 
         const beforeInfo = await getFuriganaInfo();
         expect(beforeInfo.zoneCount).toBeGreaterThan(0);
-        expect(beforeInfo.labels.some(l => l.includes('変数'))).toBe(true);
+        expect(beforeInfo.labels.some((l) => l.includes('変数'))).toBe(true);
         expect(beforeInfo.editorFontSize).toBe(16); // default
 
         // Zoom in 3 times (16 → 18 → 20 → 24)
@@ -92,8 +93,8 @@ describe('Ruby tab furigana zoom follow', () => {
         // Furigana zones must still exist with correct labels
         // (Before the fix, zones would become stale/misaligned)
         expect(afterInfo.zoneCount).toBeGreaterThan(0);
-        expect(afterInfo.labels.some(l => l.includes('変数'))).toBe(true);
-        expect(afterInfo.labels.some(l => l.includes('表示する'))).toBe(true);
+        expect(afterInfo.labels.some((l) => l.includes('変数'))).toBe(true);
+        expect(afterInfo.labels.some((l) => l.includes('表示する'))).toBe(true);
     });
 
     test('furigana zones persist after zoom reset', async () => {
@@ -108,6 +109,6 @@ describe('Ruby tab furigana zoom follow', () => {
 
         // Furigana zones must still exist with correct labels
         expect(resetInfo.zoneCount).toBeGreaterThan(0);
-        expect(resetInfo.labels.some(l => l.includes('変数'))).toBe(true);
+        expect(resetInfo.labels.some((l) => l.includes('変数'))).toBe(true);
     });
 });

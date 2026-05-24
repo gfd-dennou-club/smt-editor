@@ -19,6 +19,9 @@ import styles from './target-pane.css';
 const TargetPane = ({
     editingTarget,
     fileInputRef,
+    // === Smalruby: Start of mobile-sprite-panel suppress-library ===
+    hideSpriteLibrary,
+    // === Smalruby: End of mobile-sprite-panel suppress-library ===
     hoveredTarget,
     spriteLibraryVisible,
     onActivateBlocksTab,
@@ -93,7 +96,15 @@ const TargetPane = ({
                 onNewBackdropClick={onNewBackdropClick}
             />}
             <div>
-                {spriteLibraryVisible ? (
+                {/*
+                 * === Smalruby: Start of mobile-sprite-panel suppress-library ===
+                 * MobileSpritePanel は upstream <GUI> 配下と別ツリーで
+                 * <TargetPane> を再描画する。両方で <SpriteLibrary> モーダルを
+                 * 描画するとモバイルで二重モーダルになるため、mobile copy 側
+                 * だけ hideSpriteLibrary=true で描画を抑止する。
+                 * === Smalruby: End of mobile-sprite-panel suppress-library ===
+                 */}
+                {spriteLibraryVisible && !hideSpriteLibrary ? (
                     <SpriteLibrary
                         vm={vm}
                         onActivateBlocksTab={onActivateBlocksTab}
@@ -131,6 +142,9 @@ TargetPane.propTypes = {
     editingTarget: PropTypes.string,
     extensionLibraryVisible: PropTypes.bool,
     fileInputRef: PropTypes.func,
+    // === Smalruby: Start of mobile-sprite-panel suppress-library ===
+    hideSpriteLibrary: PropTypes.bool,
+    // === Smalruby: End of mobile-sprite-panel suppress-library ===
     hoveredTarget: PropTypes.shape({
         receivedBlocks: PropTypes.bool,
         sprite: PropTypes.oneOfType([PropTypes.string, PropTypes.number])

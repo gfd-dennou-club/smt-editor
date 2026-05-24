@@ -129,6 +129,69 @@ describe('DNCL round-trip (DNCL → Ruby → DNCL)', () => {
     })
   })
 
+  describe('nested function calls', () => {
+    test('表示する(乱数(1..10)) round-trips', () => {
+      expect(roundtrip('表示する(乱数(1..10))')).toBe('表示する(乱数(1..10))')
+    })
+
+    test('表示する(整数(x)) round-trips', () => {
+      expect(roundtrip('表示する(整数(x))')).toBe('表示する(整数(x))')
+    })
+
+    test('表示する(絶対値(x)) round-trips', () => {
+      expect(roundtrip('表示する(絶対値(x))')).toBe('表示する(絶対値(x))')
+    })
+
+    test('表示する(乱数(1..10) + 5) round-trips', () => {
+      expect(roundtrip('表示する(乱数(1..10) + 5)')).toBe(
+        '表示する(乱数(1..10) + 5)',
+      )
+    })
+
+    test('a = 含む(s, 乱数(1..10)) round-trips', () => {
+      expect(roundtrip('a = 含む(s, 乱数(1..10))')).toBe(
+        'a = 含む(s, 乱数(1..10))',
+      )
+    })
+  })
+
+  describe('user-defined function calls', () => {
+    test('function definition + call round-trips', () => {
+      const dncl = '関数 myfunc(x)\n  返す 5\nと定義する\nmyfunc(3)'
+      expect(roundtrip(dncl)).toBe(dncl)
+    })
+
+    test('function call in assignment round-trips', () => {
+      const dncl = '関数 myfunc(x)\n  返す 5\nと定義する\na = myfunc(3)'
+      expect(roundtrip(dncl)).toBe(dncl)
+    })
+  })
+
+  describe('Ruby → DNCL → Ruby (regression for nested parens)', () => {
+    const rubyRoundtrip = (ruby) => {
+      const dncl = rubyToDncl(ruby).dncl
+      return dnclToRuby(dncl).ruby
+    }
+
+    test('say(rand(1..10), 1) → puts(rand(1..10)) (表示する uses puts)', () => {
+      // 表示する → puts (Issue #640): the say() output is normalized to
+      // puts() in the new direction, so round-trip lands on puts().
+      expect(rubyRoundtrip('say(rand(1..10), 1)')).toBe('puts(rand(1..10))')
+    })
+
+    test('say(rand(1..10) + 5, 1) → puts(rand(1..10) + 5) (single expr, not flattened)', () => {
+      // Operands are not all string-literal-or-.to_s, so the `+` chain
+      // stays as a single expression in DNCL. Round-trips to puts(...).
+      expect(rubyRoundtrip('say(rand(1..10) + 5, 1)')).toBe(
+        'puts(rand(1..10) + 5)',
+      )
+    })
+
+    test('say(@x.to_i, 1) → puts(@x.to_i)', () => {
+      expect(rubyRoundtrip('say(@x.to_i, 1)')).toBe('puts(@x.to_i)')
+    })
+  })
+
   describe('comments and blank lines', () => {
     test('preserves comments', () => {
       expect(roundtrip('# コメント')).toBe('# コメント')

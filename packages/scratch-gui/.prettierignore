@@ -37,13 +37,24 @@ src/components/*
 !src/components/smalrubot-firmware-modal/
 !src/components/blocks-screenshot-button/
 !src/components/google-drive-save-dialog/
+!src/components/dncl-mode-notice/
 !src/components/koshien-test-modal/
+!src/components/mobile-bottom-tabs/
+!src/components/mobile-drawer/
+!src/components/mobile-gui/
+!src/components/mobile-orientation-gate/
+!src/components/mobile-paint-toolbar-toggle/
+!src/components/mobile-side-rail/
+!src/components/mobile-sprite-panel/
+!src/components/mobile-top-bar/
 !src/components/palette-toggle/
 !src/components/ruby-script-preview/
 !src/components/ruby-toolbar/
 !src/components/rubytee-consent/
 !src/components/rubytee-modal/
 !src/components/url-loader-modal/
+!src/components/welcome-modal/
+!src/components/welcome-tooltip/
 # Mixed directories
 !src/components/connection-modal/
 !src/components/menu-bar/
@@ -54,6 +65,16 @@ src/components/connection-modal/*
 !src/components/connection-modal/mesh-v2-initial-step.jsx
 !src/components/connection-modal/mesh-v2-network-filtered-step.jsx
 !src/components/connection-modal/mesh-v2-scanning-step.jsx
+!src/components/connection-modal/smalrubot-s1-connected-step.css
+!src/components/connection-modal/smalrubot-s1-connected-step.jsx
+!src/components/connection-modal/smalrubot-s1-connecting-step.css
+!src/components/connection-modal/smalrubot-s1-connecting-step.jsx
+!src/components/connection-modal/smalrubot-s1-error-step.css
+!src/components/connection-modal/smalrubot-s1-error-step.jsx
+!src/components/connection-modal/smalrubot-s1-initial-step.css
+!src/components/connection-modal/smalrubot-s1-initial-step.jsx
+!src/components/connection-modal/smalrubot-s1-unsupported-step.css
+!src/components/connection-modal/smalrubot-s1-unsupported-step.jsx
 
 # Level 3: src/components/menu-bar/*
 src/components/menu-bar/*
@@ -68,9 +89,16 @@ src/containers/*
 !src/containers/ruby-tab/
 # Individual Smalruby files
 !src/containers/block-display-modal.jsx
+!src/containers/classroom-classcode-utils.js
 !src/containers/classroom-error-utils.js
 !src/containers/classroom-modal.jsx
+!src/containers/classroom-teacher-modal.jsx
+!src/containers/use-google-classroom.js
+!src/containers/use-student-submit.js
+!src/containers/use-teacher-auth.js
 !src/containers/use-teacher-classroom.js
+!src/containers/use-teacher-classrooms.js
+!src/containers/use-teacher-submissions.js
 !src/containers/extension-library.css
 !src/containers/google-drive-loader-hoc.jsx
 !src/containers/google-drive-saver-hoc.jsx
@@ -78,6 +106,7 @@ src/containers/*
 !src/containers/ruby-tab.jsx
 !src/containers/smalrubot-firmware-modal.jsx
 !src/containers/rubytee-modal-hoc.jsx
+!src/containers/welcome-modal-hoc.jsx
 
 # ============================================================
 # Level 2: src/lib/*
@@ -93,12 +122,16 @@ src/lib/*
 !src/lib/libraries/
 # Individual Smalruby files
 !src/lib/auto-correct.js
+!src/lib/backpack-mesh-v1-migration.js
+!src/lib/deck-setup.js
 !src/lib/classroom-api.js
+!src/lib/classroom-kick-request-storage.js
 !src/lib/google-classroom-auth.js
 !src/lib/block-utils.js
 !src/lib/blocks-gesture-recovery.js
+!src/lib/scratch-blocks-auto-style-patch.js
+!src/lib/scratch-blocks-comment-icon-patch.js
 !src/lib/blocks-screenshot.js
-!src/lib/define-ruby-blocks.js
 !src/lib/furigana-annotator.js
 !src/lib/furigana-call-helpers.js
 !src/lib/furigana-extension-handlers.js
@@ -110,23 +143,31 @@ src/lib/*
 !src/lib/insert-class.js
 !src/lib/join-code-history.js
 !src/lib/log-suppression.js
+!src/lib/mesh-v2-classroom-binding.jsx
+!src/lib/microsoft-auth.js
 !src/lib/microbit-more-update.js
+!src/lib/teacher-auth.js
 !src/lib/module-sync.js
 !src/lib/monaco-i18n-helper.js
 !src/lib/prism-parser.js
 !src/lib/project-loader-utils.js
 !src/lib/radix-ui-context-menu.js
+!src/lib/responsive-gui.jsx
 !src/lib/ruby-parser.js
 !src/lib/ruby-screenshot.js
 !src/lib/smalrubot-firmware-flasher.js
 !src/lib/smalrubot-firmware.hex.js
+!src/lib/storage-worker-timeout.js
+!src/lib/storage-worker-timeout-hoc.jsx
 !src/lib/ruby-script-preview.js
 !src/lib/ruby-to-blocks-converter-hoc.jsx
 !src/lib/rubytee-api.js
 !src/lib/rubytee-context.js
 !src/lib/url-loader-hoc.jsx
+!src/lib/url-loader.js
 !src/lib/url-params.js
 !src/lib/url-parser.js
+!src/lib/use-is-narrow-screen.js
 !src/lib/version-checker.js
 
 # Level 3: src/lib/libraries/*
@@ -200,10 +241,13 @@ test/integration/*
 !test/integration/ruby-tab-furigana-zoom.test.js
 !test/integration/ruby-tab.test.js
 !test/integration/smalrubot-firmware.test.js
+!test/integration/smalrubot-s1-connection-flow.test.js
 !test/integration/rubytee-consent.test.js
 !test/integration/smalruby-tutorials.test.js
 !test/integration/v1-detection-prompt.test.js
+!test/integration/palette-toggle-position.test.js
 !test/integration/version-update-notification.test.js
+!test/integration/workspace-glow-regression.test.js
 
 # ============================================================
 # Level 2: test/unit/*
@@ -224,9 +268,19 @@ test/unit/*
 # Level 3: test/unit/components/*
 test/unit/components/*
 !test/unit/components/action-menu.test.jsx
+!test/unit/components/dncl-mode-notice.test.jsx
+!test/unit/components/extension-button-dncl.test.jsx
 !test/unit/components/connected-step.test.jsx
+!test/unit/components/mobile-bottom-tabs.test.jsx
+!test/unit/components/mobile-drawer.test.jsx
+!test/unit/components/mobile-orientation-gate.test.jsx
+!test/unit/components/mobile-side-rail.test.jsx
+!test/unit/components/mobile-sprite-panel.test.jsx
+!test/unit/components/mobile-top-bar.test.jsx
 !test/unit/components/palette-toggle.test.jsx
+!test/unit/components/welcome-tooltip.test.jsx
 !test/unit/components/project-title-input.test.jsx
+!test/unit/components/ruby-toolbar-analytics.test.jsx
 !test/unit/components/scanning-step-name-search.test.js
 !test/unit/components/student-join-form.test.js
 
@@ -235,7 +289,10 @@ test/unit/containers/*
 !test/unit/containers/ruby-tab/
 !test/unit/containers/backpack.test.jsx
 !test/unit/containers/cards.test.jsx
+!test/unit/containers/classroom-classcode-utils.test.js
+!test/unit/containers/classroom-error-utils.test.js
 !test/unit/containers/connection-modal-connected-message.test.jsx
+!test/unit/containers/connection-modal-smalrubot-s1.test.jsx
 !test/unit/containers/connection-modal.test.jsx
 !test/unit/containers/google-drive-saver-hoc.test.jsx
 !test/unit/containers/google-drive-state-management.test.jsx
@@ -253,30 +310,46 @@ test/unit/lib/*
 !test/unit/lib/ruby-roundtrip/
 !test/unit/lib/ruby-to-blocks-converter/
 # Individual Smalruby files
+!test/unit/lib/analytics.test.js
 !test/unit/lib/auto-correct.test.js
 !test/unit/lib/backpack-api.test.js
+!test/unit/lib/backpack-mesh-v1-migration.test.js
 !test/unit/lib/block-display-initialization.test.js
+!test/unit/lib/blockly-private-api.test.js
 !test/unit/lib/blocks-gesture-recovery.test.js
+!test/unit/lib/classroom-api.test.js
+!test/unit/lib/classroom-kick-request-storage.test.js
+!test/unit/lib/deck-setup.test.js
 !test/unit/lib/blocks-screenshot.test.js
+!test/unit/lib/calculate-popup-position.test.js
+!test/unit/lib/calculate-popup-position-regression.test.js
 !test/unit/lib/furigana-annotator-perf.test.js
 !test/unit/lib/furigana-annotator.test.js
 !test/unit/lib/google-drive-api.test.js
+!test/unit/lib/url-loader.test.js
 !test/unit/lib/insert-class.test.js
 !test/unit/lib/join-code-history.test.js
 !test/unit/lib/layout-constants.test.js
 !test/unit/lib/legacy-storage.test.js
 !test/unit/lib/make-toolbox-xml.test.js
+!test/unit/lib/mesh-v2-classroom-binding.test.js
+!test/unit/lib/responsive-gui.test.jsx
+!test/unit/lib/scratch-blocks-auto-style-patch.test.js
+!test/unit/lib/use-is-narrow-screen.test.js
 !test/unit/lib/module-sync.test.js
 !test/unit/lib/prism-parser.test.js
 !test/unit/lib/removed-trademarks.test.js
 !test/unit/lib/ruby-generator-procedure-arguments.test.js
 !test/unit/lib/ruby-generator-version.test.jsx
+!test/unit/lib/ruby-roundtrip-class-attr-accessor.test.js
 !test/unit/lib/ruby-roundtrip-class-assets.test.js
 !test/unit/lib/ruby-roundtrip-class-stage.test.js
 !test/unit/lib/ruby-roundtrip-class-superclass.test.js
 !test/unit/lib/ruby-roundtrip-comment-bugs.test.js
 !test/unit/lib/ruby-roundtrip-gets.test.js
 !test/unit/lib/ruby-roundtrip-method-return.test.js
+!test/unit/lib/ruby-roundtrip-puts-concat.test.js
+# (test/unit/lib/dncl/ already whitelisted as a directory above)
 !test/unit/lib/ruby-roundtrip-super.test.js
 !test/unit/lib/ruby-screenshot.test.js
 !test/unit/lib/ruby-script-preview.test.js
@@ -285,12 +358,14 @@ test/unit/lib/*
 !test/unit/lib/rubytee-context.test.js
 !test/unit/lib/screen-utils.test.js
 !test/unit/lib/smalrubot-firmware-flasher.test.js
+!test/unit/lib/smalruby-original-sprites.test.js
 !test/unit/lib/setup-prism.js
 !test/unit/lib/version-checker.test.js
 
 # Level 3: test/unit/reducers/*
 test/unit/reducers/*
 !test/unit/reducers/cards_reducer.test.js
+!test/unit/reducers/dncl-mode-reducer.test.js
 !test/unit/reducers/classroom-reducer.test.js
 !test/unit/reducers/menus-reducer.test.js
 !test/unit/reducers/palette-visibility-reducer.test.js

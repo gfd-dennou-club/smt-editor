@@ -66,7 +66,8 @@ const baseConfig = new ScratchWebpackConfigBuilder(
                 path: false,
                 util: false
             },
-            alias: {}
+            alias: {},
+            symlinks: false
         }
     })
     .addPlugin(new webpack.ProvidePlugin({
@@ -112,9 +113,13 @@ const baseConfig = new ScratchWebpackConfigBuilder(
         'process.env.MESH_PERIODIC_DATA_SYNC_INTERVAL_MS': `"${process.env.MESH_PERIODIC_DATA_SYNC_INTERVAL_MS || ''}"`,
         'process.env.MESH_NETWORK_FILTER': `"${process.env.MESH_NETWORK_FILTER || ''}"`,
         'process.env.RUBYTEE_RELAY_ENDPOINT': `"${process.env.RUBYTEE_RELAY_ENDPOINT || ''}"`,
+        // === Smalruby: Start of scratch api proxy endpoint ===
+        'process.env.SCRATCH_API_PROXY_ENDPOINT': `"${process.env.SCRATCH_API_PROXY_ENDPOINT || 'https://api.smalruby.app'}"`,
+        // === Smalruby: End of scratch api proxy endpoint ===
         // === Smalruby: Start of classroom API ===
         'process.env.CLASSROOM_API_ENDPOINT': `"${process.env.CLASSROOM_API_ENDPOINT || ''}"`,
         'process.env.CLASSROOM_REFRESH_INTERVAL_MS': `"${process.env.CLASSROOM_REFRESH_INTERVAL_MS || '30000'}"`,
+        'process.env.MICROSOFT_CLIENT_ID': `"${process.env.MICROSOFT_CLIENT_ID || ''}"`,
         // === Smalruby: End of classroom API ===
         'process.env.MAX_USER_MESSAGE_LENGTH': `"${process.env.MAX_USER_MESSAGE_LENGTH || '250'}"`,
         'process.env.MIN_USER_MESSAGE_LENGTH': `"${process.env.MIN_USER_MESSAGE_LENGTH || '10'}"`,
@@ -123,13 +128,30 @@ const baseConfig = new ScratchWebpackConfigBuilder(
     }))
     .addPlugin(new CopyWebpackPlugin({
         patterns: [
+            // scratch-blocks v2 (Blockly v12) re-exports some media (e.g.
+            // `disconnect.mp3`) from the underlying `blockly/media` folder
+            // rather than re-shipping them in `scratch-blocks/media`. Copy
+            // those first so that the scratch-blocks-specific assets below
+            // overwrite anything they need to customise.
             {
-                from: path.dirname(require.resolve('scratch-blocks/package.json')) + '/media',
-                to: 'static/blocks-media/default'
+                from: '../../node_modules/blockly/media',
+                to: 'static/blocks-media/default',
+                noErrorOnMissing: true
             },
             {
-                from: path.dirname(require.resolve('scratch-blocks/package.json')) + '/media',
-                to: 'static/blocks-media/high-contrast'
+                from: '../../node_modules/blockly/media',
+                to: 'static/blocks-media/high-contrast',
+                noErrorOnMissing: true
+            },
+            {
+                from: '../../node_modules/scratch-blocks/media',
+                to: 'static/blocks-media/default',
+                force: true
+            },
+            {
+                from: '../../node_modules/scratch-blocks/media',
+                to: 'static/blocks-media/high-contrast',
+                force: true
             },
             {
                 // overwrite some of the default block media with high-contrast versions
@@ -208,7 +230,10 @@ const buildConfig = baseConfig.clone()
     .enableDevServer(process.env.PORT || 8601)
     .merge({
         entry: {
-            gui: './src/playground/index.jsx'
+            gui: './src/playground/index.jsx',
+            // === Smalruby: Start of Microsoft auth redirect ===
+            'auth-redirect': './src/playground/auth-redirect.js'
+            // === Smalruby: End of Microsoft auth redirect ===
             // Removed unused entry points to reduce build time:
             // guistandalone: './src/playground/standalone.jsx',
             // blocksonly: './src/playground/blocks-only.jsx',
@@ -283,6 +308,11 @@ const buildConfig = baseConfig.clone()
                 globOptions: { dot: true }
             },
             {
+                from: 'pages',
+                to: '.',
+                globOptions: { dot: true }
+            },
+            {
                 from: 'extensions/**',
                 to: 'static',
                 context: 'src/examples'
@@ -313,7 +343,13 @@ const buildWithPwaConfig = buildConfig.clone()
             short_name: 'Smalruby',
             description: 'GraphicaL User Interface for creating and running Smalruby 3.0 projects',
             background_color: '#ffffff',
-            orientation: 'any',
+            // ホーム画面に追加された PWA を「横向き」で起動させる (issue #572 Phase 2-I)。
+            // スマホのコスチューム/サウンドエディタは upstream の min-width 制約で
+            // 縦持ちでは見切れるため、横画面前提で運用する。デスクトップやタブレットの
+            // PWA インストール時もこのヒントが入るが、デスクトップブラウザは
+            // orientation ヒントを無視するので影響なし。タブレットはサポートしている
+            // 場合のみ landscape で起動する。
+            orientation: 'landscape',
             crossorigin: 'use-credentials',
             inject: true,
             ios: {
@@ -334,7 +370,13 @@ const distWithHtmlConfig = buildConfig.clone()
     .merge({
         devtool: false, // Disable source maps for production
         output: {
-            filename: '[name].[contenthash].js', // Add contenthash for cache busting
+            // Add contenthash for cache busting, except auth-redirect which is
+            // referenced by a static HTML file (pages/auth-redirect.html) with a
+            // fixed <script src="auth-redirect.js"> tag.
+            filename: (pathData) =>
+                pathData.chunk.name === 'auth-redirect'
+                    ? '[name].js'
+                    : '[name].[contenthash].js',
             path: path.resolve(__dirname, 'dist'),
             clean: false
         },
@@ -369,7 +411,13 @@ const distWithHtmlConfig = buildConfig.clone()
             short_name: 'Smalruby',
             description: 'GraphicaL User Interface for creating and running Smalruby 3.0 projects',
             background_color: '#ffffff',
-            orientation: 'any',
+            // ホーム画面に追加された PWA を「横向き」で起動させる (issue #572 Phase 2-I)。
+            // スマホのコスチューム/サウンドエディタは upstream の min-width 制約で
+            // 縦持ちでは見切れるため、横画面前提で運用する。デスクトップやタブレットの
+            // PWA インストール時もこのヒントが入るが、デスクトップブラウザは
+            // orientation ヒントを無視するので影響なし。タブレットはサポートしている
+            // 場合のみ landscape で起動する。
+            orientation: 'landscape',
             crossorigin: 'use-credentials',
             inject: true,
             ios: {

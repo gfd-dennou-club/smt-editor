@@ -42,8 +42,8 @@ const CREATE_GROUP = gql`
 `;
 
 const JOIN_GROUP = gql`
-  mutation JoinGroup($groupId: ID!, $domain: String!, $nodeId: ID!) {
-    joinGroup(groupId: $groupId, domain: $domain, nodeId: $nodeId) {
+  mutation JoinGroup($groupId: ID!, $domain: String!, $nodeId: ID!, $useWebSocket: Boolean) {
+    joinGroup(groupId: $groupId, domain: $domain, nodeId: $nodeId, useWebSocket: $useWebSocket) {
       id
       name
       groupId
@@ -136,6 +136,7 @@ const FIRE_EVENTS = gql`
           domain
           payload
           timestamp
+          orderKey
         }
         firedByNodeId
         groupId
@@ -169,6 +170,38 @@ const GET_EVENTS_SINCE = gql`
       payload
       timestamp
       cursor
+      orderKey
+    }
+  }
+`;
+
+// issue #554: ポーリング時のイベント+ノードステータス統合取得クエリ
+// getEventsSince + listGroupStatuses を 1 リクエストにまとめる。
+// Polling モードでは pollGroupData を 2 秒間隔で呼び、
+// startPeriodicDataSync (15 秒間隔の listGroupStatuses) を停止する。
+const POLL_GROUP_DATA = gql`
+  query PollGroupData($groupId: ID!, $domain: String!, $since: String!) {
+    pollGroupData(groupId: $groupId, domain: $domain, since: $since) {
+      events {
+        name
+        firedByNodeId
+        groupId
+        domain
+        payload
+        timestamp
+        cursor
+        orderKey
+      }
+      nodeStatuses {
+        nodeId
+        groupId
+        domain
+        data {
+          key
+          value
+        }
+        timestamp
+      }
     }
   }
 `;
@@ -196,6 +229,7 @@ const ON_MESSAGE_IN_GROUP = gql`
           domain
           payload
           timestamp
+          orderKey
         }
         firedByNodeId
         groupId
@@ -253,6 +287,7 @@ module.exports = {
     FIRE_EVENTS,
     RECORD_EVENTS,
     GET_EVENTS_SINCE,
+    POLL_GROUP_DATA,
     ON_MESSAGE_IN_GROUP,
-    LIST_GROUP_STATUSES
+    LIST_GROUP_STATUSES,
 };

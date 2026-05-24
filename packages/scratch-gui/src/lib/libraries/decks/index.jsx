@@ -12,11 +12,14 @@ import libraryChat1Basic3 from './thumbnails/chat-1-basic-3.jpg';
 import libraryChat2Sprites1 from './thumbnails/chat-2-sprites-1.jpg';
 import libraryChat2Sprites2 from './thumbnails/chat-2-sprites-2.jpg';
 import libraryChat2Sprites3 from './thumbnails/chat-2-sprites-3.jpg';
-// Chat Tutorial 3 Mesh 1: メッシュ拡張機能でつながろう
+// Chat Tutorial 3 Mesh 1: メッシュでつながろう
 import libraryChat3Mesh1 from './thumbnails/chat-3-mesh-1.jpg';
 import libraryChat3Mesh2 from './thumbnails/chat-3-mesh-2.jpg';
 import libraryChat3Mesh3 from './thumbnails/chat-3-mesh-3.jpg';
 import libraryChat3Mesh1ExternalKairyudo from './thumbnails/chat3-mesh1-external-kairyudo.png';
+// Ruby Basics 1: 計算してみよう
+import libraryRubyBasics1Numbers from './thumbnails/ruby-basics-1-numbers.jpg';
+import libraryRubyBasics1TryRuby from './thumbnails/ruby-basics-1-tryruby.png';
 import {CATEGORIES} from '../tutorial-tags';
 
 // Green flag icon for inline use in tutorial step titles
@@ -112,7 +115,7 @@ end`,
             />
         ),
         tags: ['mesh'],
-        category: CATEGORIES.chatApp,
+        category: CATEGORIES.meshStep1,
         img: libraryChat1Basic1,
         nameMessageId: 'gui.howtos.chat-1-basic-1.name',
         allowedBlocks: {
@@ -242,7 +245,7 @@ end`,
             />
         ),
         tags: ['mesh'],
-        category: CATEGORIES.chatApp,
+        category: CATEGORIES.meshStep1,
         img: libraryChat1Basic2,
         nameMessageId: 'gui.howtos.chat-1-basic-2.name',
         allowedBlocks: {
@@ -355,7 +358,7 @@ end`,
             />
         ),
         tags: ['mesh'],
-        category: CATEGORIES.chatApp,
+        category: CATEGORIES.meshStep1,
         img: libraryChat1Basic3,
         nameMessageId: 'gui.howtos.chat-1-basic-3.name',
         allowedBlocks: {
@@ -474,7 +477,7 @@ end`,
             />
         ),
         tags: ['mesh'],
-        category: CATEGORIES.chatApp,
+        category: CATEGORIES.meshStep2,
         img: libraryChat2Sprites1,
         nameMessageId: 'gui.howtos.chat-2-sprites-1.name',
         allowedBlocks: {
@@ -607,7 +610,7 @@ end`,
             />
         ),
         tags: ['mesh'],
-        category: CATEGORIES.chatApp,
+        category: CATEGORIES.meshStep2,
         img: libraryChat2Sprites2,
         nameMessageId: 'gui.howtos.chat-2-sprites-2.name',
         allowedBlocks: {
@@ -729,7 +732,7 @@ end`,
             />
         ),
         tags: ['mesh'],
-        category: CATEGORIES.chatApp,
+        category: CATEGORIES.meshStep2,
         img: libraryChat2Sprites3,
         nameMessageId: 'gui.howtos.chat-2-sprites-3.name',
         allowedBlocks: {
@@ -861,17 +864,17 @@ end`,
         urlId: 'chat2Sprites3'
     },
 
-    // ─── Chat Tutorial 3 Mesh 1: メッシュ拡張機能でつながろう ───────────────
+    // ─── Chat Tutorial 3 Mesh 1: メッシュでつながろう ───────────────
     'chat-3-mesh-1': {
         name: (
             <FormattedMessage
-                defaultMessage="メッシュ拡張機能でつながろう"
+                defaultMessage="メッシュでつながろう"
                 description="Name for Chat Tutorial 3 Mesh 1"
                 id="gui.howtos.chat-3-mesh-1.name"
             />
         ),
         tags: ['mesh'],
-        category: CATEGORIES.chatApp,
+        category: CATEGORIES.meshStep3,
         img: libraryChat3Mesh1,
         nameMessageId: 'gui.howtos.chat-3-mesh-1.name',
         allowedBlocks: {
@@ -1012,7 +1015,7 @@ end`,
             />
         ),
         tags: ['mesh'],
-        category: CATEGORIES.chatApp,
+        category: CATEGORIES.meshStep3,
         img: libraryChat3Mesh2,
         nameMessageId: 'gui.howtos.chat-3-mesh-2.name',
         allowedBlocks: {
@@ -1131,7 +1134,7 @@ end`,
             />
         ),
         tags: ['mesh'],
-        category: CATEGORIES.chatApp,
+        category: CATEGORIES.meshStep3,
         img: libraryChat3Mesh3,
         nameMessageId: 'gui.howtos.chat-3-mesh-3.name',
         allowedBlocks: {
@@ -1272,6 +1275,120 @@ end`,
             }
         ],
         urlId: 'chat3Mesh3'
+    },
+
+    // ─── Ruby Basics 1: Rubyで計算してみよう ──────────────────────────────────
+    'ruby-basics-1-numbers': {
+        name: (
+            <FormattedMessage
+                defaultMessage="Rubyで計算してみよう"
+                description="Name for Ruby Basics 1: do arithmetic with puts"
+                id="gui.howtos.ruby-basics-1-numbers.name"
+            />
+        ),
+        tags: ['ruby'],
+        category: CATEGORIES.rubyBasics,
+        img: libraryRubyBasics1Numbers,
+        nameMessageId: 'gui.howtos.ruby-basics-1-numbers.name',
+        // Auto-switch to the Ruby tab in Ruby (not DNCL/furigana) mode when
+        // the user opens this tutorial — see docs/tutorial/improvement-plan.md
+        // "チュートリアル起動時の環境セットアップ".
+        setup: {
+            tab: 'ruby',
+            rubyMode: 'ruby'
+        },
+        allowedBlocks: {
+            motion: [],
+            looks: ['looks_sayforsecs', 'looks_say'],
+            sound: [],
+            event: ['event_whenflagclicked'],
+            control: [],
+            sensing: [],
+            operators: []
+        },
+        steps: [
+            {
+                title: (
+                    <FormattedMessage
+                        defaultMessage="Rubyで計算してみよう！"
+                        description="Ruby Basics 1 Step 1: Intro to arithmetic with puts"
+                        id="gui.howtos.ruby-basics-1-numbers.step1.title"
+                    />
+                ),
+                image: 'rubyBasics1Step1',
+                startTutorial: true,
+                animationTarget: 'startTutorialButton'
+            },
+            {
+                title: (
+                    <FormattedMessage
+                        defaultMessage="まずは「puts 2 + 6」を実行してみよう"
+                        description="Ruby Basics 1 Step 2: Insert first puts code"
+                        id="gui.howtos.ruby-basics-1-numbers.step2.title"
+                    />
+                ),
+                image: 'rubyBasics1Step2',
+                code: `when_flag_clicked do
+  puts 2 + 6
+end`,
+                animationTarget: 'insertCodeButton'
+            },
+            {
+                title: (
+                    <FormattedMessage
+                        defaultMessage="{greenFlag}を押すと、ネコが「8」としゃべるよ"
+                        description="Ruby Basics 1 Step 3: Run the program"
+                        id="gui.howtos.ruby-basics-1-numbers.step3.title"
+                        values={{greenFlag: <GreenFlagIcon />}}
+                    />
+                ),
+                image: 'rubyBasics1Step3',
+                animationTarget: 'nextButton'
+            },
+            {
+                title: (
+                    <FormattedMessage
+                        defaultMessage="他の計算も試してみよう（かけ算・わり算・ひき算）"
+                        description="Ruby Basics 1 Step 4: More arithmetic operations"
+                        id="gui.howtos.ruby-basics-1-numbers.step4.title"
+                    />
+                ),
+                image: 'rubyBasics1Step4',
+                code: `when_flag_clicked do
+  puts 4 * 10
+  puts 30 / 4
+  puts 5 - 12
+end`,
+                animationTarget: 'insertCodeButton'
+            },
+            {
+                title: (
+                    <FormattedMessage
+                        defaultMessage="数字を好きなものに変えて、自分だけの計算をしてみよう"
+                        description="Ruby Basics 1 Step 5: Modify the numbers"
+                        id="gui.howtos.ruby-basics-1-numbers.step5.title"
+                    />
+                ),
+                image: 'rubyBasics1Step5',
+                animationTarget: 'nextButton'
+            },
+            {
+                externalResources: {
+                    tryruby: {
+                        url: 'https://try.ruby-lang.org/',
+                        img: libraryRubyBasics1TryRuby,
+                        name: (
+                            <FormattedMessage
+                                defaultMessage="外部サイト「try ruby」で詳しくRubyを学ぶ"
+                                description="External resource: TryRuby online playground"
+                                id="gui.howtos.ruby-basics-1-numbers.external.tryruby.name"
+                            />
+                        )
+                    }
+                }
+            }
+        ],
+        urlId: 'rubyBasics1Numbers'
     }
 };
 

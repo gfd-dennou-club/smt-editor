@@ -1,12 +1,26 @@
 {
     "ja": {
         "smalrubyRuby.categoryName": "ルビー",
-        "smalrubyRuby.stringMethodR": "文字列 [STRING] . [METHOD] ( [ARG1] )",
-        "smalrubyRuby.stringMethodC": "文字列 [STRING] . [METHOD] ( [ARG1] )"
+        "smalrubyRuby.stringMethod": "文字列 [RECEIVER] . [METHOD]",
+        "smalrubyRuby.arrayMethod": "配列 [RECEIVER] . [METHOD]",
+        "smalrubyRuby.hashMethod": "ハッシュ [RECEIVER] . [METHOD]",
+        "smalrubyRuby.arrayMethodWithBlock": "配列 [RECEIVER] . [METHOD] do",
+        "smalrubyRuby.hashMethodWithBlock": "ハッシュ [RECEIVER] . [METHOD] do",
+        "smalrubyRuby.numberMethodWithBlock": "数値 [RECEIVER] . [METHOD] do",
+        "smalrubyRuby.blockParam": "ブロックパラメーター [PARAM]",
+        "smalrubyRuby.returnValue": "戻り値",
+        "smalrubyRuby.returnValueTruthy": "戻り値が真?"
     },
     "ja-Hira": {
         "smalrubyRuby.categoryName": "るびー",
-        "smalrubyRuby.stringMethodR": "もじれつ [STRING] . [METHOD] ( [ARG1] )",
-        "smalrubyRuby.stringMethodC": "もじれつ [STRING] . [METHOD] ( [ARG1] )"
+        "smalrubyRuby.stringMethod": "もじれつ [RECEIVER] . [METHOD]",
+        "smalrubyRuby.arrayMethod": "はいれつ [RECEIVER] . [METHOD]",
+        "smalrubyRuby.hashMethod": "はっしゅ [RECEIVER] . [METHOD]",
+        "smalrubyRuby.arrayMethodWithBlock": "はいれつ [RECEIVER] . [METHOD] do",
+        "smalrubyRuby.hashMethodWithBlock": "はっしゅ [RECEIVER] . [METHOD] do",
+        "smalrubyRuby.numberMethodWithBlock": "すうち [RECEIVER] . [METHOD] do",
+        "smalrubyRuby.blockParam": "ぶろっくぱらめーたー [PARAM]",
+        "smalrubyRuby.returnValue": "もどりち",
+        "smalrubyRuby.returnValueTruthy": "もどりちがしん?"
     }
 }

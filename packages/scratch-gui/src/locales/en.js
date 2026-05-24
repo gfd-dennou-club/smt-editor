@@ -1,6 +1,10 @@
 export default {
     'gui.sharedMessages.migrateMeshV1Warning':
         'This project contains legacy Mesh extensions and can only be used until April 30th. Select OK to continue using the legacy Mesh extensions. Select Cancel to use the new Mesh extensions instead.',
+    'gui.sharedMessages.meshV1AutoMigrated':
+        'The legacy Mesh service has ended. The blocks in this project have been automatically replaced with the new Mesh blocks. Please verify that it works as expected.',
+    'gui.sharedMessages.meshV1BackpackAutoMigrated':
+        '{count, plural, one {# legacy Mesh item in your backpack was} other {# legacy Mesh items in your backpack were}} automatically replaced with the new Mesh blocks.',
     'gui.stageHeader.stageSizeMiddle': 'Switch to middle stage',
     'gui.sharedMessages.changedRubyVersionByKoshien':
         'This project contains the Smalruby Koshien extension, so the Ruby version has been changed to version 1.',
@@ -21,7 +25,7 @@ export default {
     'gui.menuBar.smalrubotS1.flashFirmware': 'Write Firmware',
     'gui.smalrubotFirmware.title': 'SmalrubotS1 Firmware',
     'gui.smalrubotFirmware.description':
-        'Write the SmalrubotS1 firmware to the Studuino board. Connect the board via USB cable, then press the button below.',
+        'Write the SmalrubotS1 firmware to the Studuino board. Connect the board via USB cable, then press the button below and select your Smalrubot S1 in the serial port dialog.',
     'gui.smalrubotFirmware.warning': 'Do not disconnect the USB cable during the firmware write process.',
     'gui.smalrubotFirmware.flashButton': 'Write Firmware',
     'gui.smalrubotFirmware.cancelButton': 'Cancel',
@@ -41,7 +45,9 @@ export default {
     'gui.connection.error.flashFirmwareButton': 'Write Firmware',
     'gui.classroom.title': 'Classroom',
     'gui.menuBar.classroom': 'Classroom',
+    'gui.menuBar.classroomJoined': 'Class: Seat {seatNumber}',
     'gui.menuBar.classroomManagement': 'Class Management...',
+    'gui.menuBar.aboutSmalruby': 'About Smalruby',
     'gui.classroom.management.title': 'Class Management',
     'gui.classroom.roleSelect.prompt': 'How do you use the classroom?',
     'gui.classroom.roleSelect.teacher': 'Teacher',
@@ -72,6 +78,23 @@ export default {
         'Teachers can find the join code in {settingsIcon} Settings → Class Management.',
     'gui.classroom.studentSeat.prompt': 'Select your seat number',
     'gui.classroom.studentSeat.join': 'Join',
+    'gui.classroom.kicked.banner.title': 'You were removed from this class by your teacher.',
+    'gui.classroom.kicked.banner.subtitle': 'Pick your seat again to rejoin {className}.',
+    'gui.classroom.kickRequest.title': 'Ask the teacher to free seat {seatNumber}?',
+    'gui.classroom.kickRequest.body':
+        'Use this when you think seat {seatNumber} is your seat but someone else picked it by mistake. Your teacher will see the request and decide.',
+    'gui.classroom.kickRequest.reasonPlaceholder':
+        'Optional: tell the teacher why you need this seat (max 200 chars).',
+    'gui.classroom.kickRequest.cancel': 'Cancel',
+    'gui.classroom.kickRequest.submit': 'Send request',
+    'gui.classroom.kickRequest.pendingBanner': 'Waiting for the teacher to free seat {seatNumber}...',
+    'gui.classroom.kickRequest.rejectedBanner':
+        'The teacher did not free seat {seatNumber} this time. Try a different seat, or send a new request.',
+    'gui.classroom.kickRequest.teacherTitle':
+        '{count, plural, one {# kick request from a student} other {# kick requests from students}}',
+    'gui.classroom.kickRequest.noReason': '(no reason given)',
+    'gui.classroom.kickRequest.approve': 'Approve (kick this student)',
+    'gui.classroom.kickRequest.reject': 'Reject',
     'gui.classroom.studentJoined.success': 'Joined successfully!',
     'gui.classroom.studentJoined.seat': 'Seat {seatNumber}',
     'gui.classroom.studentJoined.start': 'Start',
@@ -155,9 +178,10 @@ export default {
     'gui.classroom.teacherDetail.selectMember': 'Click a seat number to view student details',
     'gui.classroom.joinCode.fullscreen': 'Show fullscreen',
     'gui.classroom.teacherDetail.selectClassroom': 'Select a classroom from the sidebar',
-    'gui.classroom.management.loginPrompt': 'Sign in with Google',
-    'gui.classroom.management.loginDescription': 'Sign in with your Google account to manage classrooms.',
+    'gui.classroom.management.loginPrompt': 'Sign in to manage classrooms',
+    'gui.classroom.management.loginDescription': 'Sign in with your school account to create and manage classrooms.',
     'gui.classroom.management.loginButton': 'Sign in with Google',
+    'gui.classroom.management.microsoftLoginButton': 'Sign in with Microsoft',
     'gui.classroom.management.sidebarTitle': 'Your Classes & Assignments',
     'gui.classroom.management.loading': 'Loading...',
     'gui.classroom.management.create': 'Create Classroom',
@@ -424,6 +448,10 @@ export default {
     // URL Loader messages
     'gui.urlLoader.loadError': 'The project URL that was entered failed to load.',
     'gui.urlLoader.invalidUrl': 'Please enter a valid Scratch project URL or Google Drive URL.',
+    'gui.urlLoader.projectNotFound': 'Project not found. It may have been unshared, or the URL may be incorrect.',
+    'gui.urlLoader.projectAccessDenied': 'Access to this project is denied.',
+    'gui.urlLoader.serverError': 'Scratch server-side error. Please try again later.',
+    'gui.urlLoader.networkError': 'Network error. Please check your internet connection.',
     'gui.urlLoader.title': 'Load from URL',
     'gui.urlLoader.urlPlaceholder': 'Enter project URL...',
     'gui.urlLoader.openButton': 'Open',
@@ -452,6 +480,34 @@ export default {
         'If groups are not displayed in the list, please set a domain.{br}A postal code for your school or facility is recommended.',
     'gui.connection.meshV2Initial.domainInvalidError': 'Domain name contains invalid characters.',
     'gui.connection.meshV2Initial.domainTooLongError': 'Domain name is too long (max 256 characters).',
+
+    // SmalrubotS1 dedicated flow messages
+    'gui.connection.smalrubotS1Initial.intro':
+        'How do you want to use Smalrubot S1? If this is your first time, please write the firmware first.',
+    'gui.connection.smalrubotS1Initial.connect': 'Connect (for students)',
+    'gui.connection.smalrubotS1Initial.connectDescription':
+        'Connect to a Smalrubot S1 with firmware already written.',
+    'gui.connection.smalrubotS1Initial.flashFirmware': 'Write firmware (for teachers)',
+    'gui.connection.smalrubotS1Initial.flashFirmwareDescription': 'Write firmware to a new Smalrubot S1.',
+    'gui.connection.smalrubotS1Initial.helpButton': 'Help',
+    'gui.connection.smalrubotS1Unsupported.title': 'WebSerial is not supported',
+    'gui.connection.smalrubotS1Unsupported.description':
+        'Smalrubot S1 requires WebSerial API support, which is available in Google Chrome, Microsoft Edge, ' +
+        'and Opera on desktop. Please use one of these browsers to use Smalrubot S1.',
+    'gui.connection.smalrubotS1Unsupported.helpButton': 'Help',
+    'gui.connection.smalrubotS1Connecting.title': 'Connecting...',
+    'gui.connection.smalrubotS1Connecting.description':
+        'Please select your Smalrubot S1 in the serial port dialog. ' +
+        'If the dialog does not appear, click "Back" and try again.',
+    'gui.connection.smalrubotS1Connected.title': 'Connected',
+    'gui.connection.smalrubotS1Connected.description': 'Your Smalrubot S1 is ready to use.',
+    'gui.connection.smalrubotS1Connected.disconnectButton': 'Disconnect',
+    'gui.connection.smalrubotS1Connected.goToEditorButton': 'Go to Editor',
+    'gui.connection.smalrubotS1Error.title': 'Connection failed',
+    'gui.connection.smalrubotS1Error.description':
+        'Could not connect to Smalrubot S1. Make sure your device is plugged in and try again.',
+    'gui.connection.smalrubotS1Error.retryButton': 'Try again',
+    'gui.connection.smalrubotS1.backButton': 'Back',
 
     // Ruby Toolbar messages
     'gui.rubyToolbar.executeLine': 'Execute current line',
@@ -488,7 +544,9 @@ export default {
     'gui.libraryTags.mesh': 'Mesh',
     'gui.libraryTags.firstTime': 'First Time',
     'gui.libraryCategories.gettingStarted': 'Getting Started',
-    'gui.library.chatApp': 'Build a Chat App',
+    'gui.library.meshStep1': 'Intro to Communication ① Send a Message',
+    'gui.library.meshStep2': 'Intro to Communication ② Chat Between Two Sprites',
+    'gui.library.meshStep3': 'Intro to Communication ③ Chat Across Devices (Mesh)',
     'gui.howtos.chat-1-basic-1.name': "Let's Send a Message!",
     'gui.howtos.chat-1-basic-1.step1.title': "Let's send a message to a remote block!",
     'gui.howtos.chat-1-basic-1.step2.title': 'First, insert the code and run the program',
@@ -556,7 +614,7 @@ export default {
     'gui.howtos.chat-2-sprites-3.step7.title': 'Press "Insert Ruby code" for Penguin — message names are reversed!',
     'gui.howtos.chat-2-sprites-3.step8.title': 'Click Cat or Penguin to run!',
     // Chat Tutorial 3 Mesh 1
-    'gui.howtos.chat-3-mesh-1.name': "Let's Connect with the Mesh Extension!",
+    'gui.howtos.chat-3-mesh-1.name': "Let's Connect with Mesh!",
     'gui.howtos.chat-3-mesh-1.step1.title': "Connect to other people's Smalruby using the Mesh extension",
     'gui.howtos.chat-3-mesh-1.step2.title':
         'Form a group and select the Mesh extension (even one person can do it with two Smalruby windows)',
@@ -594,12 +652,33 @@ export default {
     'gui.howtos.chat-3-mesh-3.step8.title':
         'Click your sprite to run! Use "sensor value" to get other people\'s "sent message"',
     'gui.howtos.chat-3-mesh-3.external.kairyudo.name': 'Kairyudo: Try Programming! "Create a Chat App"',
+    // Ruby Basics 1: calculate with puts
+    'gui.library.rubyBasics': 'Ruby Basics',
+    'gui.howtos.ruby-basics-1-numbers.name': "Let's Do Math with Ruby",
+    'gui.howtos.ruby-basics-1-numbers.step1.title': "Let's do math with Ruby!",
+    'gui.howtos.ruby-basics-1-numbers.step2.title': 'Try running `puts 2 + 6` first',
+    'gui.howtos.ruby-basics-1-numbers.step3.title': 'Press {greenFlag} and the cat will say "8"',
+    'gui.howtos.ruby-basics-1-numbers.step4.title': 'Try other operations too (multiply / divide / subtract)',
+    'gui.howtos.ruby-basics-1-numbers.step5.title': 'Change the numbers to whatever you like and do your own math',
+    'gui.howtos.ruby-basics-1-numbers.external.tryruby.name': 'Learn more about Ruby on the external "try ruby" site',
     'gui.menuBar.updateTooltip': 'Try the new Smalruby!',
     'gui.menuBar.updateConfirm':
         'A new version of Smalruby is available. Press "OK" to update now, or "Cancel" to update later.',
     'gui.menuBar.tutorialTooltip': 'Try Ruby!',
+    'gui.welcomeTooltip.label': 'Welcome to Smalruby',
     'gui.aria.clearButton': 'Clear',
-    'gui.extensionButton.dnclExtensionDisabled': 'Extensions are not available in Japanese mode.',
+    'gui.extensionButton.dnclExtensionConfirm':
+        'Extensions are not available in Japanese mode.\nReturn to Ruby furigana mode to enable extensions.\nSwitch now?',
+    'gui.dnclModeNotice.message': 'Japanese mode: blocks are restricted.',
+    'gui.dnclModeNotice.exitButton': 'Return to Ruby furigana mode',
     'gui.rubyTab.dnclValidationError':
         'This code contains constructs not supported in Japanese mode.\nPlease use only supported instructions before switching modes.',
+    'gui.mobile.drawer.title': 'Menu',
+    'gui.mobile.drawer.section.file': 'File',
+    'gui.mobile.drawer.section.language': 'Language',
+    'gui.mobile.drawer.close': 'Close menu',
+    'gui.mobile.drawer.reload': 'Reload',
+    'gui.mobile.orientation.title': 'Please rotate your device',
+    'gui.mobile.orientation.body': 'Smalruby works best in landscape mode on phones.',
+    'gui.mobile.orientation.iosNote': 'On iOS, make sure orientation lock is OFF (Control Center).',
 };

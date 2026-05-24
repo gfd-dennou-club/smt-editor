@@ -2,7 +2,7 @@ html,
 body,
 .app {
     /* probably unecessary, transitional until layout is refactored */
-    width: 100%; 
+    width: 100%;
     height: 100%;
     margin: 0;
 
@@ -10,6 +10,34 @@ body,
     min-width: 1024px;
     min-height: 600px; /* Min height to fit sprite/backdrop button */
 }
+
+/* === Smalruby: Start of narrow viewport vertical scroll lock === */
+/* iPhone 等の狭幅画面で、min-height: 600px と GUI 内部要素の縦方向に */
+/* よって body が viewport より縦に伸びてしまい、ページ全体が縦スクロール */
+/* 可能になっていた。横スクロール (1024px min-width) は残したいので、 */
+/* overflow-y: clip だけ当てる (clip は overflow-x への副作用がない)。 */
+@media (max-width: 743px) {
+    html,
+    body {
+        overflow-y: clip;
+    }
+}
+/* === Smalruby: End of narrow viewport vertical scroll lock === */
+
+/* === Smalruby: Start of iPad portrait min-width relax === */
+/* iPad mini portrait (744x1133) / iPad portrait (768x1024) など、    */
+/* 横幅が 1024px 未満で 744px 以上のデスクトップレイアウト範囲では、 */
+/* min-width: 1024px を緩めて横スクロールなしで GUI が表示されるように  */
+/* する。レイアウト調整は gui.css と gui.jsx の Smalruby マーカーで    */
+/* 行う。                                                              */
+@media (min-width: 744px) and (max-width: 1023px) {
+    html,
+    body,
+    .app {
+        min-width: 744px;
+    }
+}
+/* === Smalruby: End of iPad portrait min-width relax === */
 
 /* @todo: move globally? Safe / side FX, for blocks particularly? */
 * { box-sizing: border-box; }

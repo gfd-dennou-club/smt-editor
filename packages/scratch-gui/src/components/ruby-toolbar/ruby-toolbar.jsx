@@ -3,6 +3,8 @@ import PropTypes from 'prop-types';
 import {useIntl} from 'react-intl';
 import VM from '@smalruby/scratch-vm';
 
+import analytics from '../../lib/analytics';
+
 import styles from './ruby-toolbar.css';
 import messages from './messages.js';
 import TargetSelector from './target-selector.jsx';
@@ -16,6 +18,7 @@ import iconDownload from './icon--download.svg';
 import iconAutoCorrect from './icon--auto-correct.svg';
 import iconRubytee from './icon--rubytee.svg';
 import Spinner from '../spinner/spinner.jsx';
+import {isJapaneseLocale} from '../../lib/locale-utils.js';
 
 const RubyToolbar = props => {
     const intl = useIntl();
@@ -64,31 +67,74 @@ const RubyToolbar = props => {
         if (props.onDownload) props.onDownload();
     }, [props]);
 
+    const trackFuriganaToggle = useCallback(
+        (next) => {
+            try {
+                analytics.event({
+                    category: 'furigana_toggle',
+                    action: 'toggle',
+                    label: next ? 'on' : 'off',
+                });
+            } catch (_e) {
+                // Swallow analytics failures so the editor never breaks.
+            }
+        },
+        [],
+    );
+
+    const trackModeSwitch = useCallback((mode) => {
+        try {
+            analytics.event({
+                category: 'mode_switch',
+                action: 'change',
+                label: mode,
+            });
+        } catch (_e) {
+            // Swallow analytics failures so the editor never breaks.
+        }
+    }, []);
+
     const handleToggleFurigana = useCallback(() => {
         if (props.onDismissBubble) props.onDismissBubble();
-        if (props.onToggleFurigana) props.onToggleFurigana();
-    }, [props]);
+        if (props.onToggleFurigana) {
+            trackFuriganaToggle(!props.furiganaEnabled);
+            props.onToggleFurigana();
+        }
+    }, [props, trackFuriganaToggle]);
 
     // === Smalruby: Start of mode selection handlers ===
     const handleSelectFuriganaMode = useCallback(() => {
         if (props.onDismissBubble) props.onDismissBubble();
+        trackModeSwitch('furigana');
         // Switch to Ruby mode with furigana ON
         if (props.dnclMode && props.onToggleDnclMode) props.onToggleDnclMode();
-        if (!props.furiganaEnabled && props.onToggleFurigana) props.onToggleFurigana();
-    }, [props]);
+        if (!props.furiganaEnabled && props.onToggleFurigana) {
+            trackFuriganaToggle(true);
+            props.onToggleFurigana();
+        }
+    }, [props, trackModeSwitch, trackFuriganaToggle]);
 
     const handleSelectRubyMode = useCallback(() => {
         if (props.onDismissBubble) props.onDismissBubble();
+        trackModeSwitch('ruby');
         // Switch to Ruby mode with furigana OFF
         if (props.dnclMode && props.onToggleDnclMode) props.onToggleDnclMode();
-        if (props.furiganaEnabled && props.onToggleFurigana) props.onToggleFurigana();
-    }, [props]);
+        if (props.furiganaEnabled && props.onToggleFurigana) {
+            trackFuriganaToggle(false);
+            props.onToggleFurigana();
+        }
+    }, [props, trackModeSwitch, trackFuriganaToggle]);
 
     const handleSelectDnclMode = useCallback(() => {
         if (props.onDismissBubble) props.onDismissBubble();
-        // Switch to DNCL mode
+        trackModeSwitch('dncl');
+        // Switch to DNCL mode (disable furigana since DNCL is already in Japanese)
         if (!props.dnclMode && props.onToggleDnclMode) props.onToggleDnclMode();
-    }, [props]);
+        if (props.furiganaEnabled && props.onToggleFurigana) {
+            trackFuriganaToggle(false);
+            props.onToggleFurigana();
+        }
+    }, [props, trackModeSwitch, trackFuriganaToggle]);
     // === Smalruby: End of mode selection handlers ===
 
     const handleToggleAutoCorrect = useCallback(() => {
@@ -246,56 +292,58 @@ const RubyToolbar = props => {
             </div>
 
             {/* === Smalruby: Start of mode toggle group === */}
-            <div className={`${styles.toolbarPart} ${styles.modDashedBorder}`}>
-                <div className={styles.modeToggleGroup}>
-                    <button
-                        className={`${styles.modeToggleItem} ${
-                            !props.dnclMode && props.furiganaEnabled
-                                ? styles.modeToggleItemActive : ''
-                        }`}
-                        data-testid="ruby-toolbar-mode-furigana"
-                        disabled={props.dnclValidating}
-                        onClick={handleSelectFuriganaMode}
-                        title={intl.formatMessage(messages.modeFurigana)}
-                    >
-                        <span className={styles.modeToggleFuriganaLabel}>
-                            <span className={styles.modeToggleFuriganaLine1}>
-                                {intl.formatMessage(messages.modeFuriganaLine1)}
+            {isJapaneseLocale(props.locale) && (
+                <div className={`${styles.toolbarPart} ${styles.modDashedBorder}`}>
+                    <div className={styles.modeToggleGroup}>
+                        <button
+                            className={`${styles.modeToggleItem} ${
+                                !props.dnclMode && props.furiganaEnabled
+                                    ? styles.modeToggleItemActive : ''
+                            }`}
+                            data-testid="ruby-toolbar-mode-furigana"
+                            disabled={props.dnclValidating}
+                            onClick={handleSelectFuriganaMode}
+                            title={intl.formatMessage(messages.modeFurigana)}
+                        >
+                            <span className={styles.modeToggleFuriganaLabel}>
+                                <span className={styles.modeToggleFuriganaLine1}>
+                                    {intl.formatMessage(messages.modeFuriganaLine1)}
+                                </span>
+                                <span className={styles.modeToggleFuriganaLine2}>
+                                    {intl.formatMessage(messages.modeFuriganaLine2)}
+                                </span>
                             </span>
-                            <span className={styles.modeToggleFuriganaLine2}>
-                                {intl.formatMessage(messages.modeFuriganaLine2)}
-                            </span>
-                        </span>
-                    </button>
-                    <button
-                        className={`${styles.modeToggleItem} ${
-                            !props.dnclMode && !props.furiganaEnabled
-                                ? styles.modeToggleItemActive : ''
-                        }`}
-                        data-testid="ruby-toolbar-mode-ruby"
-                        disabled={props.dnclValidating}
-                        onClick={handleSelectRubyMode}
-                        title={intl.formatMessage(messages.modeRuby)}
-                    >
-                        {'Ruby'}
-                    </button>
-                    <button
-                        className={`${styles.modeToggleItem} ${
-                            props.dnclMode ? styles.modeToggleItemActive : ''
-                        }`}
-                        data-testid="ruby-toolbar-mode-dncl"
-                        disabled={props.dnclValidating}
-                        onClick={handleSelectDnclMode}
-                        title={intl.formatMessage(messages.modeDncl)}
-                    >
-                        {props.dnclValidating ? (
-                            <Spinner small level="info" />
-                        ) : (
-                            intl.formatMessage(messages.dnclLabel)
-                        )}
-                    </button>
+                        </button>
+                        <button
+                            className={`${styles.modeToggleItem} ${
+                                !props.dnclMode && !props.furiganaEnabled
+                                    ? styles.modeToggleItemActive : ''
+                            }`}
+                            data-testid="ruby-toolbar-mode-ruby"
+                            disabled={props.dnclValidating}
+                            onClick={handleSelectRubyMode}
+                            title={intl.formatMessage(messages.modeRuby)}
+                        >
+                            {'Ruby'}
+                        </button>
+                        <button
+                            className={`${styles.modeToggleItem} ${
+                                props.dnclMode ? styles.modeToggleItemActive : ''
+                            }`}
+                            data-testid="ruby-toolbar-mode-dncl"
+                            disabled={props.dnclValidating}
+                            onClick={handleSelectDnclMode}
+                            title={intl.formatMessage(messages.modeDncl)}
+                        >
+                            {props.dnclValidating ? (
+                                <Spinner small level="info" />
+                            ) : (
+                                intl.formatMessage(messages.dnclLabel)
+                            )}
+                        </button>
+                    </div>
                 </div>
-            </div>
+            )}
             {/* === Smalruby: End of mode toggle group === */}
 
             {/* More Menu Part */}
@@ -384,7 +432,8 @@ RubyToolbar.propTypes = {
     onToggleAutoCorrect: PropTypes.func,
     onOpenAutoCorrectSettings: PropTypes.func,
     onPreviewRubyScript: PropTypes.func,
-    onOpenRubyteeModal: PropTypes.func
+    onOpenRubyteeModal: PropTypes.func,
+    locale: PropTypes.string
 };
 
 export default RubyToolbar;

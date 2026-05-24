@@ -38,8 +38,15 @@ describe('dnclToRuby', () => {
   })
 
   describe('operators', () => {
+    // Both `÷` and `/` are integer division in DNCL (and `//` is the
+    // explicit alias). All three produce `(... / ...).to_i` on the Ruby
+    // side; the runtime truncates via the floor mathop block.
     test('division with ÷', () => {
-      expect(convert('a = 10 ÷ 3')).toBe('@a = 10 / 3')
+      expect(convert('a = 10 ÷ 3')).toBe('@a = (10 / 3).to_i')
+    })
+
+    test('division with /', () => {
+      expect(convert('a = 10 / 3')).toBe('@a = (10 / 3).to_i')
     })
 
     test('integer division with //', () => {
@@ -77,32 +84,40 @@ describe('dnclToRuby', () => {
 
   describe('表示する (display)', () => {
     test('single argument', () => {
-      expect(convert('表示する(a)')).toBe('say(@a, 1)')
+      expect(convert('表示する(a)')).toBe('puts(@a)')
     })
 
-    test('multiple arguments', () => {
-      expect(convert('表示する(a, b, c)')).toBe('say(@a, @b, @c, 1)')
+    test('multiple arguments concatenate with `+` and wrap non-strings with `.to_s`', () => {
+      expect(convert('表示する(a, b, c)')).toBe(
+        'puts(@a.to_s + @b.to_s + @c.to_s)',
+      )
     })
 
     test('string argument', () => {
-      expect(convert('表示する("hello")')).toBe('say("hello", 1)')
+      expect(convert('表示する("hello")')).toBe('puts("hello")')
     })
 
     test('expression argument', () => {
-      expect(convert('表示する(a + 1)')).toBe('say(@a + 1, 1)')
+      expect(convert('表示する(a + 1)')).toBe('puts(@a + 1)')
+    })
+
+    test('multi-arg with mixed strings and variables', () => {
+      expect(convert('表示する(a, "は", b, "番目")')).toBe(
+        'puts(@a.to_s + "は" + @b.to_s + "番目")',
+      )
     })
   })
 
   describe('入力 (input)', () => {
     test('input assigned to lowercase variable', () => {
       expect(convert('a = 【外部からの入力】')).toBe(
-        'ask_and_wait("")\n@a = answer',
+        'ask("")\n@a = answer',
       )
     })
 
     test('input assigned to uppercase variable', () => {
       expect(convert('A = 【外部からの入力】')).toBe(
-        'ask_and_wait("")\n@_var_A_ = answer',
+        'ask("")\n@_var_A_ = answer',
       )
     })
   })
@@ -168,6 +183,83 @@ describe('dnclToRuby', () => {
       expect(convert('a = 含む("hello", "ell")')).toBe(
         '@a = "hello".include?("ell")',
       )
+    })
+  })
+
+  describe('nested function calls', () => {
+    test('表示する(乱数(1..10)) keeps closing parens balanced', () => {
+      expect(convert('表示する(乱数(1..10))')).toBe('puts(rand(1..10))')
+    })
+
+    test('表示する(整数(x)) places .to_i inside puts argument', () => {
+      expect(convert('表示する(整数(x))')).toBe('puts(@x.to_i)')
+    })
+
+    test('表示する(絶対値(x)) places .abs inside puts argument', () => {
+      expect(convert('表示する(絶対値(x))')).toBe('puts(@x.abs)')
+    })
+
+    test('表示する(要素数(A)) keeps array conversion inside puts', () => {
+      expect(convert('表示する(要素数(Kouka))')).toBe(
+        'puts(@_array_Kouka_.length)',
+      )
+    })
+
+    test('表示する with expression containing 乱数', () => {
+      expect(convert('表示する(乱数(1..10) + 5)')).toBe(
+        'puts(rand(1..10) + 5)',
+      )
+    })
+
+    test('含む with 乱数 as second argument', () => {
+      expect(convert('a = 含む(s, 乱数(1..10))')).toBe(
+        '@a = @s.include?(rand(1..10))',
+      )
+    })
+
+    test('含む with 3 args is left unchanged (only 2-arg form is valid)', () => {
+      // Identifier conversion still runs (a → @a, b → @b, s → @s),
+      // but 含む itself stays as-is to avoid generating malformed Ruby.
+      expect(convert('含む(s, a, b)')).toBe('含む(@s, @a, @b)')
+    })
+
+    test('same-name nesting: 表示する(乱数(乱数(1..10)))', () => {
+      expect(convert('表示する(乱数(乱数(1..10)))')).toBe(
+        'puts(rand(rand(1..10)))',
+      )
+    })
+
+    test('same-name nesting: 含む(s, 含む(a, b))', () => {
+      expect(convert('含む(s, 含む(a, b))')).toBe(
+        '@s.include?(@a.include?(@b))',
+      )
+    })
+  })
+
+  describe('user-defined function calls', () => {
+    test('bare function call after definition keeps name without @', () => {
+      const dncl = '関数 myfunc(x)\n  返す 5\nと定義する\nmyfunc(3)'
+      const ruby = 'def myfunc(x)\n  return 5\nend\nmyfunc(3)'
+      expect(convert(dncl)).toBe(ruby)
+    })
+
+    test('function call in assignment', () => {
+      expect(
+        convert('関数 myfunc(x)\n  返す 5\nと定義する\na = myfunc(3)'),
+      ).toBe('def myfunc(x)\n  return 5\nend\n@a = myfunc(3)')
+    })
+
+    test('function call inside 表示する', () => {
+      expect(
+        convert('関数 myfunc(x)\n  返す 5\nと定義する\n表示する(myfunc(3))'),
+      ).toBe('def myfunc(x)\n  return 5\nend\nputs(myfunc(3))')
+    })
+
+    test('function called before definition (forward reference)', () => {
+      // detectFunctionNames runs before line conversion, so order should not matter.
+      expect(
+        convert('myfunc(3)\n関数 myfunc(x)\n  返す 5\nと定義する'),
+      ).toBe('myfunc(3)\ndef myfunc(x)\n  return 5\nend')
     })
   })
 
@@ -261,7 +353,7 @@ describe('dnclToRuby', () => {
         convert(
           'i を 1 から 10 まで 1 ずつ増やしながら\n  表示する(i)\nを繰り返す',
         ),
-      ).toBe('(1..10).step(1) do |i|\n  say(@i, 1)\nend')
+      ).toBe('@i = 1\nwhile @i <= 10\n  puts(@i)\n  @i += 1\nend')
     })
 
     test('descending for loop', () => {
@@ -269,7 +361,7 @@ describe('dnclToRuby', () => {
         convert(
           'i を 10 から 0 まで 1 ずつ減らしながら\n  表示する(i)\nを繰り返す',
         ),
-      ).toBe('10.step(0, -1) do |i|\n  say(@i, 1)\nend')
+      ).toBe('@i = 10\nwhile @i >= 0\n  puts(@i)\n  @i += -1\nend')
     })
 
     test('for loop with expression bounds', () => {
@@ -277,7 +369,29 @@ describe('dnclToRuby', () => {
         convert(
           'i を 0 から n まで 2 ずつ増やしながら\n  表示する(i)\nを繰り返す',
         ),
-      ).toBe('(0..@n).step(2) do |i|\n  say(@i, 1)\nend')
+      ).toBe('@i = 0\nwhile @i <= @n\n  puts(@i)\n  @i += 2\nend')
+    })
+
+    test('nested for loops', () => {
+      const dncl = [
+        'i を 1 から 3 まで 1 ずつ増やしながら',
+        '  j を 1 から 3 まで 1 ずつ増やしながら',
+        '    表示する(i)',
+        '  を繰り返す',
+        'を繰り返す',
+      ].join('\n')
+      const ruby = [
+        '@i = 1',
+        'while @i <= 3',
+        '  @j = 1',
+        '  while @j <= 3',
+        '    puts(@i)',
+        '    @j += 1',
+        '  end',
+        '  @i += 1',
+        'end',
+      ].join('\n')
+      expect(convert(dncl)).toBe(ruby)
     })
   })
 
@@ -296,16 +410,20 @@ describe('dnclToRuby', () => {
   })
 
   describe('control flow: function', () => {
-    test('function definition', () => {
+    test('function definition: param stays as local Ruby variable', () => {
+      // Issue #642: previously the body would emit `return @x * 2`,
+      // wrongly referencing the sprite's instance variable instead of
+      // the function parameter `x`. Now the param-scope tracker keeps
+      // it as `return x * 2`.
       expect(
         convert('関数 f(x)\n  返す x * 2\nと定義する'),
-      ).toBe('def f(x)\n  return @x * 2\nend')
+      ).toBe('def f(x)\n  return x * 2\nend')
     })
 
-    test('function with multiple params', () => {
+    test('function with multiple params: each param stays as local', () => {
       expect(
         convert('関数 add(a, b)\n  返す a + b\nと定義する'),
-      ).toBe('def add(a, b)\n  return @a + @b\nend')
+      ).toBe('def add(a, b)\n  return a + b\nend')
     })
   })
 })

@@ -54,7 +54,13 @@ describe('rubyToDncl', () => {
       expect(convert('say(@a, @b, @c, 1)')).toBe('表示する(a, b, c)')
     })
 
-    test('ask_and_wait + answer → 入力', () => {
+    test('ask + answer → 入力', () => {
+      expect(convert('ask("")\n@a = answer')).toBe(
+        'a = 【外部からの入力】',
+      )
+    })
+
+    test('ask_and_wait + answer → 入力 (legacy)', () => {
       expect(convert('ask_and_wait("")\n@a = answer')).toBe(
         'a = 【外部からの入力】',
       )
@@ -115,6 +121,35 @@ describe('rubyToDncl', () => {
     })
   })
 
+  describe('nested same-name calls', () => {
+    test('rand(rand(rand(1..10))) fully converts', () => {
+      expect(convert('puts(rand(rand(rand(1..10))))')).toBe(
+        '表示する(乱数(乱数(乱数(1..10))))',
+      )
+    })
+
+    test('puts(puts(x)) fully converts', () => {
+      expect(convert('puts(puts(@x))')).toBe('表示する(表示する(x))')
+    })
+
+    test('p(p(x)) fully converts', () => {
+      expect(convert('p(p(@x))')).toBe('表示する(表示する(x))')
+    })
+
+    test('say with nested same-name in args', () => {
+      // say uses splitArgsAtTopLevel; rand(rand(...)) is recognized as a
+      // single argument and the trailing duration `, 1` is stripped.
+      expect(convert('say(rand(rand(1..10)), 1)')).toBe(
+        '表示する(乱数(乱数(1..10)))',
+      )
+    })
+
+    test('p does not match part of map(', () => {
+      // The standalone check ensures map( does not become 表示する(ap(...))
+      expect(convert('@a = @arr.map(&:to_s)')).toBe('a = arr.map(&:to_s)')
+    })
+  })
+
   describe('display: say with any duration', () => {
     test('say with 1 second', () => {
       expect(convert('say(@a, 1)')).toBe('表示する(a)')
@@ -169,17 +204,62 @@ describe('rubyToDncl', () => {
     })
   })
 
-  describe('control flow: for loop', () => {
-    test('ascending for loop', () => {
+  describe('control flow: for loop (step syntax)', () => {
+    test('ascending step for loop', () => {
       expect(convert('(1..10).step(1) do |i|\n  say(@i, 1)\nend')).toBe(
         'i を 1 から 10 まで 1 ずつ増やしながら\n  表示する(i)\nを繰り返す',
       )
     })
 
-    test('descending for loop', () => {
+    test('descending step for loop', () => {
       expect(convert('10.step(0, -1) do |i|\n  say(@i, 1)\nend')).toBe(
         'i を 10 から 0 まで 1 ずつ減らしながら\n  表示する(i)\nを繰り返す',
       )
+    })
+  })
+
+  describe('control flow: for loop (while pattern)', () => {
+    test('ascending while-based for loop', () => {
+      const ruby = '@i = 1\nwhile @i <= 10\n  say(@i, 1)\n  @i += 1\nend'
+      expect(convert(ruby)).toBe(
+        'i を 1 から 10 まで 1 ずつ増やしながら\n  表示する(i)\nを繰り返す',
+      )
+    })
+
+    test('descending while-based for loop', () => {
+      const ruby = '@i = 10\nwhile @i >= 0\n  say(@i, 1)\n  @i += -1\nend'
+      expect(convert(ruby)).toBe(
+        'i を 10 から 0 まで 1 ずつ減らしながら\n  表示する(i)\nを繰り返す',
+      )
+    })
+
+    test('ascending while-based for loop with step 2', () => {
+      const ruby = '@i = 0\nwhile @i <= @n\n  say(@i, 1)\n  @i += 2\nend'
+      expect(convert(ruby)).toBe(
+        'i を 0 から n まで 2 ずつ増やしながら\n  表示する(i)\nを繰り返す',
+      )
+    })
+
+    test('nested while-based for loops', () => {
+      const ruby = [
+        '@i = 1',
+        'while @i <= 3',
+        '  @j = 1',
+        '  while @j <= 3',
+        '    say(@i, 1)',
+        '    @j += 1',
+        '  end',
+        '  @i += 1',
+        'end',
+      ].join('\n')
+      const dncl = [
+        'i を 1 から 3 まで 1 ずつ増やしながら',
+        '  j を 1 から 3 まで 1 ずつ増やしながら',
+        '    表示する(i)',
+        '  を繰り返す',
+        'を繰り返す',
+      ].join('\n')
+      expect(convert(ruby)).toBe(dncl)
     })
   })
 
@@ -196,6 +276,124 @@ describe('rubyToDncl', () => {
       expect(convert('def f(x)\n  return @x * 2\nend')).toBe(
         '関数 f(x)\n  返す x * 2\nと定義する',
       )
+    })
+  })
+
+  describe('CJK variable names', () => {
+    test('kanji variable assignment', () => {
+      expect(convert('@合計 = 0')).toBe('合計 = 0')
+    })
+
+    test('kanji variable reference in expression', () => {
+      expect(convert('@合計 = @合計 + @i')).toBe('合計 = 合計 + i')
+    })
+
+    test('hiragana variable', () => {
+      expect(convert('@けっか = 1')).toBe('けっか = 1')
+    })
+
+    test('katakana variable', () => {
+      expect(convert('@カウント = 0')).toBe('カウント = 0')
+    })
+
+    test('negation of CJK variable', () => {
+      expect(convert('if !@合計\n  @a = 1\nend')).toBe(
+        'もし 合計 でない ならば\n  a = 1\nを実行する',
+      )
+    })
+
+    test('CJK uppercase scalar variable', () => {
+      expect(convert('@_var_合計_ = 0')).toBe('合計 = 0')
+    })
+
+    test('CJK uppercase array variable', () => {
+      expect(convert('@_array_配列_ = [1, 2, 3]')).toBe('配列 = [1, 2, 3]')
+    })
+  })
+
+  describe('CJK for-loop (while pattern)', () => {
+    test('for-loop with CJK body variable', () => {
+      const ruby = [
+        '@合計 = 0',
+        '@i = 1',
+        'while @i <= 10',
+        '  @合計 += @i',
+        '  @i += 1',
+        'end',
+      ].join('\n')
+      const dncl = [
+        '合計 = 0',
+        'i を 1 から 10 まで 1 ずつ増やしながら',
+        '  合計 += i',
+        'を繰り返す',
+      ].join('\n')
+      expect(convert(ruby)).toBe(dncl)
+    })
+
+    test('for-loop with CJK loop variable', () => {
+      const ruby = [
+        '@回数 = 1',
+        'while @回数 <= 5',
+        '  say(@回数, 1)',
+        '  @回数 += 1',
+        'end',
+      ].join('\n')
+      const dncl = [
+        '回数 を 1 から 5 まで 1 ずつ増やしながら',
+        '  表示する(回数)',
+        'を繰り返す',
+      ].join('\n')
+      expect(convert(ruby)).toBe(dncl)
+    })
+  })
+
+  describe('CJK built-in methods', () => {
+    test('.to_i on CJK variable', () => {
+      expect(convert('@a = @合計.to_i')).toBe('a = 整数(合計)')
+    })
+
+    test('.to_s on CJK variable', () => {
+      expect(convert('@a = @合計.to_s')).toBe('a = 文字列(合計)')
+    })
+
+    test('.length on CJK variable', () => {
+      expect(convert('@a = @配列.length')).toBe('a = 要素数(配列)')
+    })
+
+    test('.round on CJK variable', () => {
+      expect(convert('@a = @平均.round')).toBe('a = 四捨五入(平均)')
+    })
+
+    test('.abs on CJK variable', () => {
+      expect(convert('@a = @差分.abs')).toBe('a = 絶対値(差分)')
+    })
+
+    test('.include? on CJK variable', () => {
+      expect(convert('@a = @文字列.include?("ell")')).toBe(
+        'a = 含む(文字列, "ell")',
+      )
+    })
+  })
+
+  describe('CJK roundtrip: reported bug', () => {
+    test('DNCL program with 合計 variable roundtrips correctly', () => {
+      const ruby = [
+        '@合計 = 0',
+        '@i = 1',
+        'while @i <= 10',
+        '  @合計 += @i',
+        '  @i += 1',
+        'end',
+        'say(@合計, 1)',
+      ].join('\n')
+      const expectedDncl = [
+        '合計 = 0',
+        'i を 1 から 10 まで 1 ずつ増やしながら',
+        '  合計 += i',
+        'を繰り返す',
+        '表示する(合計)',
+      ].join('\n')
+      expect(convert(ruby)).toBe(expectedDncl)
     })
   })
 

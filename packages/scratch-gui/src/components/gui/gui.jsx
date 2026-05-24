@@ -24,6 +24,9 @@ import Watermark from '../../containers/watermark.jsx';
 
 import Backpack from '../../containers/backpack.jsx';
 import ExtensionsButton from '../extension-button/extension-button.jsx';
+// === Smalruby: Start of DNCL mode notice ===
+import DnclModeNotice from '../dncl-mode-notice/dncl-mode-notice.jsx';
+// === Smalruby: End of DNCL mode notice ===
 import WebGlModal from '../../containers/webgl-modal.jsx';
 import TipsLibrary from '../../containers/tips-library.jsx';
 import Cards from '../../containers/cards.jsx';
@@ -37,12 +40,19 @@ import SmalrubotFirmwareModal from '../../containers/smalrubot-firmware-modal.js
 // === Smalruby: End of smalrubot firmware modal ===
 // === Smalruby: Start of classroom modal ===
 import ClassroomModal from '../../containers/classroom-modal.jsx';
+import ClassroomTeacherModal from '../../containers/classroom-teacher-modal.jsx';
 // === Smalruby: End of classroom modal ===
+// === Smalruby: Start of meshV2 classroom binding ===
+import MeshV2ClassroomBinding from '../../lib/mesh-v2-classroom-binding.jsx';
+// === Smalruby: End of meshV2 classroom binding ===
+// === Smalruby: Start of welcome modal ===
+import WelcomeModalHOC from '../../containers/welcome-modal-hoc.jsx';
+// === Smalruby: End of welcome modal ===
 import URLLoaderModal from '../url-loader-modal/url-loader-modal.jsx';
 import KoshienTestModal from '../koshien-test-modal/koshien-test-modal.jsx';
 import RubyTab from '../../containers/ruby-tab.jsx';
 
-import layout, {STAGE_SIZE_MODES} from '../../lib/layout-constants';
+import layout, {STAGE_DISPLAY_SIZES, STAGE_SIZE_MODES} from '../../lib/layout-constants';
 import {resolveStageSize} from '../../lib/screen-utils';
 import {colorModeMap} from '../../lib/settings/color-mode/index.js';
 import {DEFAULT_THEME, themeMap} from '../../lib/settings/theme/index.js';
@@ -58,6 +68,21 @@ import {setPlatform} from '../../reducers/platform.js';
 import {setTheme} from '../../reducers/settings.js';
 import {PLATFORM} from '../../lib/platform.js';
 import {ModalFocusProvider} from '../../contexts/modal-focus-context.jsx';
+
+// === Smalruby: Start of about menu ===
+const aboutMenuMessages = defineMessages({
+    aboutSmalruby: {
+        id: 'gui.menuBar.aboutSmalruby',
+        defaultMessage: 'About Smalruby',
+        description: 'Menu item that opens the Smalruby introduction page (/about.html)'
+    },
+    showWelcomeAgain: {
+        id: 'gui.menuBar.showWelcomeAgain',
+        defaultMessage: 'Show welcome again',
+        description: 'Menu item that re-opens the first-visit welcome modal'
+    }
+});
+// === Smalruby: End of about menu ===
 
 const ariaMessages = defineMessages({
     menuBar: {
@@ -134,6 +159,7 @@ const GUIComponent = props => {
         authorAvatarBadge,
         basePath,
         backdropLibraryVisible,
+        backpackConfigured,
         backpackHost,
         backpackVisible,
         blockDisplayModalVisible,
@@ -180,12 +206,18 @@ const GUIComponent = props => {
         loading,
         logo,
         manuallySaveThumbnails,
+        onSetManualThumbnail,
+        onSetManualThumbnailButtonClick,
         menuBarHidden,
         renderLogin,
         onClickAbout,
+        // === Smalruby: Start of welcome modal ===
+        onShowWelcomeModal,
+        // === Smalruby: End of welcome modal ===
         onClickAccountNav,
         onCloseAccountNav,
         onLogOut,
+        onClickLogin,
         onOpenRegistration,
         onToggleLoginOpen,
         onActivateCostumesTab,
@@ -223,9 +255,11 @@ const GUIComponent = props => {
         onSetPlatform,
         onSetTheme,
         onOpenClassroomModal,
+        onRequestExitDnclMode,
         // === Smalruby: End of Redux action props prevention ===
         rubyTabVisible,
         showComingSoon,
+        showNewFeatureCallouts,
         soundsTabVisible,
         stageSizeMode,
         targetIsStage,
@@ -296,11 +330,18 @@ const GUIComponent = props => {
         isRendererSupported = Renderer.isSupported();
     }
 
-    return (<MediaQuery minWidth={layout.fullSizeMinWidth}>{isFullSize => {
-        const stageSize = resolveStageSize(stageSizeMode, isFullSize);
-        const boxStyles = classNames(styles.bodyWrapper, {
-            [styles.bodyWrapperWithoutMenuBar]: menuBarHidden
-        });
+    return (<MediaQuery minWidth={layout.fullSizeMinWidth}>{isFullSize => (
+        // === Smalruby: Start of iPad portrait narrow desktop stage size ===
+        // 744〜1023px (iPad mini portrait / iPad portrait など) の narrow desktop
+        // では、480px / 408px / 360px の stage を維持すると viewport に収まらない
+        // ため、stage を 240x180 (small) に強制する。
+        <MediaQuery maxWidth={1023} minWidth={744}>{isNarrowDesktop => {
+            const baseStageSize = resolveStageSize(stageSizeMode, isFullSize);
+            const stageSize = isNarrowDesktop ? STAGE_DISPLAY_SIZES.small : baseStageSize;
+            // === Smalruby: End of iPad portrait narrow desktop stage size ===
+            const boxStyles = classNames(styles.bodyWrapper, {
+                [styles.bodyWrapperWithoutMenuBar]: menuBarHidden
+            });
 
         return isPlayerOnly ? (
             <StageWrapper
@@ -308,11 +349,6 @@ const GUIComponent = props => {
                 isRendererSupported={isRendererSupported}
                 isRtl={isRtl}
                 loading={loading}
-                manuallySaveThumbnails={
-                    manuallySaveThumbnails &&
-                    userOwnsProject
-                }
-                onUpdateProjectThumbnail={onUpdateProjectThumbnail}
                 stageSize={STAGE_SIZE_MODES.large}
                 vm={vm}
             >
@@ -412,14 +448,16 @@ const GUIComponent = props => {
                         <SmalrubotFirmwareModal />
                     ) : null}
                     {/* === Smalruby: Start of classroom modal === */}
-                    {classroomModalVisible ? (
-                        <ClassroomModal mode="student" />
-                    ) : null}
-                    {teacherModalVisible ? (
-                        <ClassroomModal mode="teacher" />
-                    ) : null}
+                    {classroomModalVisible ? <ClassroomModal /> : null}
+                    {teacherModalVisible ? <ClassroomTeacherModal /> : null}
                     {/* === Smalruby: End of classroom modal === */}
+                    {/* === Smalruby: Start of meshV2 classroom binding === */}
+                    <MeshV2ClassroomBinding />
+                    {/* === Smalruby: End of meshV2 classroom binding === */}
                     {/* === Smalruby: End of smalrubot firmware modal === */}
+                    {/* === Smalruby: Start of welcome modal === */}
+                    <WelcomeModalHOC />
+                    {/* === Smalruby: End of welcome modal === */}
                     {!menuBarHidden && <MenuBar
                         ariaRole="banner"
                         ariaLabel={intl.formatMessage(ariaMessages.menuBar)}
@@ -446,11 +484,26 @@ const GUIComponent = props => {
                         logo={logo}
                         renderLogin={renderLogin}
                         showComingSoon={showComingSoon}
-                        onClickAbout={onClickAbout}
+                        // === Smalruby: Start of about menu ===
+                        // title は文字列にする — menu-bar.jsx が title を React の key に使うため。
+                        onClickAbout={onClickAbout || [
+                            {
+                                title: intl.formatMessage(aboutMenuMessages.aboutSmalruby),
+                                onClick: () => {
+                                    window.open('about.html', '_blank', 'noopener,noreferrer');
+                                }
+                            },
+                            {
+                                title: intl.formatMessage(aboutMenuMessages.showWelcomeAgain),
+                                onClick: onShowWelcomeModal
+                            }
+                        ]}
+                        // === Smalruby: End of about menu ===
                         onClickAccountNav={onClickAccountNav}
                         onClickLogo={onClickLogo}
                         onCloseAccountNav={onCloseAccountNav}
                         onLogOut={onLogOut}
+                        onClickLogin={onClickLogin}
                         onOpenRegistration={onOpenRegistration}
                         onProjectTelemetryEvent={onProjectTelemetryEvent}
                         onSeeCommunity={onSeeCommunity}
@@ -621,12 +674,19 @@ const GUIComponent = props => {
                                             vm={vm}
                                             colorMode={colorMode}
                                         />
+                                        {/* === Smalruby: Start of DNCL mode notice === */}
+                                        <DnclModeNotice
+                                            dnclMode={dnclMode}
+                                            onExitDnclMode={onRequestExitDnclMode}
+                                        />
+                                        {/* === Smalruby: End of DNCL mode notice === */}
                                     </Box>
                                     {/* === Smalruby: Start of DNCL extension button === */}
                                     <ExtensionsButton
                                         intl={intl}
                                         dnclMode={dnclMode}
                                         onExtensionButtonClick={onExtensionButtonClick}
+                                        onRequestExitDnclMode={onRequestExitDnclMode}
                                     />
                                     {/* === Smalruby: End of DNCL extension button === */}
                                     <Box className={styles.watermark}>
@@ -668,7 +728,7 @@ const GUIComponent = props => {
                                     />
                                 </TabPanel>
                             </Tabs>
-                            {backpackVisible ? (
+                            {backpackVisible && backpackConfigured ? (
                                 <Backpack
                                     host={backpackHost}
                                     ariaRole="region"
@@ -687,10 +747,19 @@ const GUIComponent = props => {
                                 isFullScreen={isFullScreen}
                                 isRendererSupported={isRendererSupported}
                                 isRtl={isRtl}
+                                isCreating={isCreating}
                                 stageSize={stageSize}
                                 vm={vm}
                                 ariaRole="region"
                                 ariaLabel={intl.formatMessage(ariaMessages.stage)}
+                                manuallySaveThumbnails={manuallySaveThumbnails}
+                                onSetManualThumbnail={onSetManualThumbnail}
+                                onSetManualThumbnailButtonClick={onSetManualThumbnailButtonClick}
+                                loading={loading}
+                                showNewFeatureCallouts={showNewFeatureCallouts}
+                                userOwnsProject={userOwnsProject}
+                                username={username}
+                                onUpdateProjectThumbnail={onUpdateProjectThumbnail}
                             />
                             <Box
                                 className={styles.targetWrapper}
@@ -711,7 +780,8 @@ const GUIComponent = props => {
                 </Box>
             </ModalFocusProvider>
         );
-    }}</MediaQuery>);
+        }}</MediaQuery>
+    )}</MediaQuery>);
 };
 
 GUIComponent.propTypes = {
@@ -723,6 +793,7 @@ GUIComponent.propTypes = {
     authorUsername: PropTypes.oneOfType([PropTypes.string, PropTypes.bool]), // can be false
     authorAvatarBadge: PropTypes.number,
     backdropLibraryVisible: PropTypes.bool,
+    backpackConfigured: PropTypes.bool,
     backpackHost: PropTypes.string,
     backpackVisible: PropTypes.bool,
     basePath: PropTypes.string,
@@ -764,6 +835,8 @@ GUIComponent.propTypes = {
     loading: PropTypes.bool,
     logo: PropTypes.string,
     manuallySaveThumbnails: PropTypes.bool,
+    onSetManualThumbnail: PropTypes.func,
+    onSetManualThumbnailButtonClick: PropTypes.func,
     menuBarHidden: PropTypes.bool,
     onActivateCostumesTab: PropTypes.func,
     onActivateRubyTab: PropTypes.func,
@@ -773,9 +846,11 @@ GUIComponent.propTypes = {
     onClickLogo: PropTypes.func,
     onCloseAccountNav: PropTypes.func,
     onExtensionButtonClick: PropTypes.func,
+    onRequestExitDnclMode: PropTypes.func, // === Smalruby: DNCL mode notice ===
     onLogOut: PropTypes.func,
     onNewSpriteClick: PropTypes.func,
     onNewLibraryCostumeClick: PropTypes.func,
+    onClickLogin: PropTypes.func,
     onOpenRegistration: PropTypes.func,
     onRequestCloseBackdropLibrary: PropTypes.func,
     onRequestCloseCostumeLibrary: PropTypes.func,
@@ -786,6 +861,9 @@ GUIComponent.propTypes = {
     onRequestCloseUrlLoaderModal: PropTypes.func,
     onSeeCommunity: PropTypes.func,
     onShare: PropTypes.func,
+    // === Smalruby: Start of welcome modal ===
+    onShowWelcomeModal: PropTypes.func,
+    // === Smalruby: End of welcome modal ===
     onShowPrivacyPolicy: PropTypes.func,
     onStartSelectingFileUpload: PropTypes.func,
     onStartSelectingUrlLoad: PropTypes.func,
@@ -850,7 +928,8 @@ const mapStateToProps = state => ({
     blocksId: state.scratchGui.timeTravel.year.toString(),
     stageSizeMode: state.scratchGui.stageSize.stageSize,
     colorMode: state.scratchGui.settings.colorMode,
-    theme: state.scratchGui.settings.theme
+    theme: state.scratchGui.settings.theme,
+    backpackConfigured: !!state.scratchGui.config.storage?.backpackStorage
 });
 
 const mapDispatchToProps = dispatch => ({

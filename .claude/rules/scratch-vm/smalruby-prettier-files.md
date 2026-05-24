@@ -46,10 +46,13 @@ upstream (Scratch) ファイルは対象外。
 - `test/unit/extension_mesh_v2_service.js`
 - `test/unit/extension_mesh_v2.js`
 - `test/unit/extension_smalrubot_s1.js`
+- `test/unit/extension_smalruby_ruby_each.js`
 - `test/unit/mesh_service_v2_cost.js`
 - `test/unit/mesh_service_v2_global_vars.js`
 - `test/unit/mesh_service_v2_integration.js`
 - `test/unit/mesh_service_v2_order.js`
+- `test/unit/mesh_service_v2_order_key.js`
+- `test/unit/mesh_service_v2_poll_group_data.js`
 - `test/unit/mesh_service_v2_polling.js`
 - `test/unit/mesh_service_v2_subscription.js`
 - `test/unit/mesh_service_v2_timestamp.js`

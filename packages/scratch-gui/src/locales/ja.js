@@ -1,6 +1,8 @@
 export default {
     'gui.modal.reload': '再読み込み',
     'gui.modal.stop': '中止',
+    'gui.confirmationPrompt.confirm': 'はい',
+    'gui.confirmationPrompt.cancel': 'いいえ',
     'gui.menuBar.loadFromUrl': 'Scratchから読み込む',
     'gui.menuBar.colorMode': 'カラーモード',
     'gui.menuBar.rubyVersion': 'ルビー',
@@ -11,7 +13,7 @@ export default {
     'gui.menuBar.smalrubotS1.flashFirmware': 'ファームウェア書き込み',
     'gui.smalrubotFirmware.title': 'スモウルボットS1 ファームウェア',
     'gui.smalrubotFirmware.description':
-        'スモウルボットS1のファームウェアをStuduino基板に書き込みます。USBケーブルで基板を接続してから、下のボタンを押してください。',
+        'スモウルボットS1のファームウェアをStuduino基板に書き込みます。USBケーブルで基板を接続してから、下のボタンを押してシリアルポート選択ダイアログで、お使いのスモウルボット S1 を選んでください。',
     'gui.smalrubotFirmware.warning': 'ファームウェア書き込み中にUSBケーブルを抜かないでください。',
     'gui.smalrubotFirmware.flashButton': 'ファームウェア書き込み',
     'gui.smalrubotFirmware.cancelButton': 'キャンセル',
@@ -30,7 +32,29 @@ export default {
     'gui.connection.error.flashFirmwareButton': 'ファームウェア書き込み',
     'gui.classroom.title': 'クラス',
     'gui.menuBar.classroom': 'クラス',
+    'gui.menuBar.classroomJoined': 'クラス:出席番号{seatNumber}',
     'gui.menuBar.classroomManagement': 'クラス管理...',
+    'gui.menuBar.aboutSmalruby': 'スモウルビーについて',
+    'gui.menuBar.showWelcomeAgain': 'ウェルカムをもう一度見る',
+    'gui.welcomeModal.title': 'スモウルビーへようこそ',
+    'gui.welcomeModal.lead':
+        'スモウルビーは、ブラウザだけで使える無料のプログラミング環境です。' +
+        'ブロックから始めて、Rubyのコードまで挑戦できます。',
+    'gui.welcomeModal.cardBlocksTitle': 'ブロックでつくる',
+    'gui.welcomeModal.cardBlocksDesc': 'ブロックを並べてゲームやアニメをつくれます。',
+    'gui.welcomeModal.cardBlocksDescShort': 'ゲームやアニメを作れます。',
+    'gui.welcomeModal.cardRubyTitle': 'Rubyに挑戦',
+    'gui.welcomeModal.cardRubyDesc': 'ふりがな付きのRubyコードでステップアップ。',
+    'gui.welcomeModal.cardRubyDescShort': 'ふりがな付きでステップアップ。',
+    'gui.welcomeModal.cardMeshTitle': '友達とつなぐ',
+    'gui.welcomeModal.cardMeshDesc': 'メッシュ機能で複数の端末をつないで遊べます。',
+    'gui.welcomeModal.cardMeshDescShort': '複数の端末をつないで遊べます。',
+    'gui.welcomeModal.startTutorial': '最初のチュートリアルを始める',
+    'gui.welcomeModal.learnMore': 'スモウルビーについて詳しく',
+    'gui.welcomeModal.leadShort': 'ブロックから始めて、Rubyのコードまで挑戦できます。',
+    'gui.welcomeModal.later': 'あとで見る',
+    'gui.mobile.drawer.section.help': 'ヘルプ',
+    'gui.mobile.drawer.help.showWelcome': 'ウェルカムをもう一度見る',
     'gui.classroom.management.title': 'クラス管理',
     'gui.classroom.roleSelect.prompt': 'どちらで使いますか？',
     'gui.classroom.roleSelect.teacher': '先生',
@@ -62,6 +86,22 @@ export default {
     'gui.classroom.studentJoin.teacherLink': '先生の方はこちら（クラス管理）',
     'gui.classroom.studentSeat.prompt': '出席番号を選んでください',
     'gui.classroom.studentSeat.join': '参加する',
+    'gui.classroom.kicked.banner.title': '先生によってクラスから退室させられました。',
+    'gui.classroom.kicked.banner.subtitle': '「{className}」に再度参加するには出席番号を選びなおしてください。',
+    'gui.classroom.kickRequest.title': '出席番号{seatNumber}の人に退室を依頼しますか？',
+    'gui.classroom.kickRequest.body':
+        '出席番号{seatNumber}が自分の席で、他の人が間違って選んでしまったときに使ってください。先生に依頼が送られ、承認するかどうかを決めてもらいます。',
+    'gui.classroom.kickRequest.reasonPlaceholder': '任意：先生へひと言（200文字まで）',
+    'gui.classroom.kickRequest.cancel': 'キャンセル',
+    'gui.classroom.kickRequest.submit': '依頼を送る',
+    'gui.classroom.kickRequest.pendingBanner': '出席番号{seatNumber}の退室を先生に依頼中です…',
+    'gui.classroom.kickRequest.rejectedBanner':
+        '出席番号{seatNumber}の退室は受理されませんでした。別の席を選ぶか、もう一度依頼を出してください。',
+    'gui.classroom.kickRequest.teacherTitle':
+        '{count, plural, one {# 件の退室リクエストが届いています} other {# 件の退室リクエストが届いています}}',
+    'gui.classroom.kickRequest.noReason': '（理由の入力なし）',
+    'gui.classroom.kickRequest.approve': '承認（この生徒を退室させる）',
+    'gui.classroom.kickRequest.reject': '却下',
     'gui.classroom.studentJoined.success': '参加しました！',
     'gui.classroom.studentJoined.seat': '出席番号{seatNumber}',
     'gui.classroom.studentJoined.start': 'はじめる',
@@ -144,9 +184,10 @@ export default {
     'gui.classroom.teacherDetail.selectMember': '出席番号をクリックして生徒の詳細を見る',
     'gui.classroom.joinCode.fullscreen': '全画面表示',
     'gui.classroom.teacherDetail.selectClassroom': 'サイドバーからクラスを選択してください',
-    'gui.classroom.management.loginPrompt': 'Googleでログイン',
-    'gui.classroom.management.loginDescription': 'Googleアカウントでログインして、クラスを管理します。',
+    'gui.classroom.management.loginPrompt': 'ログインしてクラスを管理',
+    'gui.classroom.management.loginDescription': '学校のアカウントでログインして、クラスを作成・管理します。',
     'gui.classroom.management.loginButton': 'Googleでログイン',
+    'gui.classroom.management.microsoftLoginButton': 'Microsoftでログイン',
     'gui.classroom.management.sidebarTitle': 'あなたのクラス・課題',
     'gui.classroom.management.loading': '読み込み中...',
     'gui.classroom.management.create': 'クラスを作る',
@@ -194,6 +235,10 @@ export default {
     'gui.sharedMessages.loadFromComputerTitle': 'コンピューターから読み込む',
     'gui.sharedMessages.migrateMeshV1Warning':
         'このプロジェクトには従来のメッシュ拡張機能が含まれていますので4月30日までしか使えません。このまま従来のメッシュ拡張機能を利用する場合はOKを選択します。そうではなく、あたらしいメッシュ拡張機能を使う場合はキャンセルを選択します。',
+    'gui.sharedMessages.meshV1AutoMigrated':
+        '従来のメッシュ拡張機能のサービスは終了しました。プロジェクト内のブロックを新しいメッシュ拡張機能に自動で置き換えました。動作を確認してください。',
+    'gui.sharedMessages.meshV1BackpackAutoMigrated':
+        'バックパックの中の従来のメッシュブロックを{count}件、新しいメッシュブロックに自動で置き換えました。',
     'gui.sharedMessages.changedRubyVersionByKoshien':
         'このプロジェクトにはスモウルビー甲子園拡張機能が含まれていますのでルビーをバージョン1に変更しました',
     'gui.menuBar.loadFromGoogleDrive': 'Google ドライブから読み込む',
@@ -216,6 +261,11 @@ export default {
     'gui.smalruby3.alerts.rubyVersionChangeFailed':
         'ルビーのバージョンを変更できません：先にルビーのコードのエラーを直してください。',
     'gui.stageHeader.stageSizeMiddle': '中サイズのステージに切り替える',
+    'gui.stageHeader.saveThumbnail': 'サムネイルを保存',
+    'gui.stageHeader.saveThumbnailMessage': 'サムネイルを設定してもよいですか？',
+    'gui.stageHeader.thumbnailTooltipTitle': 'お知らせ 👋',
+    'gui.stageHeader.thumbnailTooltipBody':
+        '「<b>サムネイルを保存</b>」がここに移動しました。ステージのスナップショットを撮って、プロジェクトのサムネイルとして設定できます。',
 
     'gui.koshienTestModal.title': 'スモウルビー甲子園のAIを試す',
     'gui.googleDriveLoader.loadError': 'Google ドライブからプロジェクトの読み込みに失敗しました。',
@@ -240,6 +290,11 @@ export default {
     'gui.googleDriveSaveDialog.folderPickerError': 'フォルダピッカーの表示に失敗しました。もう一度お試しください。',
     'gui.urlLoader.loadError': 'プロジェクトURLの読み込みに失敗しました。',
     'gui.urlLoader.invalidUrl': '有効なScratchプロジェクトURLまたはGoogle DriveのURLを入力してください。',
+    'gui.urlLoader.projectNotFound':
+        'プロジェクトが見つかりません。共有が解除されたか、URLが間違っている可能性があります。',
+    'gui.urlLoader.projectAccessDenied': 'このプロジェクトにはアクセスできません。',
+    'gui.urlLoader.serverError': 'Scratchサーバー側でエラーが発生しました。しばらく経ってから再度お試しください。',
+    'gui.urlLoader.networkError': 'ネットワークエラーが発生しました。インターネット接続を確認してください。',
     'gui.urlLoader.title': 'Scratchから読み込む',
     'gui.urlLoader.urlPlaceholder': 'プロジェクトのURLを入力...',
     'gui.urlLoader.openButton': '開く',
@@ -623,12 +678,15 @@ export default {
     'gui.connection.meshV2Initial.joinGroupDescription': 'グループに参加',
     'gui.connection.meshV2Initial.domainHelp':
         'ホスト名が一覧に表示されない場合はドメインを設定してください。{br}学校などの施設の郵便番号が最適です。',
+    'gui.connection.meshV2Initial.domainLockedHelp':
+        'クラスに参加しているため、ドメインは参加コードに固定されています。クラスから抜けるとドメインを変更できます。',
     'gui.connection.meshV2Initial.domainInvalidError': 'ドメイン名に無効な文字が含まれています。',
     'gui.connection.meshV2Initial.domainTooLongError': 'ドメイン名が長すぎます（最大256文字）。',
     
     // SmT blocks
     "gui.kanirobo.name": "かにロボ",
     "gui.kanirobo.description": "かにロボブロック",
+
 
     "gui.kaniroboR.name": "かにロボ(RBoard)",
     "gui.kaniroboR.description": "かにロボブロック(RBoard)",
@@ -991,7 +1049,7 @@ export default {
         'ペンギンのRubyコードを「ルビーを入力する」で入力しよう — メッセージ名がネコと逆になっているよ',
     'gui.howtos.chat-2-sprites-3.step8.title': 'ネコやペンギンを押して実行しよう！',
     // Chat Tutorial 3 Mesh 1
-    'gui.howtos.chat-3-mesh-1.name': 'メッシュ拡張機能でつながろう',
+    'gui.howtos.chat-3-mesh-1.name': 'メッシュでつながろう',
     'gui.howtos.chat-3-mesh-1.step1.title': 'メッシュ拡張機能を使って他の人のスモウルビーとつながろう',
     'gui.howtos.chat-3-mesh-1.step2.title':
         '2人以上のグループをつくってメッシュ拡張機能を選ぶ（1人でも2つのスモウルビーを使えばできる）',
@@ -1032,6 +1090,15 @@ export default {
         '自分のスプライトを押して実行！他の人の「送信メッセージ」は「センサーの値」で取り出せるよ',
     'gui.howtos.chat-3-mesh-3.external.kairyudo.name':
         '開隆堂 やってみよう！プログラミング「チャットアプリを制作しよう」',
+    // Ruby Basics 1: putsで計算してみよう
+    'gui.library.rubyBasics': 'Ruby のきほん',
+    'gui.howtos.ruby-basics-1-numbers.name': 'Rubyで計算してみよう',
+    'gui.howtos.ruby-basics-1-numbers.step1.title': 'Rubyで計算してみよう！',
+    'gui.howtos.ruby-basics-1-numbers.step2.title': 'まずは「puts 2 + 6」を実行してみよう',
+    'gui.howtos.ruby-basics-1-numbers.step3.title': '{greenFlag}を押すと、ネコが「8」としゃべるよ',
+    'gui.howtos.ruby-basics-1-numbers.step4.title': '他の計算も試してみよう（かけ算・わり算・ひき算）',
+    'gui.howtos.ruby-basics-1-numbers.step5.title': '数字を好きなものに変えて、自分だけの計算をしてみよう',
+    'gui.howtos.ruby-basics-1-numbers.external.tryruby.name': '外部サイト「try ruby」で詳しくRubyを学ぶ',
     // Mesh tag
     'gui.libraryTags.mesh': 'メッシュ',
     'gui.cards.all-tutorials': 'チュートリアル',
@@ -1047,13 +1114,19 @@ export default {
     'gui.libraryTags.ruby': 'ルビー',
     'gui.libraryTags.firstTime': 'はじめて',
     'gui.libraryCategories.gettingStarted': '始めましょう',
-    'gui.library.chatApp': 'チャットアプリをつくろう',
+    'gui.library.meshStep1': '通信入門 ① メッセージを送ってみよう',
+    'gui.library.meshStep2': '通信入門 ② ふたりで会話しよう',
+    'gui.library.meshStep3': '通信入門 ③ みんなで会話しよう (メッシュ)',
     'gui.menuBar.updateTooltip': '新しいスモウルビーを使ってみよう！',
     'gui.menuBar.updateConfirm':
         '新しいバージョンのスモウルビーが利用可能です。いますぐ更新する場合は「OK」を、あとにする場合は「キャンセル」を押してください。',
     'gui.menuBar.tutorialTooltip': 'ルビーを試してみよう!',
+    'gui.welcomeTooltip.label': 'スモウルビーへようこそ',
     'gui.aria.clearButton': 'クリア',
-    'gui.extensionButton.dnclExtensionDisabled': '日本語モードでは拡張機能は使えません。',
+    'gui.extensionButton.dnclExtensionConfirm':
+        '日本語モードでは拡張機能は使えません。\nRubyふりがなモードに戻すと拡張機能が使えるようになります。\n戻しますか？',
+    'gui.dnclModeNotice.message': '日本語モード：ブロックが制限されています',
+    'gui.dnclModeNotice.exitButton': 'Rubyふりがなモードに戻す',
     'gui.rubyTab.dnclValidationError':
         '日本語モードでは対応していない記述です。\n対応している命令のみにしてから、モード切り替えを行ってください。',
 

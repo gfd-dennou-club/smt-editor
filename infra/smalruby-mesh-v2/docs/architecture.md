@@ -190,7 +190,7 @@ sequenceDiagram
     end
 ```
 
-### イベント通信フロー（ポーリング）
+### イベント通信フロー（ポーリング、issue #554 で `pollGroupData` に統合）
 
 ```mermaid
 sequenceDiagram
@@ -211,11 +211,52 @@ sequenceDiagram
     AppSync-->>Node1: Response
 
     loop 2秒間隔
+        Node2->>AppSync: pollGroupData(groupId, domain, since)
+        AppSync->>Resolver: JS Pipeline Resolver
+        Note over Resolver,DynamoDB: Function 1: fetchEventsForPoll
+        Resolver->>DynamoDB: Query: pk=GROUP#id@domain AND sk > EVENT#since
+        DynamoDB-->>Resolver: events
+        Note over Resolver,DynamoDB: Function 2: fetchNodeStatusesForPoll
+        Resolver->>DynamoDB: Query: pk=DOMAIN#domain AND begins_with(sk, GROUP#id#NODE#)
+        DynamoDB-->>Resolver: nodeStatuses
+        Resolver-->>AppSync: PollGroupData { events, nodeStatuses }
+        AppSync-->>Node2: Response
+    end
+```
+
+ポーリング クライアントは旧来の `getEventsSince` (2s) + `listGroupStatuses`
+(15s, `startPeriodicDataSync` 経由) の 2 系統リクエストを送る代わりに、
+`pollGroupData` を 2 秒間隔で呼ぶことで events と nodeStatuses を同時取得
+する。AppSync 課金は **Pipeline Resolver 全体で 1 op**。WebSocket モード
+では subscription + 15 秒間隔の `listGroupStatuses` を引き続き使用 (フォール
+バック用途)。
+
+### イベント通信フロー（ポーリング、旧設計 — `getEventsSince` 単体）
+
+旧クライアント・デバッグ・テスト用途では引き続き利用可能（後方互換）:
+
+```mermaid
+sequenceDiagram
+    participant Node2 as Node 2 (受信)
+    participant AppSync
+    participant Resolver
+    participant DynamoDB
+
+    loop 2秒間隔（旧）
         Node2->>AppSync: getEventsSince(groupId, domain, since)
         AppSync->>Resolver: JS Resolver (Unit)
         Resolver->>DynamoDB: Query: pk=GROUP#id@domain AND sk > EVENT#since
         DynamoDB-->>Resolver: Items (Event[])
         Resolver-->>AppSync: Event[]
+        AppSync-->>Node2: Response
+    end
+
+    loop 15秒間隔（旧、startPeriodicDataSync 経由）
+        Node2->>AppSync: listGroupStatuses(groupId, domain)
+        AppSync->>Resolver: JS Resolver (Unit)
+        Resolver->>DynamoDB: Query: pk=DOMAIN#domain AND begins_with(sk, GROUP#id#NODE#)
+        DynamoDB-->>Resolver: NodeStatus[]
+        Resolver-->>AppSync: NodeStatus[]
         AppSync-->>Node2: Response
     end
 ```
@@ -397,26 +438,44 @@ Mesh v2 は Single Table Design を採用し、1つのテーブルにすべて�
 #### 4. イベント (Event)
 
 **PK**: `GROUP#{groupId}@{domain}`
-**SK**: `EVENT#{timestamp}#{eventId}`
+
+**SK** (issue #556 対応):
+- `orderKey` 付き: `EVENT#{server_timestamp}#{orderKey}#{short_uuid}`
+- `orderKey` なし (旧クライアント): `EVENT#{server_timestamp}#{uuid}`
 
 **属性**:
 ```json
 {
   "pk": "GROUP#abc123@192.168.1.1",
-  "sk": "EVENT#2026-01-01T12:00:00.123Z#evt-001",
+  "sk": "EVENT#2026-01-01T12:00:00Z#20260101120000-0000001#a1b2c3d4",
   "eventName": "button_clicked",
   "firedByNodeId": "node-001",
   "groupId": "abc123",
   "domain": "192.168.1.1",
   "payload": "{\"button\":\"A\"}",
-  "timestamp": "2026-01-01T12:00:00.123Z",
+  "timestamp": "2026-01-01T12:00:00Z",
+  "orderKey": "20260101120000-0000001",
   "ttl": 1704067210
 }
 ```
 
 **アクセスパターン**:
-- グループ内イベント一覧: `pk = GROUP#{groupId}@{domain} AND begins_with(sk, "EVENT#")`
-- 時系列イベント取得: Sort Key でソート
+- グループ内イベント以降取得: `pk = GROUP#{groupId}@{domain} AND sk > "EVENT#{since}"` (limit 100)
+- 時系列イベント取得: SK の昇順 (scanIndexForward: true)
+
+##### SK 構造と順序保証 (issue #556)
+
+DynamoDB BatchWriteItem は同一バッチを並列書き込みするため、UUID 末尾だけでは
+取得時に送信順が保証されない。クライアントが `EventInput.orderKey`
+(`<YYYYMMDDHHMMSS>-<NNNNNNN>` 形式) を送信すると、サーバーは SK に組み込み、
+同一 `server_timestamp` 内では `orderKey` の辞書順 = 送信順 でソート可能になる。
+
+`short_uuid` (8 文字) は異なるクライアントが偶然同じ `orderKey` を送ったときの
+一意性確保用。`orderKey` 自体に SK 区切り文字 `#` を含む値も DynamoDB query は
+文字列比較のみなので動作する (cursor 経由のページングも問題なし)。
+
+旧クライアント (`orderKey` 未送信) は従来通り `EVENT#{ts}#{uuid}` で保存され、
+`orderKey` 属性も保存されないため後方互換が保たれる。
 
 ---
 

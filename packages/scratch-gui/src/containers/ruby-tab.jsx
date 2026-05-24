@@ -1,14 +1,15 @@
 // === Smalruby: This file is Smalruby-specific (Ruby tab with Monaco Editor, DNCL mode, furigana) ===
+import Editor from '@monaco-editor/react';
+import VM from '@smalruby/scratch-vm';
 import PropTypes from 'prop-types';
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { injectIntl } from 'react-intl';
 import { connect } from 'react-redux';
-import Editor from '@monaco-editor/react';
-import VM from '@smalruby/scratch-vm';
 import AutoCorrectModal from '../components/auto-correct-modal/auto-correct-modal.jsx';
 import cameraIcon from '../components/blocks-screenshot-button/icon--camera.svg';
 import RubyScriptPreview from '../components/ruby-script-preview/ruby-script-preview.jsx';
 import RubyToolbar from '../components/ruby-toolbar/ruby-toolbar.jsx';
+import analytics from '../lib/analytics';
 import { autoCorrect, defaultSettings as defaultAutoCorrectSettings } from '../lib/auto-correct';
 import collectMetadata from '../lib/collect-metadata.js';
 import { DnclSourceMap } from '../lib/dncl/dncl-source-map';
@@ -17,6 +18,7 @@ import { rubyToDncl } from '../lib/dncl/ruby-to-dncl';
 import FuriganaAnnotator from '../lib/furigana-annotator';
 import { wrapCurrentCodeWithClass } from '../lib/insert-class';
 import intlShape from '../lib/intlShape.js';
+import { isJapaneseLocale } from '../lib/locale-utils';
 import { syncModules } from '../lib/module-sync';
 import { loadMonacoLocale } from '../lib/monaco-i18n-helper';
 import { getPrism, loadPrism } from '../lib/prism-parser';
@@ -28,7 +30,7 @@ import RubyToBlocksConverterHOC from '../lib/ruby-to-blocks-converter-hoc.jsx';
 import { containsV1Code } from '../lib/ruby-to-blocks-converter/v1-detection';
 import { getUrlParams } from '../lib/url-params';
 import { showAlertWithTimeout, closeAlertWithId } from '../reducers/alerts';
-import { setDnclMode as setDnclModeAction } from '../reducers/dncl-mode';
+import { setDnclMode as setDnclModeAction, clearExternalExitDnclModeRequest } from '../reducers/dncl-mode';
 import { BLOCKS_TAB_INDEX, RUBY_TAB_INDEX } from '../reducers/editor-tab';
 import { setAiSaveStatus, clearAiSaveStatus } from '../reducers/koshien-file';
 import { closeFileMenu } from '../reducers/menus.js';
@@ -92,7 +94,7 @@ const loadAutoCorrectSettings = () => {
 
 // === Component ===
 
-const RubyTab = props => {
+const RubyTab = (props) => {
     const {
         vm,
         intl,
@@ -121,6 +123,8 @@ const RubyTab = props => {
         v1PromptDismissed,
         onDismissV1Prompt,
         onSetDnclMode,
+        exitDnclModeExternallyRequested,
+        onClearExitDnclModeRequest,
     } = props;
 
     // --- State ---
@@ -130,9 +134,19 @@ const RubyTab = props => {
     const [canUndo, setCanUndo] = useState(false);
     const [canRedo, setCanRedo] = useState(false);
     const [furiganaEnabled, setFuriganaEnabled] = useState(() => {
+        if (!isJapaneseLocale(locale)) return false;
         const urlRubyMode = getUrlParams().rubyMode;
         if (urlRubyMode === 'furigana') return true;
         if (urlRubyMode === 'ruby' || urlRubyMode === 'dncl') return false;
+        // DNCL mode shows Japanese pseudo-code, not Ruby — furigana annotations
+        // are meaningless and visually distracting in that view. Force off.
+        if (
+            typeof window !== 'undefined' &&
+            window.localStorage &&
+            window.localStorage.getItem(DNCL_MODE_KEY) === 'true'
+        ) {
+            return false;
+        }
         return loadBool(FURIGANA_ENABLED_KEY, true);
     });
     const [autoCorrectEnabled, setAutoCorrectEnabled] = useState(() => loadBool(AUTO_CORRECT_ENABLED_KEY, true));
@@ -142,6 +156,7 @@ const RubyTab = props => {
     const [previewCode, setPreviewCode] = useState('');
     const [dnclValidating, setDnclValidating] = useState(false);
     const [dnclMode, setDnclMode] = useState(() => {
+        if (!isJapaneseLocale(locale)) return false;
         const urlRubyMode = getUrlParams().rubyMode;
         if (urlRubyMode === 'dncl') return true;
         if (urlRubyMode === 'furigana' || urlRubyMode === 'ruby') return false;
@@ -222,9 +237,9 @@ const RubyTab = props => {
         onDismissAlert('rubyVersionChangeFailed');
     };
 
-    const showErrors = errors => {
+    const showErrors = (errors) => {
         if (editorRef.current && monacoRef.current) {
-            const markers = errors.map(err => ({
+            const markers = errors.map((err) => ({
                 startLineNumber: err.row + 1,
                 startColumn: err.column + 1,
                 endLineNumber: err.row + 1,
@@ -247,6 +262,9 @@ const RubyTab = props => {
 
     const renderFurigana = () => {
         if (!editorRef.current || !monacoRef.current) return;
+        // Furigana annotations target Ruby source; in DNCL mode the editor
+        // shows Japanese pseudo-code, so suppress rendering entirely.
+        if (dnclModeRef.current) return;
         const code = editorRef.current.getValue() || '';
         const prism = getPrism();
         if (prism) {
@@ -256,8 +274,9 @@ const RubyTab = props => {
             furiganaRendererRef.current.render(editorRef.current, monacoRef.current, annotations);
             furiganaLastMsRef.current = performance.now() - t0;
         } else {
-            loadPrism().then(loadedPrism => {
+            loadPrism().then((loadedPrism) => {
                 if (!furiganaEnabledRef.current) return;
+                if (dnclModeRef.current) return;
                 if (!editorRef.current || !monacoRef.current) return;
                 const currentCode = editorRef.current.getValue() || '';
                 const t0 = performance.now();
@@ -276,7 +295,7 @@ const RubyTab = props => {
         const delay = Math.max(50, furiganaLastMsRef.current * 2);
         furiganaDebounceTimerRef.current = setTimeout(() => {
             furiganaDebounceTimerRef.current = null;
-            if (furiganaEnabledRef.current) {
+            if (furiganaEnabledRef.current && !dnclModeRef.current) {
                 renderFurigana();
             }
         }, delay);
@@ -294,7 +313,7 @@ const RubyTab = props => {
         }
     };
 
-    const doHighlightLine = lineNumber => {
+    const doHighlightLine = (lineNumber) => {
         if (!editorRef.current || !monacoRef.current) return;
         executingLineDecorationRef.current = highlightLine(
             editorRef.current,
@@ -317,11 +336,11 @@ const RubyTab = props => {
 
     // --- Stable VM event handlers ---
 
-    const handleScriptGlowOn = useCallback(data => {
+    const handleScriptGlowOn = useCallback((data) => {
         setRunningBlockId(data.id);
     }, []);
 
-    const handleScriptGlowOff = useCallback(data => {
+    const handleScriptGlowOff = useCallback((data) => {
         if (runningBlockIdRef.current === data.id) {
             setRunningBlockId(null);
             setExecutingLine(null);
@@ -330,7 +349,7 @@ const RubyTab = props => {
         }
     }, []);
 
-    const handleVisualReport = useCallback(data => {
+    const handleVisualReport = useCallback((data) => {
         if (activeTabIndexRef.current !== RUBY_TAB_INDEX) return;
         bubbleElRef.current = showBubble(bubbleElRef.current, data.value);
     }, []);
@@ -341,7 +360,7 @@ const RubyTab = props => {
 
     // --- Stable Editor callbacks ---
 
-    const dispatchCode = useCallback(code => {
+    const dispatchCode = useCallback((code) => {
         if (dnclModeRef.current) {
             setDnclDisplayCode(code);
             const result = dnclToRuby(code);
@@ -358,7 +377,7 @@ const RubyTab = props => {
     }, []);
 
     const handleEditorChange = useCallback(
-        value => {
+        (value) => {
             // Skip change events triggered by mode switch (Ruby↔DNCL) to
             // prevent a Redux dispatch that causes a re-render race where
             // the dnclMode state hasn't committed yet.
@@ -426,7 +445,7 @@ const RubyTab = props => {
             }
         });
 
-        configChangeListenerRef.current = editor.onDidChangeConfiguration(e => {
+        configChangeListenerRef.current = editor.onDidChangeConfiguration((e) => {
             if (e.hasChanged(monaco.editor.EditorOption.fontInfo)) {
                 if (furiganaEnabledRef.current) {
                     renderFurigana();
@@ -450,7 +469,7 @@ const RubyTab = props => {
 
         // Register callback for Rubytee (AI assistant) to insert code into the editor
         if (onRegisterRubyteeApply) {
-            onRegisterRubyteeApply(code => {
+            onRegisterRubyteeApply((code) => {
                 onChangeRef.current(code);
             });
         }
@@ -460,7 +479,7 @@ const RubyTab = props => {
 
     const handleZoomIn = useCallback(() => {
         const currentSize = rubyCode.fontSize || DEFAULT_FONT_SIZE;
-        const nextSize = FONT_SIZES.find(s => s > currentSize);
+        const nextSize = FONT_SIZES.find((s) => s > currentSize);
         if (nextSize) onFontSizeChange(nextSize);
     }, [rubyCode.fontSize, onFontSizeChange]);
 
@@ -468,7 +487,7 @@ const RubyTab = props => {
         const currentSize = rubyCode.fontSize || DEFAULT_FONT_SIZE;
         const prevSize = FONT_SIZES.slice()
             .reverse()
-            .find(s => s < currentSize);
+            .find((s) => s < currentSize);
         if (prevSize) onFontSizeChange(prevSize);
     }, [rubyCode.fontSize, onFontSizeChange]);
 
@@ -485,7 +504,7 @@ const RubyTab = props => {
     }, [vm, props.projectTitle]);
 
     const handleSelectTarget = useCallback(
-        targetId => {
+        (targetId) => {
             const target = vm.runtime.getTargetById(targetId);
             if (target) vm.setEditingTarget(target.id);
         },
@@ -493,7 +512,7 @@ const RubyTab = props => {
     );
 
     const getSaveToComputerHandler = useCallback(
-        downloadProjectCallback => () => {
+        (downloadProjectCallback) => () => {
             onRequestCloseFile();
             downloadProjectCallback();
             if (onProjectTelemetryEvent) {
@@ -540,7 +559,7 @@ const RubyTab = props => {
     }, [onClearAiSaveStatus]);
 
     const handleConversionError = useCallback(
-        errors => {
+        (errors) => {
             onShowAlert('convertRubyToBlocksError');
             updateRubyCodeErrorsState(errors);
             showErrors(errors);
@@ -571,7 +590,7 @@ const RubyTab = props => {
 
                 // Check DNCL → Ruby conversion errors (e.g. @ or $ in DNCL)
                 if (rubyResult.errors && rubyResult.errors.length > 0) {
-                    const errors = rubyResult.errors.map(err => ({
+                    const errors = rubyResult.errors.map((err) => ({
                         row: err.line - 1,
                         column: err.column - 1,
                         text: dnclValidationErrorMessage,
@@ -586,7 +605,7 @@ const RubyTab = props => {
                     version: rubyVersion,
                 });
                 if (!converter.result) {
-                    const errors = converter.errors.map(err => ({
+                    const errors = converter.errors.map((err) => ({
                         ...err,
                         text: dnclValidationErrorMessage,
                     }));
@@ -635,10 +654,19 @@ const RubyTab = props => {
         isModeSwitchRef.current = false;
         setDnclMode(enabling);
         onSetDnclMode(enabling);
+
+        // Furigana is meaningless in DNCL view (Japanese pseudo-code, not Ruby).
+        // Clear annotations on enable; restore them on disable when the user
+        // had furigana on.
+        if (enabling) {
+            furiganaRendererRef.current?.clear(editorRef.current);
+        } else if (furiganaEnabledRef.current) {
+            renderFurigana();
+        }
     }, [vm, rubyCode.target, intl, rubyVersion, dnclValidationErrorMessage, onSetDnclMode]);
 
     const handleToggleFurigana = useCallback(() => {
-        setFuriganaEnabled(prev => {
+        setFuriganaEnabled((prev) => {
             const enabled = !prev;
             if (typeof window !== 'undefined' && window.localStorage) {
                 window.localStorage.setItem(FURIGANA_ENABLED_KEY, enabled);
@@ -648,7 +676,7 @@ const RubyTab = props => {
     }, []);
 
     const handleToggleAutoCorrect = useCallback(() => {
-        setAutoCorrectEnabled(prev => {
+        setAutoCorrectEnabled((prev) => {
             const enabled = !prev;
             if (typeof window !== 'undefined' && window.localStorage) {
                 window.localStorage.setItem(AUTO_CORRECT_ENABLED_KEY, enabled);
@@ -701,7 +729,7 @@ const RubyTab = props => {
     }, []);
 
     const handleAutoCorrectSettingChange = useCallback((key, value) => {
-        setAutoCorrectSettings(prev => {
+        setAutoCorrectSettings((prev) => {
             const newSettings = { ...prev, [key]: value };
             if (typeof window !== 'undefined' && window.localStorage) {
                 window.localStorage.setItem(AUTO_CORRECT_SETTINGS_KEY, JSON.stringify(newSettings));
@@ -740,7 +768,7 @@ const RubyTab = props => {
     };
 
     const handleExecuteLine = useCallback(
-        async lineNumber => {
+        async (lineNumber) => {
             if (runningBlockIdRef.current) {
                 vm.runtime.toggleScript(runningBlockIdRef.current, {
                     target: vm.editingTarget,
@@ -869,7 +897,7 @@ const RubyTab = props => {
                         stackClick: true,
                     });
                 })
-                .catch(error => {
+                .catch((error) => {
                     // eslint-disable-next-line no-console
                     console.error('[handleExecuteLine] Apply error:', error);
                     onShowAlert('convertRubyToBlocksError');
@@ -940,6 +968,35 @@ const RubyTab = props => {
         loadMonacoLocale(locale);
     }, [locale]);
 
+    // Force Ruby mode when switching to a non-Japanese locale.
+    // Skip the initial render — initial state is already set correctly by useState.
+    const localeInitRef = useRef(false);
+    useEffect(() => {
+        if (!localeInitRef.current) {
+            localeInitRef.current = true;
+            return;
+        }
+        if (isJapaneseLocale(locale)) {
+            // Restore saved preferences when switching back to Japanese
+            setFuriganaEnabled(loadBool(FURIGANA_ENABLED_KEY, true));
+            if (typeof window !== 'undefined' && window.localStorage) {
+                const savedDncl = window.localStorage.getItem(DNCL_MODE_KEY) === 'true';
+                if (savedDncl !== dnclMode) {
+                    setDnclMode(savedDncl);
+                    onSetDnclMode(savedDncl);
+                }
+            }
+        } else {
+            // Non-Japanese locale: force Ruby mode without updating localStorage
+            if (furiganaEnabled) {
+                setFuriganaEnabled(false);
+            }
+            if (dnclMode) {
+                handleToggleDnclMode();
+            }
+        }
+    }, [locale]);
+
     // Furigana toggle effect
     useEffect(() => {
         if (!editorRef.current || !monacoRef.current) return;
@@ -985,6 +1042,19 @@ const RubyTab = props => {
             savePrev();
             return;
         }
+
+        // Snapshot the current Ruby tab mode before any wasDncl reset path
+        // mutates dnclModeRef.current later in this effect. This is used
+        // for the `ruby_tab/open` GA event so it observes the user-intended
+        // mode rather than the transient ruby state during DNCL re-application.
+        const rubyTabOpenLabel =
+            isVisible && !prev.isVisible
+                ? dnclModeRef.current
+                    ? 'dncl'
+                    : furiganaEnabledRef.current
+                      ? 'furigana'
+                      : 'ruby'
+                : null;
 
         // Ruby version change
         if (rubyVersion !== prev.rubyVersion) {
@@ -1037,7 +1107,7 @@ const RubyTab = props => {
                     }
                     onDismissV1Prompt();
                 }
-                targetCodeToBlocksHOC(intl).then(converter => {
+                targetCodeToBlocksHOC(intl).then((converter) => {
                     if (converter.result) {
                         converter.apply().then(async () => {
                             modified = false;
@@ -1093,12 +1163,17 @@ const RubyTab = props => {
                 updateRubyCodeTargetState(vm.editingTarget, rubyVersion);
                 // Schedule DNCL switch after React re-renders with the new
                 // Ruby code and the Monaco editor value prop is committed.
+                // Skip if an external exit was requested (e.g. from extension button).
                 if (wasDncl) {
-                    requestAnimationFrame(() => {
-                        setTimeout(() => {
-                            handleToggleDnclMode();
-                        }, 0);
-                    });
+                    if (exitDnclModeExternallyRequested) {
+                        onClearExitDnclModeRequest?.();
+                    } else {
+                        requestAnimationFrame(() => {
+                            setTimeout(() => {
+                                handleToggleDnclMode();
+                            }, 0);
+                        });
+                    }
                 }
             }
         }
@@ -1109,6 +1184,15 @@ const RubyTab = props => {
                 editorRef.current.layout();
             }
             onMarkRubyTabUsed();
+            try {
+                analytics.event({
+                    category: 'ruby_tab',
+                    action: 'open',
+                    label: rubyTabOpenLabel,
+                });
+            } catch (_e) {
+                // Swallow analytics failures so the editor never breaks.
+            }
         }
 
         updateDebugGlobals(vm, {
@@ -1147,6 +1231,7 @@ const RubyTab = props => {
                     dnclMode={dnclMode}
                     dnclValidating={dnclValidating}
                     onToggleDnclMode={handleToggleDnclMode}
+                    locale={locale}
                 />
                 <div className={styles.editorWrapper}>
                     <Editor
@@ -1165,6 +1250,11 @@ const RubyTab = props => {
                             fixedOverflowWidgets: true,
                             wordBasedSuggestions: 'off',
                             autoIndent: 'full',
+                            // Android Chrome でキーボード出現により親 div の高さが
+                            // 縮んだとき、Monaco を ResizeObserver で自動再レイアウト
+                            // させる。未設定だと内部キャッシュ寸法のままになり、
+                            // キーボードに隠れた領域に caret が残って入力できない。
+                            automaticLayout: true,
                         }}
                         theme="vs"
                         value={dnclMode ? dnclDisplayCode : code}
@@ -1245,9 +1335,11 @@ RubyTab.propTypes = {
     v1PromptDismissed: PropTypes.bool,
     onDismissV1Prompt: PropTypes.func,
     onSetDnclMode: PropTypes.func,
+    exitDnclModeExternallyRequested: PropTypes.bool,
+    onClearExitDnclModeRequest: PropTypes.func,
 };
 
-const mapStateToProps = state => ({
+const mapStateToProps = (state) => ({
     blocksTabVisible: state.scratchGui.editorTab.activeTabIndex === BLOCKS_TAB_INDEX,
     editingTarget: state.scratchGui.targets.editingTarget,
     rubyCode: state.scratchGui.rubyCode,
@@ -1257,25 +1349,27 @@ const mapStateToProps = state => ({
     locale: state.locales.locale,
     activeTabIndex: state.scratchGui.editorTab.activeTabIndex,
     v1PromptDismissed: state.scratchGui.settings.v1PromptDismissed,
+    exitDnclModeExternallyRequested: state.scratchGui.dnclMode.exitDnclModeExternallyRequested,
 });
 
-const mapDispatchToProps = dispatch => ({
-    onChange: code => {
+const mapDispatchToProps = (dispatch) => ({
+    onChange: (code) => {
         dispatch(updateRubyCode(code));
         dispatch(setProjectChanged());
     },
-    updateRubyCodeErrorsState: errors => dispatch(updateRubyCodeErrors(errors)),
+    updateRubyCodeErrorsState: (errors) => dispatch(updateRubyCodeErrors(errors)),
     updateRubyCodeTargetState: (target, version) => dispatch(updateRubyCodeTarget(target, version)),
-    onRevertRubyVersion: version => dispatch(setRubyVersion(version)),
-    onShowAlert: alertId => showAlertWithTimeout(dispatch, alertId),
-    onDismissAlert: alertId => dispatch(closeAlertWithId(alertId)),
+    onRevertRubyVersion: (version) => dispatch(setRubyVersion(version)),
+    onShowAlert: (alertId) => showAlertWithTimeout(dispatch, alertId),
+    onDismissAlert: (alertId) => dispatch(closeAlertWithId(alertId)),
     onRequestCloseFile: () => dispatch(closeFileMenu()),
-    onSetAiSaveStatus: status => dispatch(setAiSaveStatus(status)),
+    onSetAiSaveStatus: (status) => dispatch(setAiSaveStatus(status)),
     onClearAiSaveStatus: () => dispatch(clearAiSaveStatus()),
-    onFontSizeChange: fontSize => dispatch(updateRubyFontSize(fontSize)),
+    onFontSizeChange: (fontSize) => dispatch(updateRubyFontSize(fontSize)),
     onMarkRubyTabUsed: () => dispatch(markRubyTabUsed()),
     onDismissV1Prompt: () => dispatch(dismissV1Prompt()),
-    onSetDnclMode: dnclMode => dispatch(setDnclModeAction(dnclMode)),
+    onSetDnclMode: (dnclMode) => dispatch(setDnclModeAction(dnclMode)),
+    onClearExitDnclModeRequest: () => dispatch(clearExternalExitDnclModeRequest()),
 });
 
 const ConnectedRubyTab = RubyteeModalHOC(

@@ -1441,8 +1441,19 @@ class Runtime extends EventEmitter {
 
             return {
                 id: categoryInfo.id,
-                xml: `<category name="${name}" id="${categoryInfo.id}" ${statusButtonXML} ${colorXML} ${menuIconXML}>${
+                // === Smalruby: Start of toolboxitemid for extension categories ===
+                // Blockly v12's ContinuousToolbox parses category id from the
+                // `toolboxitemid` attribute (`iI.id_ = e.toolboxitemid || genUid()`).
+                // When only `id` is present, Blockly falls back to an auto-generated
+                // `blockly-XXX` id, which then propagates to the StatusIndicatorLabel
+                // (`extensionId = E.id`). The connection-modal subsequently opens with
+                // a bogus extensionId and never finds the real extension — modal stays
+                // at scanning, status icon stays "!", and `vm.connectPeripheral` is a
+                // no-op. Emit `toolboxitemid` (preferred by v12) alongside the legacy
+                // `id` attribute so the StatusIndicatorLabel receives the real id.
+                xml: `<category name="${name}" toolboxitemid="${categoryInfo.id}" id="${categoryInfo.id}" ${statusButtonXML} ${colorXML} ${menuIconXML}>${
                     paletteBlocks.map(block => block.xml).join('')}</category>`
+                // === Smalruby: End of toolboxitemid for extension categories ===
             };
         });
     }
@@ -1664,12 +1675,27 @@ class Runtime extends EventEmitter {
         // We should tune this over time based on user feedback and our budget.
         const secondsPerAction = 4;
 
+        const productionDomains = ['scratch.mit.edu', 'scratch.org'];
+        const isProductionHost = typeof window !== 'undefined' &&
+            productionDomains.some(d =>
+                window.location.hostname === d || window.location.hostname.endsWith(`.${d}`)
+            );
+
         /** @type {Parameters<typeof storage.scratchFetch.createQueue>[1]} */
+        // To override on staging, set `window._scratchExtensionServiceQueueOptions` in the browser console
+        // before the VM initializes (e.g. in a DevTools snippet that runs before page load), then reload.
+        // Example: window._scratchExtensionServiceQueueOptions = { burstLimit: 10, sustainRate: 1 }
+        // This override is ignored on production hosts.
+        // Note to folks who run into this in the wild: this is very temporary! Please don't rely on this in, say,
+        // an extension that implements add-ons for Scratch. Just for example. Anyway... we're trying to tune these
+        // numbers to find a good balance between user experience and our monetary costs. My first attempt was
+        // definitely too low; sorry! Once we're done tuning, we'll probably remove this override.
         const extensionServiceQueueOptions = {
             burstLimit: 3, // How many actions can be sent in a short time if we haven't done any for a while?
             concurrency: 1, // Number of concurrent connections to the service
             queueCostLimit: 10, // Don't queue more actions than can finish before the `fetchWithTimeout` timeout.
-            sustainRate: 1 / secondsPerAction // See `secondsPerAction` above.
+            sustainRate: 1 / secondsPerAction, // See `secondsPerAction` above.
+            ...(!isProductionHost && typeof window !== 'undefined' && window._scratchExtensionServiceQueueOptions)
         };
 
         /** @todo The extensions should probably specify their own queue options (within existing limits) */

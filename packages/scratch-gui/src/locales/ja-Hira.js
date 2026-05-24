@@ -1,6 +1,8 @@
 export default {
     'gui.modal.reload': 'さいよみこみ',
     'gui.modal.stop': 'ちゅうし',
+    'gui.confirmationPrompt.confirm': 'はい',
+    'gui.confirmationPrompt.cancel': 'いいえ',
     'gui.menuBar.loadFromUrl': 'Scratchからよみこむ',
     'gui.menuBar.colorMode': 'カラーモード',
     'gui.menuBar.rubyVersion': 'ルビー',
@@ -11,7 +13,7 @@ export default {
     'gui.menuBar.smalrubotS1.flashFirmware': 'ファームウェアかきこみ',
     'gui.smalrubotFirmware.title': 'スモウルボットS1 ファームウェア',
     'gui.smalrubotFirmware.description':
-        'スモウルボットS1のファームウェアをStuduinoきばんにかきこみます。USBケーブルできばんをせつぞくしてから、したのボタンをおしてください。',
+        'スモウルボットS1のファームウェアをStuduinoきばんにかきこみます。USBケーブルできばんをせつぞくしてから、したのボタンをおしてシリアルポートせんたくダイアログで、おつかいのスモウルボット S1 をえらんでください。',
     'gui.smalrubotFirmware.warning': 'ファームウェアかきこみちゅうにUSBケーブルをぬかないでください。',
     'gui.smalrubotFirmware.flashButton': 'ファームウェアかきこみ',
     'gui.smalrubotFirmware.cancelButton': 'キャンセル',
@@ -31,7 +33,29 @@ export default {
     'gui.connection.error.flashFirmwareButton': 'ファームウェアかきこみ',
     'gui.classroom.title': 'クラス',
     'gui.menuBar.classroom': 'クラス',
+    'gui.menuBar.classroomJoined': 'クラス:しゅっせきばんごう{seatNumber}',
     'gui.menuBar.classroomManagement': 'クラスかんり...',
+    'gui.menuBar.aboutSmalruby': 'スモウルビーについて',
+    'gui.menuBar.showWelcomeAgain': 'ウェルカムをもういちどみる',
+    'gui.welcomeModal.title': 'スモウルビーへようこそ',
+    'gui.welcomeModal.lead':
+        'スモウルビーは、ブラウザだけでつかえるむりょうのプログラミングかんきょうです。' +
+        'ブロックからはじめて、Rubyのコードまでちょうせんできます。',
+    'gui.welcomeModal.cardBlocksTitle': 'ブロックでつくる',
+    'gui.welcomeModal.cardBlocksDesc': 'ブロックをならべてゲームやアニメをつくれます。',
+    'gui.welcomeModal.cardBlocksDescShort': 'ゲームやアニメをつくれます。',
+    'gui.welcomeModal.cardRubyTitle': 'Rubyにちょうせん',
+    'gui.welcomeModal.cardRubyDesc': 'ふりがなつきのRubyコードでステップアップ。',
+    'gui.welcomeModal.cardRubyDescShort': 'ふりがなつきでステップアップ。',
+    'gui.welcomeModal.cardMeshTitle': 'ともだちとつなぐ',
+    'gui.welcomeModal.cardMeshDesc': 'メッシュきのうでふくすうのたんまつをつないであそべます。',
+    'gui.welcomeModal.cardMeshDescShort': 'ふくすうのたんまつをつないであそべます。',
+    'gui.welcomeModal.startTutorial': 'さいしょのチュートリアルをはじめる',
+    'gui.welcomeModal.learnMore': 'スモウルビーについてくわしく',
+    'gui.welcomeModal.leadShort': 'ブロックからはじめて、Rubyのコードまでちょうせんできます。',
+    'gui.welcomeModal.later': 'あとでみる',
+    'gui.mobile.drawer.section.help': 'ヘルプ',
+    'gui.mobile.drawer.help.showWelcome': 'ウェルカムをもういちどみる',
     'gui.classroom.management.title': 'クラスかんり',
     'gui.classroom.roleSelect.prompt': 'どちらでつかいますか？',
     'gui.classroom.roleSelect.teacher': 'せんせい',
@@ -63,6 +87,24 @@ export default {
     'gui.classroom.studentJoin.teacherLink': 'せんせいのかたはこちら（クラスかんり）',
     'gui.classroom.studentSeat.prompt': 'しゅっせきばんごうをえらんでください',
     'gui.classroom.studentSeat.join': 'さんかする',
+    'gui.classroom.kicked.banner.title': 'せんせいによってクラスからたいしつさせられました。',
+    'gui.classroom.kicked.banner.subtitle':
+        '「{className}」にもういちどさんかするには、しゅっせきばんごうをえらびなおしてください。',
+    'gui.classroom.kickRequest.title': 'しゅっせきばんごう{seatNumber}のひとにたいしつをいらいしますか？',
+    'gui.classroom.kickRequest.body':
+        'しゅっせきばんごう{seatNumber}がじぶんのせきで、ほかのひとがまちがってえらんでしまったときにつかってください。せんせいにいらいがおくられ、しょうにんするかどうかをきめてもらいます。',
+    'gui.classroom.kickRequest.reasonPlaceholder': 'にんい：せんせいへひとこと（200もじまで）',
+    'gui.classroom.kickRequest.cancel': 'キャンセル',
+    'gui.classroom.kickRequest.submit': 'いらいをおくる',
+    'gui.classroom.kickRequest.pendingBanner':
+        'しゅっせきばんごう{seatNumber}のたいしつをせんせいにいらいちゅうです…',
+    'gui.classroom.kickRequest.rejectedBanner':
+        'しゅっせきばんごう{seatNumber}のたいしつはじゅりされませんでした。べつのせきをえらぶか、もういちどいらいをだしてください。',
+    'gui.classroom.kickRequest.teacherTitle':
+        '{count, plural, one {# けんのたいしつリクエストがとどいています} other {# けんのたいしつリクエストがとどいています}}',
+    'gui.classroom.kickRequest.noReason': '（りゆうのにゅうりょくなし）',
+    'gui.classroom.kickRequest.approve': 'しょうにん（このせいとをたいしつさせる）',
+    'gui.classroom.kickRequest.reject': 'きゃっか',
     'gui.classroom.studentJoined.success': 'さんかしました！',
     'gui.classroom.studentJoined.seat': 'しゅっせきばんごう{seatNumber}',
     'gui.classroom.studentJoined.start': 'はじめる',
@@ -147,9 +189,11 @@ export default {
     'gui.classroom.teacherDetail.selectMember': 'しゅっせきばんごうをクリックしてせいとのしょうさいをみる',
     'gui.classroom.joinCode.fullscreen': 'ぜんがめんひょうじ',
     'gui.classroom.teacherDetail.selectClassroom': 'サイドバーからクラスをせんたくしてください',
-    'gui.classroom.management.loginPrompt': 'Googleでログイン',
-    'gui.classroom.management.loginDescription': 'Googleアカウントでログインして、クラスをかんりします。',
+    'gui.classroom.management.loginPrompt': 'ログインしてクラスをかんり',
+    'gui.classroom.management.loginDescription':
+        'がっこうのアカウントでログインして、クラスをつくったりかんりしたりします。',
     'gui.classroom.management.loginButton': 'Googleでログイン',
+    'gui.classroom.management.microsoftLoginButton': 'Microsoftでログイン',
     'gui.classroom.management.sidebarTitle': 'あなたのクラス・かだい',
     'gui.classroom.management.loading': 'よみこみちゅう...',
     'gui.classroom.management.create': 'クラスをつくる',
@@ -200,6 +244,10 @@ export default {
     'gui.sharedMessages.loadFromComputerTitle': 'コンピューターからよみこむ',
     'gui.sharedMessages.migrateMeshV1Warning':
         'このプロジェクトにはじゅうらいのメッシュかくちょうきのうがふくまれていますので4がつ30にちまでしかつかえません。このままじゅうらいのメッシュかくちょうきのうをりようするばあいはOKをせんたくします。そうではなく、あたらしいメッシュかくちょうきのうをつかうばあいはキャンセルをせんたくします。',
+    'gui.sharedMessages.meshV1AutoMigrated':
+        'じゅうらいのメッシュかくちょうきのうのサービスはしゅうりょうしました。プロジェクトのなかのブロックをあたらしいメッシュかくちょうきのうにじどうでおきかえました。どうさをかくにんしてください。',
+    'gui.sharedMessages.meshV1BackpackAutoMigrated':
+        'バックパックのなかのじゅうらいのメッシュブロックを{count}けん、あたらしいメッシュブロックにじどうでおきかえました。',
     'gui.sharedMessages.changedRubyVersionByKoshien':
         'このプロジェクトにはスモウルビーこうしえんかくちょうきのうがふくまれていますのでルビーをバージョン1にへんこうしました',
     'gui.menuBar.loadFromGoogleDrive': 'Google ドライブからよみこむ',
@@ -222,6 +270,11 @@ export default {
     'gui.smalruby3.alerts.rubyVersionChangeFailed':
         'ルビーのバージョンをへんこうできません：さきにルビーのコードのエラーをなおしてください。',
     'gui.stageHeader.stageSizeMiddle': 'ちゅうサイズのステージにきりかえる',
+    'gui.stageHeader.saveThumbnail': 'サムネイルをほぞん',
+    'gui.stageHeader.saveThumbnailMessage': 'サムネイルをせっていしてもよいですか？',
+    'gui.stageHeader.thumbnailTooltipTitle': 'おしらせ 👋',
+    'gui.stageHeader.thumbnailTooltipBody':
+        '「<b>サムネイルをほぞん</b>」がここにいどうしました。ステージのスナップショットをとって、プロジェクトのサムネイルとしてせっていできます。',
 
     'gui.koshienTestModal.title': 'スモウルビーこうしえんのAIをためす',
     'gui.googleDriveLoader.loadError': 'Google ドライブからプロジェクトのよみこみにしっぱいしました。',
@@ -248,6 +301,13 @@ export default {
         'フォルダピッカーのひょうじにしっぱいしました。もういちどおためしください。',
     'gui.urlLoader.loadError': 'プロジェクトURLのよみこみにしっぱいしました。',
     'gui.urlLoader.invalidUrl': 'ゆうこうなScratchプロジェクトURLまたはGoogle DriveのURLをにゅうりょくしてください。',
+    'gui.urlLoader.projectNotFound':
+        'プロジェクトがみつかりません。きょうゆうがかいじょされたか、URLがまちがっているかもしれません。',
+    'gui.urlLoader.projectAccessDenied': 'このプロジェクトにはアクセスできません。',
+    'gui.urlLoader.serverError':
+        'Scratchサーバーがわでエラーがはっせいしました。しばらくたってからもういちどおためしください。',
+    'gui.urlLoader.networkError':
+        'ネットワークエラーがはっせいしました。インターネットせつぞくをかくにんしてください。',
     'gui.urlLoader.title': 'Scratchからよみこむ',
     'gui.urlLoader.urlPlaceholder': 'プロジェクトのURLをにゅうりょく...',
     'gui.urlLoader.openButton': 'ひらく',
@@ -638,13 +698,15 @@ export default {
     'gui.connection.meshV2Initial.joinGroupDescription': 'グループにさんか',
     'gui.connection.meshV2Initial.domainHelp':
         'ホストがいちらんにひょうじされないばあいはドメインをせっていしてください。{br}がっこうなどのしせつのゆうびんばんごうがさいてきです。',
+    'gui.connection.meshV2Initial.domainLockedHelp':
+        'クラスにさんかしているため、ドメインはさんかコードにこていされています。クラスからぬけるとドメインをへんこうできます。',
     'gui.connection.meshV2Initial.domainInvalidError': 'ドメインめいにむこうなもじがふくまれています。',
     'gui.connection.meshV2Initial.domainTooLongError': 'ドメインめいがながすぎます（さいだい256もじ）。',
+
 
     // SmT blocks
     "gui.kanirobo.name": "かにロボ",
     "gui.kanirobo.description": "かにロボブロック",
-
 
     "gui.kaniroboR.name": "かにロボ(RBoard)",
     "gui.kaniroboR.description": "かにロボブロック(RBoard)",
@@ -1011,7 +1073,7 @@ export default {
         'ペンギンのRubyコードを「ルビーをにゅうりょくする」でにゅうりょくしよう — メッセージめいがネコとぎゃくになっているよ',
     'gui.howtos.chat-2-sprites-3.step8.title': 'ネコやペンギンをおしてじっこうしよう！',
     // Chat Tutorial 3 Mesh 1
-    'gui.howtos.chat-3-mesh-1.name': 'メッシュかくちょうきのうでつながろう',
+    'gui.howtos.chat-3-mesh-1.name': 'メッシュでつながろう',
     'gui.howtos.chat-3-mesh-1.step1.title': 'メッシュかくちょうきのうをつかってほかのひとのスモウルビーとつながろう',
     'gui.howtos.chat-3-mesh-1.step2.title':
         '2にんいじょうのグループをつくってメッシュかくちょうきのうをえらぶ（1にんでも2つのスモウルビーをつかえばできる）',
@@ -1057,6 +1119,15 @@ export default {
         'じぶんのスプライトをおしてじっこう！ほかのひとの「そうしんメッセージ」は「センサーのあたい」でとりだせるよ',
     'gui.howtos.chat-3-mesh-3.external.kairyudo.name':
         'かいりゅうどう やってみよう！プログラミング「チャットアプリをせいさくしよう」',
+    // Ruby Basics 1: putsでけいさんしてみよう
+    'gui.library.rubyBasics': 'Ruby のきほん',
+    'gui.howtos.ruby-basics-1-numbers.name': 'Rubyでけいさんしてみよう',
+    'gui.howtos.ruby-basics-1-numbers.step1.title': 'Rubyでけいさんしてみよう！',
+    'gui.howtos.ruby-basics-1-numbers.step2.title': 'まずは「puts 2 + 6」をじっこうしてみよう',
+    'gui.howtos.ruby-basics-1-numbers.step3.title': '{greenFlag}をおすと、ネコが「8」としゃべるよ',
+    'gui.howtos.ruby-basics-1-numbers.step4.title': 'ほかのけいさんもためしてみよう（かけざん・わりざん・ひきざん）',
+    'gui.howtos.ruby-basics-1-numbers.step5.title': 'すうじをすきなものにかえて、じぶんだけのけいさんをしてみよう',
+    'gui.howtos.ruby-basics-1-numbers.external.tryruby.name': 'がいぶサイト「try ruby」でくわしくRubyをまなぶ',
     // Mesh tag
     'gui.libraryTags.mesh': 'メッシュ',
     'gui.cards.insert-ruby': 'ルビーをにゅうりょくする',
@@ -1065,13 +1136,19 @@ export default {
     'gui.libraryTags.ruby': 'ルビー',
     'gui.libraryTags.firstTime': 'はじめて',
     'gui.libraryCategories.gettingStarted': 'はじめましょう',
-    'gui.library.chatApp': 'チャットアプリをつくろう',
+    'gui.library.meshStep1': 'つうしんにゅうもん ① メッセージをおくってみよう',
+    'gui.library.meshStep2': 'つうしんにゅうもん ② ふたりでかいわしよう',
+    'gui.library.meshStep3': 'つうしんにゅうもん ③ みんなでかいわしよう (メッシュ)',
     'gui.menuBar.updateTooltip': 'あたらしいスモウルビーをつかってみよう！',
     'gui.menuBar.updateConfirm':
         'あたらしいバージョンのスモウルビーがりようかのうです。いますぐこうしんするばあいは「OK」を、あとにするばあいは「キャンセル」をおしてください。',
     'gui.menuBar.tutorialTooltip': 'ルビーをためしてみよう!',
+    'gui.welcomeTooltip.label': 'スモウルビーへようこそ',
     'gui.aria.clearButton': 'クリア',
-    'gui.extensionButton.dnclExtensionDisabled': 'にほんごモードではかくちょうきのうはつかえません。',
+    'gui.extensionButton.dnclExtensionConfirm':
+        'にほんごモードではかくちょうきのうはつかえません。\nRubyふりがなモードにもどすとかくちょうきのうがつかえるようになります。\nもどしますか？',
+    'gui.dnclModeNotice.message': 'にほんごモード：ブロックがせいげんされています',
+    'gui.dnclModeNotice.exitButton': 'Rubyふりがなモードにもどす',
     'gui.rubyTab.dnclValidationError':
         'にほんごモードではたいおうしていないきじゅつです。\nたいおうしているめいれいのみにしてから、モードきりかえをおこなってください。',
 

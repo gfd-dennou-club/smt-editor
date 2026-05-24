@@ -1,6 +1,7 @@
 import {defineMessages} from 'react-intl';
 import _ from 'lodash';
 import {RubyToBlocksConverterError} from '../errors';
+import Primitive from '../primitive';
 import ExpressionsLiterals from './expressions-literals';
 
 const messages = defineMessages({
@@ -31,6 +32,89 @@ const ExpressionHandlers = {
     ...ExpressionsLiterals,
 
     visitCallNode (node) {
+        // === Smalruby: Start of attr_accessor getter/setter resolution ===
+        const attrAccessors = this._context.attrAccessors;
+        if (attrAccessors) {
+            const recvType = node.receiver ? this._getNodeTypeName(node.receiver) : null;
+            const isSelfOrNone = !node.receiver || recvType === 'SelfNode';
+
+            // Getter: foo or self.foo (no args, no block)
+            if (isSelfOrNone &&
+                (!node.arguments_ || node.arguments_.arguments_.length === 0) &&
+                !node.block) {
+                const attrKind = attrAccessors[node.name];
+                if (attrKind === 'accessor' || attrKind === 'reader') {
+                    return this._onVar(`@${node.name}`, 'instance', node);
+                }
+            }
+
+            // Setter: self.foo = val (name ends with =, 1 arg)
+            if (node.name.endsWith('=') &&
+                recvType === 'SelfNode' &&
+                node.arguments_ && node.arguments_.arguments_.length === 1) {
+                const baseName = node.name.slice(0, -1);
+                const attrKind = attrAccessors[baseName];
+                if (attrKind === 'accessor' || attrKind === 'writer') {
+                    const variable = this._lookupOrCreateVariable(`@${baseName}`);
+                    const savedIsValue = this._context.isValue;
+                    this._context.isValue = true;
+                    let rh = this.visit(node.arguments_.arguments_[0]);
+                    this._context.isValue = savedIsValue;
+                    const s = this._splitPreBlocksAndValue(rh);
+                    rh = s.value;
+                    const preBlks = s.preBlocks;
+                    const block = this._callConvertersHandler('onVasgn', 'instance', variable, rh);
+                    if (block) {
+                        if (preBlks.length > 0) {
+                            return [...preBlks, ...(_.isArray(block) ? block : [block])];
+                        }
+                        return block;
+                    }
+                }
+            }
+        }
+        // === Smalruby: End of attr_accessor getter/setter resolution ===
+
+        // === Smalruby: Start of Array.new / Hash.new constructor ===
+        if (node.name === 'new' && node.receiver) {
+            const recvType = this._getNodeTypeName(node.receiver);
+            if (recvType === 'ConstantReadNode') {
+                const className = node.receiver.name;
+                const ctorArgs = node.arguments_ ? node.arguments_.arguments_ : [];
+
+                if (className === 'Array') {
+                    if (ctorArgs.length === 0) {
+                        return new Primitive('array', [], node);
+                    }
+                    if (ctorArgs.length <= 2) {
+                        const sizeNode = ctorArgs[0];
+                        const sizeType = this._getNodeTypeName(sizeNode);
+                        if (sizeType === 'IntegerNode') {
+                            const size = sizeNode.value;
+                            const fillVal = ctorArgs.length === 2
+                                ? this.visit(ctorArgs[1])
+                                : '';
+                            const items = Array.from({length: size}, () => fillVal);
+                            return new Primitive('array', items, node);
+                        }
+                    }
+                }
+
+                if (className === 'Hash') {
+                    if (ctorArgs.length === 0) {
+                        return new Primitive('hash', new Map(), node);
+                    }
+                    // Hash.new(default) → error
+                    throw new RubyToBlocksConverterError(
+                        node,
+                        `Hash.new(${this._getSource(ctorArgs[0])}) — ` +
+                        'ハッシュのデフォルト値には対応していません。{} を使ってください。'
+                    );
+                }
+            }
+        }
+        // === Smalruby: End of Array.new / Hash.new constructor ===
+
         const saved = this._saveContext();
 
         const preBlocks = [];
@@ -84,6 +168,25 @@ const ExpressionHandlers = {
         if (!block) {
             block = this._callConvertersHandler('onSend', receiver, name, args, rubyBlockArgs, rubyBlock, node);
         }
+
+        // === Smalruby: Start of auto-split method call return value ===
+        // When a smalrubyRuby method COMMAND block is used in a value context
+        // (e.g. say("hello".reverse)), split into:
+        //   1. The COMMAND block (as a pre-block)
+        //   2. A returnValue REPORTER (as the value)
+        if (block && this._isBlock(block) &&
+            typeof block.opcode === 'string' &&
+            /^smalrubyRuby_\w+Method$/.test(block.opcode)) {
+            // Skip auto-split for bang methods (they are statements, not expressions)
+            const method = block.fields && block.fields.METHOD && block.fields.METHOD.value;
+            if (!method || !method.endsWith('!')) {
+                const rvBlock = this._createBlock('smalrubyRuby_returnValue', 'value');
+                preBlocks.push(block);
+                block = rvBlock;
+            }
+        }
+        // === Smalruby: End of auto-split method call return value ===
+
         if (!block) {
             if ((this._isSelf(receiver) || receiver === null) && !rubyBlock) {
                 switch (name) {

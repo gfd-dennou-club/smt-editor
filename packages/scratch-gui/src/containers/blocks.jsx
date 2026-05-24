@@ -23,7 +23,7 @@ import DragConstants from '../lib/drag-constants';
 import defineDynamicBlock from '../lib/define-dynamic-block';
 import {DEFAULT_MODE, getColorsForMode, colorModeMap} from '../lib/settings/color-mode';
 import {CAT_BLOCKS_THEME} from '../lib/settings/theme';
-import {injectExtensionBlockMode, injectExtensionCategoryMode} from '../lib/settings/color-mode/blockHelpers';
+import {injectExtensionBlockIcons, injectExtensionCategoryMode} from '../lib/settings/color-mode/blockHelpers';
 
 import {connect} from 'react-redux';
 import {updateToolbox} from '../reducers/toolbox';
@@ -66,7 +66,7 @@ const DroppableBlocks = DropAreaHOC([
 class Blocks extends React.Component {
     constructor (props) {
         super(props);
-        this.ScratchBlocks = VMScratchBlocks(props.vm, false);
+        this.ScratchBlocks = VMScratchBlocks(props.vm);
         bindAll(this, [
             'attachVM',
             'detachVM',
@@ -96,8 +96,11 @@ class Blocks extends React.Component {
             'setLocale',
             'handleDownloadBlocksImage'
         ]);
-        this.ScratchBlocks.prompt = this.handlePromptStart;
-        this.ScratchBlocks.statusButtonCallback = this.handleConnectionModalStart;
+        this.ScratchBlocks.dialog.setPrompt(this.handlePromptStart);
+        this.ScratchBlocks.ScratchVariables.setPromptHandler(
+            this.handlePromptStart
+        );
+        this.ScratchBlocks.StatusIndicatorLabel.statusButtonCallback = this.handleConnectionModalStart;
         this.ScratchBlocks.recordSoundCallback = this.handleOpenSoundRecorder;
 
         this.state = {
@@ -106,24 +109,103 @@ class Blocks extends React.Component {
         this.onTargetsUpdate = debounce(this.onTargetsUpdate, 100);
         this.toolboxUpdateQueue = [];
         this._pendingScrollCenter = false;
+        // === Smalruby: Start of deferred flyout rebuild ===
+        // Track whether the code tab has ever been visible. When the workspace
+        // is first created while a non-code tab is active (?tab=ruby etc.),
+        // Blockly computes SVG text widths as 0 because the container is hidden.
+        // On the first visibility we must rebuild the flyout without recycling
+        // so that all blocks get correct measurements.
+        this._hasBeenVisible = false;
+        // === Smalruby: End of deferred flyout rebuild ===
+        // === Smalruby: Start of iOS flyout touch bleed fix ===
+        // On iOS Safari, tapping "ブロックを作る" in the Blockly flyout can
+        // spuriously fire the "変数を作る" callback first due to SVG touch
+        // event propagation. These are used by handlePromptStart and the
+        // externalProcedureDefCallback wrapper below to cancel the spurious
+        // variable prompt when a procedure modal is about to open. (#698)
+        this._pendingPromptTimer = null;
+        this._pendingPromptArgs = null;
+        this._procedureJustActivated = false;
+        this._procedureActivatedTimer = null;
+        // === Smalruby: End of iOS flyout touch bleed fix ===
     }
     componentDidMount () {
-        this.ScratchBlocks = VMScratchBlocks(this.props.vm, this.props.useCatBlocks);
+        this.ScratchBlocks = VMScratchBlocks(this.props.vm);
         this.props.onSetScratchBlocks(this.ScratchBlocks);
-        this.ScratchBlocks.prompt = this.handlePromptStart;
-        this.ScratchBlocks.statusButtonCallback = this.handleConnectionModalStart;
+        this.ScratchBlocks.dialog.setPrompt(this.handlePromptStart);
+        this.ScratchBlocks.ScratchVariables.setPromptHandler(
+            this.handlePromptStart
+        );
+        this.ScratchBlocks.StatusIndicatorLabel.statusButtonCallback = this.handleConnectionModalStart;
         this.ScratchBlocks.recordSoundCallback = this.handleOpenSoundRecorder;
 
         this.ScratchBlocks.FieldColourSlider.activateEyedropper_ = this.props.onActivateColorPicker;
-        this.ScratchBlocks.Procedures.externalProcedureDefCallback = this.props.onActivateCustomProcedures;
+        // === Smalruby: Start of iOS flyout touch bleed fix ===
+        // On iOS Safari with MobileGui, tapping "ブロックを作る" can also fire
+        // the "変数を作る" callback due to Blockly flyout event propagation.
+        // Wrap externalProcedureDefCallback to cancel any pending variable
+        // prompt before opening the custom procedures modal. (#698)
+        this.ScratchBlocks.ScratchProcedures.externalProcedureDefCallback = (data, callback) => {
+            if (this._pendingPromptTimer) {
+                clearTimeout(this._pendingPromptTimer);
+                this._pendingPromptTimer = null;
+            }
+            this._pendingPromptArgs = null;
+            // Set a flag so handlePromptStart (which may fire up to ~200ms after
+            // this callback) knows to skip showing the variable modal. (#698)
+            this._procedureJustActivated = true;
+            if (this._procedureActivatedTimer) clearTimeout(this._procedureActivatedTimer);
+            this._procedureActivatedTimer = setTimeout(() => {
+                this._procedureJustActivated = false;
+                this._procedureActivatedTimer = null;
+            }, 300);
+            this.props.onActivateCustomProcedures(data, callback);
+        };
+        // === Smalruby: End of iOS flyout touch bleed fix ===
         this.ScratchBlocks.ScratchMsgs.setLocale(this.props.locale);
 
         const workspaceConfig = defaultsDeep({},
             Blocks.defaultOptions,
             this.props.options,
-            {rtl: this.props.isRtl, toolbox: this.props.toolboxXML, colours: getColorsForMode(this.props.colorMode)}
+            {
+                rtl: this.props.isRtl,
+                toolbox: this.props.toolboxXML,
+                theme: new this.ScratchBlocks.Theme(
+                    this.props.colorMode,
+                    getColorsForMode(this.props.colorMode)
+                ),
+                // TODO: use scratch-blocks constants instead of bare strings
+                scratchTheme: this.props.useCatBlocks ? 'catblocks' : 'classic'
+            }
         );
         this.workspace = this.ScratchBlocks.inject(this.blocks, workspaceConfig);
+        this.workspace.registerToolboxCategoryCallback(
+            'VARIABLE',
+            this.ScratchBlocks.ScratchVariables.getVariablesCategory
+        );
+        this.workspace.registerToolboxCategoryCallback(
+            'PROCEDURE',
+            this.ScratchBlocks.ScratchProcedures.getProceduresCategory
+        );
+
+        this.toolboxUpdateChangeListener = event => {
+            if (
+                event.type === this.ScratchBlocks.Events.VAR_CREATE ||
+                event.type === this.ScratchBlocks.Events.VAR_RENAME ||
+                event.type === this.ScratchBlocks.Events.VAR_DELETE ||
+                (event.type === this.ScratchBlocks.Events.BLOCK_DELETE &&
+                    event.oldJson.type === 'procedures_definition') ||
+                // Only refresh the toolbox when procedure block creations are
+                // triggered by undoing a deletion (implied by recordUndo being
+                // false on the event).
+                (event.type === this.ScratchBlocks.Events.BLOCK_CREATE &&
+                    event.json.type === 'procedures_definition' &&
+                    !event.recordUndo)
+            ) {
+                this.requestToolboxUpdate();
+            }
+        };
+        this.workspace.addChangeListener(this.toolboxUpdateChangeListener);
 
         // Register buttons under new callback keys for creating variables,
         // lists, and procedures from extensions.
@@ -131,9 +213,9 @@ class Blocks extends React.Component {
         const toolboxWorkspace = this.workspace.getFlyout().getWorkspace();
 
         const varListButtonCallback = type =>
-            (() => this.ScratchBlocks.Variables.createVariable(this.workspace, null, type));
+            (() => this.ScratchBlocks.ScratchVariables.createVariable(this.workspace, null, type));
         const procButtonCallback = () => {
-            this.ScratchBlocks.Procedures.createProcedureDefCallback_(this.workspace);
+            this.ScratchBlocks.ScratchProcedures.createProcedureDefCallback(this.workspace);
         };
 
         toolboxWorkspace.registerButtonCallback('MAKE_A_VARIABLE', varListButtonCallback(''));
@@ -145,13 +227,8 @@ class Blocks extends React.Component {
         // the xml can change while e.g. on the costumes tab.
         this._renderedToolboxXML = this.props.toolboxXML;
 
-        // we actually never want the workspace to enable "refresh toolbox" - this basically re-renders the
-        // entire toolbox every time we reset the workspace.  We call updateToolbox as a part of
-        // componentDidUpdate so the toolbox will still correctly be updated
-        this.setToolboxRefreshEnabled = this.workspace.setToolboxRefreshEnabled.bind(this.workspace);
-        this.workspace.setToolboxRefreshEnabled = () => {
-            this.setToolboxRefreshEnabled(false);
-        };
+        // === Smalruby: scratch-blocks v2 removed workspace.setToolboxRefreshEnabled.
+        // The toolbox refresh suppression is handled differently in v2.
 
         // @todo change this when blockly supports UI events
         addFunctionListener(this.workspace, 'translate', this.onWorkspaceMetricsChange);
@@ -162,6 +239,7 @@ class Blocks extends React.Component {
         // If locale changes while not visible it will get handled in didUpdate
         if (this.props.isVisible) {
             this.setLocale();
+            this._hasBeenVisible = true; // === Smalruby: deferred flyout rebuild ===
         }
 
         window.addEventListener('load-extension', () => {
@@ -169,6 +247,16 @@ class Blocks extends React.Component {
                 this.handleCategorySelected('faceSensing');
             });
         });
+
+        // === Smalruby: Start of palette-toggle initial render ===
+        // this.workspace is an instance variable, not React state, so inject()
+        // above does not trigger a re-render. The first render() ran before
+        // componentDidMount with workspace=null, skipping PaletteToggle.
+        // Call _applyPaletteVisibility here to forceUpdate() after workspace is
+        // ready, so PaletteToggle appears immediately on mount (e.g. after the
+        // ResponsiveGui swaps MobileGui ↔ GUI on viewport orientation change).
+        this._applyPaletteVisibility(this.props.paletteVisible);
+        // === Smalruby: End of palette-toggle initial render ===
     }
     shouldComponentUpdate (nextProps, nextState) {
         return (
@@ -182,7 +270,8 @@ class Blocks extends React.Component {
             this.props.stageSize !== nextProps.stageSize ||
             this.props.selectedBlocks !== nextProps.selectedBlocks ||
             this.props.tutorialAllowedBlocks !== nextProps.tutorialAllowedBlocks ||
-            this.props.paletteVisible !== nextProps.paletteVisible
+            this.props.paletteVisible !== nextProps.paletteVisible ||
+            this.props.dnclMode !== nextProps.dnclMode // === Smalruby: DNCL block filtering ===
         );
     }
     componentDidUpdate (prevProps) {
@@ -223,6 +312,21 @@ class Blocks extends React.Component {
         // @todo hack to reload the workspace due to gui bug #413
         if (this.props.isVisible) { // Scripts tab
             this.workspace.setVisible(true);
+            // === Smalruby: Start of deferred flyout rebuild ===
+            if (!this._hasBeenVisible) {
+                // First time the code tab becomes visible after being initially
+                // hidden (e.g. ?tab=ruby). Flyout blocks were created while the
+                // container was display:none, so their SVG text measurements are
+                // wrong. Disable flyout recycling and force a full rebuild.
+                this._hasBeenVisible = true;
+                this.workspace.getFlyout().setRecyclingEnabled(false);
+                this.props.vm.refreshWorkspace();
+                this.requestToolboxUpdate();
+                this.withToolboxUpdates(() => {
+                    this.workspace.getFlyout().setRecyclingEnabled(true);
+                });
+            } else
+            // === Smalruby: End of deferred flyout rebuild ===
             if (prevProps.locale !== this.props.locale || this.props.locale !== this.props.vm.getLocale()) {
                 // call setLocale if the locale has changed, or changed while the blocks were hidden.
                 // vm.getLocale() will be out of sync if locale was changed while not visible
@@ -251,7 +355,29 @@ class Blocks extends React.Component {
     }
     componentWillUnmount () {
         this.detachVM();
-        this.workspace.dispose();
+        // Hide any open field editor and move Blockly focus to the workspace
+        // root before disposing. Without this, BlockSvg.dispose() detects the
+        // focused element is inside a block and schedules a stale
+        // setTimeout(() => focusTree(workspace)), which fires after the
+        // workspace is unregistered and throws
+        // "Attempted to focus unregistered tree" (scratch-blocks#3460).
+        //
+        // focusNode(workspace) — not focusTree(workspace) — is used here
+        // because focusTree would restore focus to whatever was previously
+        // focused in this workspace (likely the same block about to be
+        // disposed). focusNode pins focus to the workspace root directly,
+        // ensuring no block is focused when dispose() runs.
+        try {
+            this.ScratchBlocks.WidgetDiv?.hide?.();
+            // focusNode requires the workspace to be a focusable IFocusableNode;
+            // skip silently if the workspace is already in a non-focusable state.
+            if (this.workspace?.canBeFocused?.()) {
+                this.ScratchBlocks.getFocusManager().focusNode(this.workspace);
+            }
+        } catch {
+            // Workspace may already be unregistered — fall through to dispose.
+        }
+        this.workspace?.dispose?.();
         clearTimeout(this.toolboxUpdateTimeout);
 
         // Clear the flyout blocks so that they can be recreated on mount.
@@ -284,6 +410,13 @@ class Blocks extends React.Component {
             if (flyout.svgGroup_) flyout.svgGroup_.style.display = 'none';
         }
         this.ScratchBlocks.svgResize(this.workspace);
+        // Re-render so the palette-toggle button picks up the now-correct
+        // toolbox.getWidth() + flyout.getWidth() — render() runs *before*
+        // this method, so the first render after a paletteVisible change
+        // sees stale flyout dimensions and lands the toggle on top of the
+        // blocks (issue: toggle button at toolbox.getWidth() instead of
+        // toolbox.getWidth() + flyout.getWidth() after re-open).
+        this.forceUpdate();
     }
     requestToolboxUpdate () {
         clearTimeout(this.toolboxUpdateTimeout);
@@ -314,31 +447,103 @@ class Blocks extends React.Component {
     updateToolbox () {
         this.toolboxUpdateTimeout = false;
 
-        const categoryId = this.workspace.toolbox_.getSelectedCategoryId();
-        const offset = this.workspace.toolbox_.getCategoryScrollOffset();
-        this.workspace.updateToolbox(this.props.toolboxXML);
-        this._renderedToolboxXML = this.props.toolboxXML;
-
-        // In order to catch any changes that mutate the toolbox during "normal runtime"
-        // (variable changes/etc), re-enable toolbox refresh.
-        // Using the setter function will rerender the entire toolbox which we just rendered.
-        this.workspace.toolboxRefreshEnabled_ = true;
-
-        const currentCategoryPos = this.workspace.toolbox_.getCategoryPositionById(categoryId);
-        const currentCategoryLen = this.workspace.toolbox_.getCategoryLengthById(categoryId);
-        if (offset < currentCategoryLen) {
-            this.workspace.toolbox_.setFlyoutScrollPos(currentCategoryPos + offset);
-        } else {
-            this.workspace.toolbox_.setFlyoutScrollPos(currentCategoryPos);
+        const scale = this.workspace.getFlyout().getWorkspace().scale;
+        let selectedCategoryName = null;
+        const selectedItem = this.workspace.getToolbox()?.getSelectedItem?.();
+        if (selectedItem) {
+            selectedCategoryName = selectedItem.getName();
         }
+        const selectedCategoryScrollPosition = selectedCategoryName ?
+            this.workspace
+                .getFlyout()
+                .getCategoryScrollPosition(selectedCategoryName) * scale :
+            0;
+        const offsetWithinCategory =
+            this.workspace.getFlyout().getWorkspace()
+                .getMetrics().viewTop -
+            selectedCategoryScrollPosition;
+
+        this.workspace.updateToolbox(this.props.toolboxXML);
+        if (selectedCategoryName) {
+            this.workspace.getToolbox().runAfterRerender(() => {
+                const newCategoryScrollPosition = this.workspace
+                    .getFlyout()
+                    .getCategoryScrollPosition(selectedCategoryName);
+                if (newCategoryScrollPosition) {
+                    this.workspace
+                        .getFlyout()
+                        .getWorkspace()
+                        .scrollbar.setY(
+                            (newCategoryScrollPosition * scale) + offsetWithinCategory
+                        );
+                }
+            });
+        }
+        // === Smalruby: Start of forceRerender error guard ===
+        // scratch-blocks v2 throws "Cannot read properties of undefined
+        // (reading '2')" inside the toolbox flyout's recycling/dispose path
+        // (clearOldBlocks → disposeItem → block.dispose) for some Ruby
+        // converted scripts (e.g. `a = [1,2,3]; a.each do |i| puts i end`
+        // creates a list variable that, when the dynamic Variables category
+        // re-renders, hits a v2 bug). If forceRerender throws and we don't
+        // mark _renderedToolboxXML as updated, componentDidUpdate immediately
+        // queues another updateToolbox via requestToolboxUpdate(), causing
+        // an infinite loop that floods the console and freezes the UI.
+        //
+        // Always update _renderedToolboxXML so the loop is broken, and
+        // swallow the v2 internal error: the toolbox shows previously
+        // recycled / fallback content, but the editor stays usable.
+        // Recycling is also disabled across the call to take the
+        // non-recycling dispose path when possible.
+        this._renderedToolboxXML = this.props.toolboxXML;
+        const flyout = this.workspace.getFlyout();
+        const recyclingWasEnabled = flyout && typeof flyout.recyclingEnabled === 'function' ?
+            flyout.recyclingEnabled() : true;
+        if (flyout && typeof flyout.setRecyclingEnabled === 'function') {
+            flyout.setRecyclingEnabled(false);
+        }
+        try {
+            this.workspace.getToolbox().forceRerender();
+        } catch (err) {
+            log.error('Toolbox forceRerender failed (scratch-blocks v2):', err);
+        } finally {
+            if (flyout && typeof flyout.setRecyclingEnabled === 'function') {
+                flyout.setRecyclingEnabled(recyclingWasEnabled);
+            }
+        }
+        // === Smalruby: End of forceRerender error guard ===
 
         const queue = this.toolboxUpdateQueue;
         this.toolboxUpdateQueue = [];
         queue.forEach(fn => fn());
 
-        // Re-apply palette visibility since updateToolbox/setFlyoutScrollPos may re-show the flyout
+        // === Smalruby: Re-apply palette visibility since updateToolbox may re-show the flyout
         if (!this.props.paletteVisible) {
             this._applyPaletteVisibility(false);
+        }
+
+        // === Smalruby: scroll the flyout to a newly added extension category.
+        // `handleExtensionAdded` flags the extension id; once the toolbox has
+        // been rebuilt (now), look the category up and scroll to it.
+        const pendingId = this._pendingScrollToCategoryId;
+        if (pendingId) {
+            this._pendingScrollToCategoryId = null;
+            const toolbox = this.workspace?.getToolbox?.();
+            const items = toolbox?.getToolboxItems?.() || [];
+            const item = items.find(it => it.toolboxItemDef_?.id === pendingId);
+            const name = item?.toolboxItemDef_?.name || item?.name_;
+            if (item && name) {
+                if (typeof toolbox.selectCategoryByName === 'function') {
+                    toolbox.selectCategoryByName(name);
+                }
+                // ContinuousToolbox.selectCategoryByName updates the toolbox
+                // selection but does not scroll the flyout. The continuous
+                // flyout exposes scrollToCategory(item) for that.
+                const pendingFlyout = this.workspace.getFlyout?.();
+                if (pendingFlyout && typeof pendingFlyout.scrollToCategory === 'function') {
+                    pendingFlyout.scrollToCategory(item);
+                }
+            }
         }
     }
 
@@ -423,23 +628,26 @@ class Blocks extends React.Component {
         }
     }
     onScriptGlowOn (data) {
-        this.workspace.glowStack(data.id, true);
+        this.ScratchBlocks.glowStack(data.id, true);
     }
     onScriptGlowOff (data) {
-        this.workspace.glowStack(data.id, false);
+        this.ScratchBlocks.glowStack(data.id, false);
     }
-    onBlockGlowOn (data) {
-        this.workspace.glowBlock(data.id, true);
+    onBlockGlowOn (/* data */) {
+        // No-op in scratch-blocks v2: per-block glow is not supported
+        // by the Blockly v12 WorkspaceSvg API. Upstream upstreamed the
+        // same no-op pattern; per-block glow may return in a future
+        // scratch-blocks release.
     }
-    onBlockGlowOff (data) {
-        this.workspace.glowBlock(data.id, false);
+    onBlockGlowOff (/* data */) {
+        // No-op (see onBlockGlowOn).
     }
     onVisualReport (data) {
         // Don't show visual report in Code tab when Ruby tab is active
         if (this.props.activeTabIndex === RUBY_TAB_INDEX) {
             return;
         }
-        this.workspace.reportValue(data.id, data.value);
+        this.ScratchBlocks.reportValue(data.id, data.value);
     }
 
     // Extract only_blocks setting from Stage comments
@@ -547,14 +755,27 @@ class Blocks extends React.Component {
             this.onWorkspaceMetricsChange();
         }
 
-        // Remove and reattach the workspace listener (but allow flyout events)
-        this.workspace.removeChangeListener(this.props.vm.blockListener);
-        const dom = this.ScratchBlocks.Xml.textToDom(data.xml);
+        // Disable Blockly events during workspace reload. In Blockly v2, Events.fire()
+        // enqueues events for async dispatch (after rendering), so the old pattern of
+        // removing and re-adding the blockListener no longer prevents spurious events
+        // from reaching the VM — the queued events fire after the listener is re-added.
+        // Disabling events entirely during the load ensures nothing is queued.
+        this.workspace.removeChangeListener(this.toolboxUpdateChangeListener);
         let fromRuby = false;
-        try {
-            this.ScratchBlocks.Xml.clearWorkspaceAndLoadFromXml(dom, this.workspace);
 
-            // When we converted blocks from Ruby, update top block positions.
+        try {
+            this.ScratchBlocks.Events.disable();
+            const dom = this.ScratchBlocks.utils.xml.textToDom(data.xml);
+            this.ScratchBlocks.clearWorkspaceAndLoadFromXml(dom, this.workspace);
+
+            // === Smalruby: Start of Ruby-converted block positioning ===
+            // When we converted blocks from Ruby, repositioning is left to
+            // Blockly's `cleanUp()` only. Comment positions are intentionally
+            // NOT touched — Blockly v12's bubble follows its block via the
+            // anchor mechanism, and any explicit setBubbleLocation /
+            // target.comments x/y override we did before would corrupt the
+            // bubble's y after the user moved the block. Trust Blockly's
+            // built-in positioning.
             if (this.props.vm.editingTarget) {
                 const blocks = this.props.vm.editingTarget.blocks;
                 const scripts = blocks.getScripts();
@@ -568,48 +789,6 @@ class Blocks extends React.Component {
                 }
                 if (fromRuby) {
                     this.workspace.cleanUp();
-
-                    // Re-calculate the position of the comments.
-                    const firstTopBlock = this.workspace.getTopBlocks(true)[0];
-                    this.workspace.getTopComments(false).forEach(comment => {
-                        if (comment.blockId) {
-                            const block = this.workspace.getBlockById(comment.blockId);
-                            if (block) {
-                                // Minimize @ruby:return comments (internal metadata)
-                                if (comment.text && comment.text.startsWith('@ruby:return')) {
-                                    comment.setMinimized(true);
-                                }
-
-                                const blockXY = block.getRelativeToSurfaceXY();
-                                const commentHW = comment.getHeightWidth();
-                                const rtl = this.workspace.RTL;
-                                const x = rtl ? 20 : -commentHW.width - 20;
-                                const y = blockXY.y;
-                                comment.moveTo(x, y);
-
-                                const targetComments = this.props.vm.editingTarget.comments;
-                                if (targetComments && targetComments[comment.id]) {
-                                    targetComments[comment.id].x = x;
-                                    targetComments[comment.id].y = y;
-                                }
-                            }
-                        } else if (firstTopBlock) {
-                            // Workspace-level comments (e.g. @ruby:class) have no blockId.
-                            // Place them to the left of the first top block, at the same y.
-                            const blockXY = firstTopBlock.getRelativeToSurfaceXY();
-                            const commentHW = comment.getHeightWidth();
-                            const rtl = this.workspace.RTL;
-                            const x = rtl ? 20 : -commentHW.width - 20;
-                            const y = blockXY.y;
-                            comment.moveTo(x, y);
-
-                            const targetComments = this.props.vm.editingTarget.comments;
-                            if (targetComments && targetComments[comment.id]) {
-                                targetComments[comment.id].x = x;
-                                targetComments[comment.id].y = y;
-                            }
-                        }
-                    });
 
                     this.workspace.getTopBlocks(false).forEach(wsTopBlock => {
                         const topBlock = blocks.getBlock(wsTopBlock.id);
@@ -633,6 +812,7 @@ class Blocks extends React.Component {
                     this.updateToolbox();
                 }
             }
+            // === Smalruby: End of Ruby-converted block positioning ===
         } catch (error) {
             // The workspace is likely incomplete. What did update should be
             // functional.
@@ -647,8 +827,9 @@ class Blocks extends React.Component {
                 error.message = `Workspace Update Error: ${error.message}`;
             }
             log.error(error);
+        } finally {
+            this.ScratchBlocks.Events.enable();
         }
-        this.workspace.addChangeListener(this.props.vm.blockListener);
 
         if (!fromRuby &&
             this.props.vm.editingTarget &&
@@ -665,6 +846,15 @@ class Blocks extends React.Component {
         // fresh workspace and we don't want any changes made to another sprites
         // workspace to be 'undone' here.
         this.workspace.clearUndo();
+        // Let events get flushed before readding the toolbox-updater listener
+        // to avoid unneeded refreshes.
+        requestAnimationFrame(() => {
+            setTimeout(() => {
+                this.workspace.addChangeListener(
+                    this.toolboxUpdateChangeListener
+                );
+            });
+        });
     }
     handleMonitorsUpdate (monitors) {
         // Update the checkboxes of the relevant monitors.
@@ -699,7 +889,7 @@ class Blocks extends React.Component {
                     if (blockInfo.info && blockInfo.info.isDynamic) {
                         dynamicBlocksInfo.push(blockInfo);
                     } else if (blockInfo.json) {
-                        staticBlocksJson.push(injectExtensionBlockMode(blockInfo.json, this.props.colorMode));
+                        staticBlocksJson.push(injectExtensionBlockIcons(blockInfo.json, this.props.colorMode));
                     }
                     // otherwise it's a non-block entry such as '---'
                 });
@@ -730,6 +920,18 @@ class Blocks extends React.Component {
         if (toolboxXML) {
             this.props.updateToolboxState(toolboxXML);
         }
+
+        // After the toolbox finishes its async rebuild, scroll the flyout to
+        // the newly added extension category. In scratch-blocks v1 the flyout
+        // automatically focused the just-added category, but the v2
+        // continuous toolbox does not do this on its own — the flyout stays
+        // scrolled to wherever it was, so the user never sees the new blocks.
+        //
+        // `updateToolboxState` only dispatches the Redux update; the actual
+        // `workspace.updateToolbox(...)` rebuild happens later from
+        // `componentDidUpdate` -> `requestToolboxUpdate` (setTimeout 0). Mark
+        // the pending category and let the post-rebuild path scroll to it.
+        this._pendingScrollToCategoryId = categoryInfo.id;
     }
     handleBlocksInfoUpdate (categoryInfo) {
         // @todo Later we should replace this to avoid all the warnings from redefining blocks.
@@ -742,30 +944,46 @@ class Blocks extends React.Component {
         }
 
         this.withToolboxUpdates(() => {
-            this.workspace.toolbox_.setSelectedCategoryById(categoryId);
+            const toolbox = this.workspace.getToolbox();
+            toolbox.setSelectedItem(toolbox.getToolboxItemById(categoryId));
         });
     }
     setBlocks (blocks) {
         this.blocks = blocks;
     }
+    // === Smalruby: Start of iOS flyout touch bleed fix ===
+    // Defer opening the variable/list prompt by 50ms so that if
+    // externalProcedureDefCallback fires in the same rAF+setTimeout cycle
+    // (iOS touch bleed), the pending prompt is cancelled before it shows. (#698)
     handlePromptStart (message, defaultValue, callback, optTitle, optVarType) {
-        const p = {prompt: {callback, message, defaultValue}};
-        p.prompt.title = optTitle ? optTitle :
-            this.ScratchBlocks.Msg.VARIABLE_MODAL_TITLE;
-        p.prompt.varType = typeof optVarType === 'string' ?
-            optVarType : this.ScratchBlocks.SCALAR_VARIABLE_TYPE;
-        p.prompt.showVariableOptions = // This flag means that we should show variable/list options about scope
-            optVarType !== this.ScratchBlocks.BROADCAST_MESSAGE_VARIABLE_TYPE &&
-            p.prompt.title !== this.ScratchBlocks.Msg.RENAME_VARIABLE_MODAL_TITLE &&
-            p.prompt.title !== this.ScratchBlocks.Msg.RENAME_LIST_MODAL_TITLE;
-        p.prompt.showCloudOption = (optVarType === this.ScratchBlocks.SCALAR_VARIABLE_TYPE) && this.props.canUseCloud;
-        this.setState(p);
+        if (this._pendingPromptTimer) clearTimeout(this._pendingPromptTimer);
+        this._pendingPromptArgs = [message, defaultValue, callback, optTitle, optVarType];
+        this._pendingPromptTimer = setTimeout(() => {
+            const args = this._pendingPromptArgs;
+            this._pendingPromptArgs = null;
+            this._pendingPromptTimer = null;
+            if (!args) return;
+            if (this._procedureJustActivated) return;
+            const [msg, defVal, cb, title, varType] = args;
+            const p = {prompt: {callback: cb, message: msg, defaultValue: defVal}};
+            p.prompt.title = title ? title :
+                this.ScratchBlocks.Msg.VARIABLE_MODAL_TITLE;
+            p.prompt.varType = typeof varType === 'string' ?
+                varType : this.ScratchBlocks.SCALAR_VARIABLE_TYPE;
+            p.prompt.showVariableOptions = // This flag means that we should show variable/list options about scope
+                varType !== this.ScratchBlocks.BROADCAST_MESSAGE_VARIABLE_TYPE &&
+                p.prompt.title !== this.ScratchBlocks.Msg.RENAME_VARIABLE_MODAL_TITLE &&
+                p.prompt.title !== this.ScratchBlocks.Msg.RENAME_LIST_MODAL_TITLE;
+            p.prompt.showCloudOption = (varType === this.ScratchBlocks.SCALAR_VARIABLE_TYPE) && this.props.canUseCloud;
+            this.setState(p);
+        }, 50);
     }
+    // === Smalruby: End of iOS flyout touch bleed fix ===
     handleConnectionModalStart (extensionId) {
         this.props.onOpenConnectionModal(extensionId);
     }
     handleStatusButtonUpdate () {
-        this.ScratchBlocks.refreshStatusButtons(this.workspace);
+        this.workspace.getFlyout().refreshStatusButtons();
     }
     handleOpenSoundRecorder () {
         this.props.onOpenSoundRecorder();
@@ -789,8 +1007,46 @@ class Blocks extends React.Component {
     handleCustomProceduresClose (data) {
         this.props.onRequestCloseCustomProcedures(data);
         const ws = this.workspace;
-        ws.refreshToolboxSelection_();
-        ws.toolbox_.scrollToCategoryById('myBlocks');
+        // scratch-blocks v2 renamed `refreshToolboxSelection_` → `refreshToolboxSelection`.
+        if (typeof ws.refreshToolboxSelection === 'function') {
+            ws.refreshToolboxSelection();
+        }
+        // The new `procedures_definition` block has been created on the
+        // workspace by `createProcedureCallbackFactory`. The "My Blocks"
+        // toolbox category is dynamic (`custom="PROCEDURE"`), and its
+        // `procedures_call` flyout entry only appears after the toolbox is
+        // rebuilt. In scratch-blocks v1 `ContinuousToolbox.refreshSelection`
+        // rebuilt the flyout on every BLOCK_CREATE; v2 made that a no-op,
+        // so we must explicitly force a rebuild here. Defer until after the
+        // pending block-create renders flush, otherwise `forceRerender`
+        // sees the workspace mid-update.
+        const toolbox = ws.getToolbox?.();
+        const myBlocksId = 'myBlocks';
+        const scrollMyBlocks = () => {
+            const items = toolbox?.getToolboxItems?.() || [];
+            const item = items.find(it => it.toolboxItemDef_?.toolboxitemid === myBlocksId);
+            const name = item?.toolboxItemDef_?.name || item?.name_;
+            if (name && typeof toolbox.selectCategoryByName === 'function') {
+                toolbox.selectCategoryByName(name);
+            }
+            const flyout = ws.getFlyout?.();
+            if (item && flyout && typeof flyout.scrollToCategory === 'function') {
+                flyout.scrollToCategory(item);
+            }
+        };
+        if (toolbox && typeof toolbox.forceRerender === 'function') {
+            setTimeout(() => {
+                try {
+                    toolbox.forceRerender();
+                } catch (err) {
+                    // forceRerender can throw if dispose paths race; the
+                    // surrounding scroll still works without a rebuild.
+                }
+                scrollMyBlocks();
+            }, 0);
+        } else {
+            scrollMyBlocks();
+        }
     }
     handleDrop (dragInfo) {
         fetch(dragInfo.payload.bodyUrl)
@@ -838,9 +1094,15 @@ class Blocks extends React.Component {
             ...props
         } = this.props;
 
-        // Calculate toggle button position based on toolbox width (toolbox + flyout combined)
+        // Calculate toggle button position based on toolbox + flyout combined width.
+        // In scratch-blocks v2 toolbox.getWidth() returns only the category-column
+        // width, so we add the flyout width separately to land on the visual edge
+        // of the open palette (matching docs/mobile-ui/screenshots/02-code-palette-open.png).
         const toolbox = this.workspace ? this.workspace.getToolbox() : null;
-        const toggleButtonLeft = paletteVisible && toolbox ? toolbox.getWidth() : 0;
+        const flyout = this.workspace ? this.workspace.getFlyout() : null;
+        const toggleButtonLeft = paletteVisible && toolbox ?
+            toolbox.getWidth() + (flyout?.getWidth?.() ?? 0) :
+            0;
 
         return (
             <React.Fragment>
@@ -947,7 +1209,11 @@ Blocks.defaultOptions = {
     zoom: {
         controls: true,
         wheel: true,
+        pinch: true,
         startScale: BLOCKS_DEFAULT_SCALE
+    },
+    move: {
+        wheel: true
     },
     grid: {
         spacing: 40,
@@ -956,7 +1222,9 @@ Blocks.defaultOptions = {
     },
     comments: true,
     collapse: false,
-    sounds: false
+    sounds: false,
+    trashcan: false,
+    modalInputs: false
 };
 
 Blocks.defaultProps = {
@@ -1017,6 +1285,7 @@ const mapDispatchToProps = dispatch => ({
     }
 });
 
+export {Blocks};
 export default errorBoundaryHOC('Blocks')(
     connect(
         mapStateToProps,

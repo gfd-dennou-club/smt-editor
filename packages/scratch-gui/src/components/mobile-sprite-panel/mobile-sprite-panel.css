@@ -1,0 +1,53 @@
+.panel {
+    position: fixed;
+    /* top / left / width / height は JS (visualViewport) で動的に設定する。 */
+    top: 0;
+    left: 0;
+    background: white;
+    /*
+     * z-index は 100。タブコンテンツ (Blockly toolbox 40 等) より上に乗せて
+     * sprite tab 切替時に編集エリアを覆い隠す。
+     *
+     * SideRail (9200) や backpack (200) より下に置くことで、sprite タブ中でも
+     * 左サイドレールがタップ可能、かつ画面下端に開かれた backpack が前面に
+     * 見える (drop ターゲットとして使える)。
+     * drawer (9501) や modal overlay (10000) よりも当然下。
+     */
+    z-index: 100;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    box-sizing: border-box;
+    padding: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+/*
+ * upstream の TargetPane は flex-direction: row で
+ * スプライトリスト (左) + 72px の stage-selector-wrapper (右) のレイアウト。
+ * 横向きスマホは横幅が十分 (844 - 56 = 788px) あるので、デスクトップと
+ * 同じ row レイアウトをそのまま使える。
+ *
+ * height: 100% でサイドレール右の利用可能高さを使い切る。
+ */
+.panel :global([class*="target-pane_target-pane"]) {
+    flex-grow: 1;
+    height: 100%;
+}
+
+/*
+ * upstream のスプライトライブラリモーダル (`<SpriteLibrary>`) は
+ * react-modal の Overlay z-index がデフォルト 510。Smalruby のモバイル UI
+ * (MobileTopBar / MobileBottomTabs = 9000, MobileDrawer = 9501) より下にあり、
+ * モーダルを開いてもモバイル UI で隠れて操作できないので、Smalruby 側で
+ * 上書きする。スプライトライブラリ・背景ライブラリ両方のモーダルが対象。
+ *
+ * 9999 まで上げてしまうとデスクトップでも他の要素より高くなるが、upstream
+ * モーダル間の優先順位は同じ 9999 のままなので問題ない (もともと 510 同士で
+ * 順位なし)。
+ */
+:global(.ReactModal__Overlay) {
+    z-index: 9999 !important;
+}
+

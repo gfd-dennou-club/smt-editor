@@ -10,6 +10,12 @@ import {PLATFORM} from '../lib/platform.js';
 // === Smalruby: Start of URL params for Playwright ===
 import {getUrlParams} from '../lib/url-params.js';
 // === Smalruby: End of URL params for Playwright ===
+// === Smalruby: Start of MobileGui dispatcher ===
+import ResponsiveGui from '../lib/responsive-gui.jsx';
+// === Smalruby: End of MobileGui dispatcher ===
+// === Smalruby: Start of storage worker timeout HOC ===
+import StorageWorkerTimeoutHOC from '../lib/storage-worker-timeout-hoc.jsx';
+// === Smalruby: End of storage worker timeout HOC ===
 
 const onClickLogo = () => {
     window.location = 'https://smalruby.jp';
@@ -40,8 +46,19 @@ export default appTarget => {
     // ability to compose reducers.
     const WrappedGui = compose(
         AppStateHOC,
-        HashParserHOC
-    )(GUI);
+        HashParserHOC,
+        // === Smalruby: Start of storage worker timeout HOC ===
+        // VM がセットアップされたら scratch-storage の FetchWorkerTool に
+        // 5s タイムアウトを当て、ハング時に FetchTool フォールバックを発動させる。
+        // サブディレクトリ deploy + iOS Safari で Worker 内 fetch がハングする
+        // 問題への対策 (詳細は storage-worker-timeout.js)。
+        StorageWorkerTimeoutHOC,
+        // === Smalruby: End of storage worker timeout HOC ===
+        // === Smalruby: Start of MobileGui dispatcher ===
+        // ResponsiveGui forwards all HOC-injected props and switches between
+        // <GUI> and <MobileGui> based on viewport width (useIsNarrowScreen).
+        // === Smalruby: End of MobileGui dispatcher ===
+    )(ResponsiveGui);
 
     // TODO a hack for testing the backpack, allow backpack host to be set by url param
     const backpackHostMatches = window.location.href.match(/[?&]backpack_host=([^&]*)&?/);

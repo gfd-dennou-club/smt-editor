@@ -5,7 +5,7 @@
 ```mermaid
 stateDiagram-v2
     state "先生フロー" as teacher {
-        state "Google ログイン" as teacher_login
+        state "ログイン (Google / Microsoft)" as teacher_login
         state "ダッシュボード" as teacher_dashboard
         state "クラス作成" as teacher_create
         state "クラス詳細" as teacher_detail
@@ -51,21 +51,25 @@ stateDiagram-v2
 
 メニューバーの右端に「クラス」ボタンが表示されます（`CLASSROOM_API_ENDPOINT` 環境変数が設定されている場合）。
 
-![メニューバー](images/01-menu-bar.png)
+![メニューバー](screenshots/0101-menu-bar.png)
 
 **パーツ:**
 
 | 要素 | テキスト/内容 | data-testid |
 |------|-------------|-------------|
+| 設定メニュー | ⚙ アイコン | `settings-menu` |
+| クラス管理メニュー | 「クラス管理...」（設定メニュー内） | `settings-classroom-management` |
 | クラスボタン | 「クラス」（未参加時） | `classroom-menu-button` |
 | ラベル | — | `classroom-menu-label` |
 
-生徒がクラスに参加中の場合、ボタンのテキストが課題名と出席番号に変わります:
+生徒がクラスに参加中の場合、ボタンのテキストは固定の「クラス:出席番号NN」表記に変わります (NN は 0 埋め 2 桁):
 
 | 要素 | テキスト/内容 | data-testid |
 |------|-------------|-------------|
-| 課題名（またはクラス名） | 例: 「第１回チャットアプリを作ろう」 | `classroom-menu-class-name` |
-| 出席番号 | 例: 「/ 03」（0埋め2桁） | `classroom-menu-seat-number` |
+| ラベル全体 | 例: 「クラス:出席番号03」 | `classroom-menu-label` |
+| 出席番号 (内側 span) | 例: 「03」 | `classroom-menu-seat-number` |
+
+未参加時はラベルが「クラス」のみになる。 課題名 / クラス名はメニューに表示せず、モーダル内でのみ確認する設計。
 
 ---
 
@@ -85,11 +89,11 @@ stateDiagram-v2
 
 ---
 
-## 1. 先生: Google ログイン (`teacher-login`)
+## 1. 先生: ログイン (`teacher-login`)
 
-Google アカウントでサインインする画面。先生は「設定 → クラス管理」メニューからアクセスします。
+Google または Microsoft アカウントでサインインする画面。先生は「設定 → クラス管理」メニューからアクセスします。
 
-![先生ログイン画面](images/04-teacher-login.png)
+![先生ログイン画面](screenshots/0201-teacher-login.png)
 
 **パーツ:**
 
@@ -97,15 +101,16 @@ Google アカウントでサインインする画面。先生は「設定 → �
 |------|-------------|-------------|------|
 | フェーズルート | — | `classroom-phase-teacher-login` | — |
 | 戻るリンク | 「< 戻る」 | `classroom-back` | → teacher-dashboard |
-| 見出し | 「Googleでログイン」 | — | — |
-| 説明文 | 「Googleアカウントでログインして、クラスを管理します。」 | — | — |
+| 見出し | 「ログイン」 | — | — |
+| 説明文 | 「アカウントでログインして、クラスを管理します。」 | — | — |
 | ヒント | 「学校の Google Workspace for Education のアカウントで…」 | — | — |
-| ログインボタン | 「Googleでログイン」 | `classroom-google-login` | Google 認証画面を開く |
+| Google ログインボタン | 「Googleでログイン」 | `classroom-google-login` | Google 認証画面を開く |
+| Microsoft ログインボタン | 「Microsoftでログイン」 | `classroom-microsoft-login` | Microsoft 認証ポップアップを開く |
 | カルーセル | 右ペインに機能紹介画像（4枚、5秒ごと自動切替） | — | ドットクリックで手動切替 |
 
-**レイアウト:** 左右分割レイアウト。左ペイン: ログインフォーム、右ペイン: 画像カルーセル（薄いグレー背景）。1024x600 の画面でもスクロールなしで表示。
+**レイアウト:** 左右分割レイアウト。左ペイン: ログインフォーム（Google / Microsoft の2つのログインボタン）、右ペイン: 画像カルーセル（薄いグレー背景）。1024x600 の画面でもスクロールなしで表示。
 
-**セッション管理:** Google ID Token（1時間有効）。期限切れ時はサイレント再認証（`auto_select`）を試行し、透過的にトークンを更新。失敗時のみ Alert バナーを表示。
+**セッション管理:** Google / Microsoft ID Token（1時間有効）。期限切れ時はプロバイダーに応じたサイレント再認証を試行し、透過的にトークンを更新。失敗時のみ Alert バナーを表示。詳細は [Microsoft 認証](microsoft-authentication.md) を参照。
 
 ---
 
@@ -113,7 +118,7 @@ Google アカウントでサインインする画面。先生は「設定 → �
 
 先生のメイン画面。作成したクラスがカード形式で一覧表示されます。
 
-![ダッシュボード](images/05-teacher-dashboard.png)
+![ダッシュボード](screenshots/0202-teacher-dashboard.png)
 
 **パーツ:**
 
@@ -152,7 +157,7 @@ Google アカウントでサインインする画面。先生は「設定 → �
 
 クラス名・人数・課題名を入力してクラスを作成する画面。
 
-![クラス作成画面](images/06-teacher-create.png)
+![クラス作成画面](screenshots/0203-teacher-create.png)
 
 **パーツ:**
 
@@ -183,15 +188,15 @@ Google Classroom からインポートした場合は「インポート元: {コ
 
 ### 空席のみの状態
 
-![クラス詳細 — 空席のみ](images/07-teacher-detail.png)
+![クラス詳細 — 空席のみ](screenshots/0204-teacher-detail.png)
 
 ### 提出があった状態（5番が緑 = 提出済み）
 
-![クラス詳細 — 提出あり](images/13-teacher-detail-submitted.png)
+![クラス詳細 — 提出あり](screenshots/0205-teacher-detail-submitted.png)
 
 ### メンバー詳細パネル（右側）
 
-![メンバー詳細パネル](images/14-teacher-member-detail.png)
+![メンバー詳細パネル](screenshots/0206-teacher-member-detail.png)
 
 **左カラム パーツ:**
 
@@ -216,10 +221,12 @@ Google Classroom からインポートした場合は「インポート元: {コ
 
 | セルの色 | 状態 | テキスト |
 |---------|------|---------|
-| グレー (`#e0e0e0`) | 空席 | 出席番号のみ (例: 「5」) |
-| 青 (`#4285f4`) | 着席（未提出） | 出席番号（下線付き） |
-| 緑 (`#34a853`) | 提出済み | 「✓」+ 出席番号 (例: 「✓5」) |
-| オレンジ (`#ff9800`) | 返却済み | 出席番号 |
+| 青 (`#4c97ff`) | 空席 | 出席番号のみ (例: 「5」) |
+| グレー (`#d9d9d9`) | 着席（未提出） | 出席番号（下線付き） |
+| 緑 (`#0fbd8c`) | 提出済み | 「✓」+ 出席番号 (例: 「✓5」) |
+| オレンジ (`#ff8c1a`) | 返却済み | 出席番号 |
+
+色は生徒側の出席番号選択画面と統一されている: 青 = 「空き / 選択可能 (生徒視点では選べる席、先生視点では未参加)」、灰色 = 「使用中」。
 
 セルをクリックすると右カラムに詳細パネルが表示されます。
 
@@ -277,7 +284,7 @@ Google Classroom からインポートした場合は「インポート元: {コ
 
 生徒が既にクラスに参加している場合（localStorage にセッション情報あり）は、この画面をスキップして**ステータス**画面に直接遷移します。
 
-![参加コード入力画面](images/03-student-join.png)
+![参加コード入力画面](screenshots/0301-student-join.png)
 
 **パーツ:**
 
@@ -300,7 +307,7 @@ Google Classroom からインポートした場合は「インポート元: {コ
 
 クラスの座席がグリッド表示され、空いている出席番号を選択します。
 
-![出席番号選択画面](images/08-student-seat.png)
+![出席番号選択画面](screenshots/0302-student-seat.png)
 
 **パーツ:**
 
@@ -330,7 +337,7 @@ Google Classroom からインポートした場合は「インポート元: {コ
 参加が成功したときの確認画面。メニューバーにもクラス情報が表示されます。
 プロジェクト名が課題名に自動変更されます。
 
-![参加完了画面](images/09-student-joined.png)
+![参加完了画面](screenshots/0303-student-joined.png)
 
 **パーツ:**
 
@@ -354,11 +361,11 @@ Google Classroom からインポートした場合は「インポート元: {コ
 
 ### 未提出の状態
 
-![ステータス画面（未提出）](images/10-student-status.png)
+![ステータス画面（未提出）](screenshots/0304-student-status.png)
 
 ### 提出済みの状態
 
-![ステータス画面（提出済み）](images/12-student-submitted.png)
+![ステータス画面（提出済み）](screenshots/0305-student-submitted.png)
 
 **情報テーブル:**
 
@@ -409,7 +416,7 @@ Google Classroom からインポートした場合は「インポート元: {コ
 
 提出前の確認画面。プロジェクトのサムネイルがプレビュー表示されます。
 
-![提出確認画面](images/11-student-submit-confirm.png)
+![提出確認画面](screenshots/0306-student-submit-confirm.png)
 
 **パーツ:**
 

@@ -4,6 +4,7 @@ import PropTypes from 'prop-types';
 import React from 'react';
 import { defineMessages, injectIntl } from 'react-intl';
 import { connect } from 'react-redux';
+import analytics from '../lib/analytics';
 import googleDriveAPI from '../lib/google-drive-api';
 import intlShape from '../lib/intlShape.js';
 import log from '../lib/log';
@@ -128,6 +129,16 @@ const GoogleDriveSaverHOC = function (WrappedComponent) {
 
             // Set status to saved
             this.setState({ saveDirectStatus: 'saved' });
+
+            try {
+                analytics.event({
+                    category: 'google_drive',
+                    action: 'save',
+                    label: 'overwrite',
+                });
+            } catch (_e) {
+                // Swallow analytics failures so the editor never breaks.
+            }
 
             // Reset status to idle after 3 seconds
             setTimeout(() => {
@@ -317,6 +328,16 @@ const GoogleDriveSaverHOC = function (WrappedComponent) {
                 // Set status to saved
                 this.setState({ saveStatus: 'saved' });
 
+                try {
+                    analytics.event({
+                        category: 'google_drive',
+                        action: 'save',
+                        label: 'new_file',
+                    });
+                } catch (_e) {
+                    // Swallow analytics failures so the editor never breaks.
+                }
+
                 // Reset status to idle after 3 seconds
                 setTimeout(() => {
                     this.setState({ saveStatus: 'idle' });
@@ -380,7 +401,7 @@ const GoogleDriveSaverHOC = function (WrappedComponent) {
         targetCodeToBlocks: PropTypes.func,
     };
 
-    const mapStateToProps = state => ({
+    const mapStateToProps = (state) => ({
         googleDriveFile: state.scratchGui.googleDriveFile,
         locale: state.locales.locale,
         projectChanged: state.scratchGui.projectChanged,
@@ -388,12 +409,12 @@ const GoogleDriveSaverHOC = function (WrappedComponent) {
         saveProjectSb3: state.scratchGui.vm.saveProjectSb3.bind(state.scratchGui.vm),
     });
 
-    const mapDispatchToProps = dispatch => ({
+    const mapDispatchToProps = (dispatch) => ({
         closeFileMenu: () => dispatch(closeFileMenu()),
         onSetGoogleDriveFile: (fileId, fileName, folderId) =>
             dispatch(setGoogleDriveFile(fileId, fileName, folderId)),
         // === Smalruby: Start of sync project title on copy save ===
-        onSetProjectTitle: title => dispatch(setProjectTitle(title)),
+        onSetProjectTitle: (title) => dispatch(setProjectTitle(title)),
         // === Smalruby: End of sync project title on copy save ===
         onSetProjectUnchanged: () => dispatch(setProjectUnchanged()),
     });

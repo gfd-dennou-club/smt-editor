@@ -11,7 +11,7 @@ Playwright MCP および Selenium integration tests で使用する `data-testid
 | data-testid | フェーズ |
 |------------|---------|
 | `classroom-modal` | モーダル全体 |
-| `classroom-phase-teacher-login` | 先生: Google ログイン |
+| `classroom-phase-teacher-login` | 先生: ログイン (Google / Microsoft) |
 | `classroom-phase-teacher-dashboard` | 先生: ダッシュボード |
 | `classroom-phase-teacher-create` | 先生: クラス作成 |
 | `classroom-phase-teacher-detail` | 先生: クラス詳細 |
@@ -27,8 +27,11 @@ Playwright MCP および Selenium integration tests で使用する `data-testid
 
 | data-testid | 要素 | 説明 |
 |------------|------|------|
+| `settings-menu` | div | 設定メニュー（⚙ アイコン） |
+| `settings-classroom-management` | MenuItem | 設定 → クラス管理 |
 | `classroom-menu-button` | div | メニューバーのクラスボタン |
 | `classroom-google-login` | button | Google ログイン |
+| `classroom-microsoft-login` | button | Microsoft ログイン |
 | `classroom-back` | button | 戻る |
 | `classroom-refresh` | button | 更新 (↻) |
 | `classroom-create` | button | クラス作成 (ダッシュボード) |
@@ -41,18 +44,19 @@ Playwright MCP および Selenium integration tests で使用する `data-testid
 |------------|------|------|
 | `classroom-name-input` | input | クラス名入力 |
 | `classroom-count-input` | input | 人数入力 |
-| `classroom-create-submit` | button | 作成実行 |
+| `classroom-assignment-name-input` | input | 課題名入力 |
+| `classroom-create-submit` | button | 作成実行（クラス名・人数・課題名の **3 つすべて必須**。1 つでも空だと disabled）|
 
-### クラス一覧 (ダッシュボード)
+**作成後の挙動**: `classroom-create-submit` を押すと API 呼び出し成功後 `phase` は `teacher-dashboard` に戻り、新しいクラスはサイドバー一覧 (`classroom-sidebar-item-{id}`) に追加される。`teacher-class-detail` には自動遷移せず、サイドバーの該当アイテムをクリックして明示的に選択する必要がある。
+
+### サイドバー (先生・常時表示、login 以外のフェーズで visible)
+
+サイドバーはクラス管理モーダル左側に常時表示される（teacher-login 以外）。「クラス一覧 (ダッシュボード)」ではなく **サイドバー** に登録済みクラスがリスト表示される。
 
 | data-testid | 要素 | 説明 |
 |------------|------|------|
-| `classroom-list` | ul | クラス一覧 |
-| `classroom-empty-message` | div | クラスなしメッセージ |
-| `classroom-item-{id}` | li | クラスカード |
-| `classroom-item-name-{id}` | span | クラス名 |
-| `classroom-item-code-{id}` | span | 参加コード |
-| `classroom-item-details-{id}` | button | 詳細ボタン |
+| `classroom-sidebar-group-{className}` | div | クラス名でグルーピングされたヘッダ（例: 「6年A組」）|
+| `classroom-sidebar-item-{classroomId}` | li | サイドバーの個別クラス項目。`data-classroom-id` 属性も持つ。クリックで `selectedClassroom` が更新され `teacher-class-detail` フェーズへ遷移。表示テキストは `assignmentName · 人数 · 参加コード(小文字)` |
 
 ### クラス詳細 (先生)
 
@@ -159,9 +163,28 @@ Playwright MCP および Selenium integration tests で使用する `data-testid
 | data-testid | 要素 | 説明 |
 |------------|------|------|
 | `classroom-menu-button` | div | クラスボタン（コンテナ） |
-| `classroom-menu-label` | span | メニューバーのクラス表示テキスト |
-| `classroom-menu-class-name` | span | 課題名（またはクラス名） |
-| `classroom-menu-seat-number` | span | 出席番号（0埋め2桁） |
+| `classroom-menu-label` | span | メニューバーのクラス表示テキスト全体（参加中は「クラス:出席番号NN」、未参加時は「クラス」）|
+| `classroom-menu-seat-number` | span | 出席番号（0埋め2桁、参加中のみレンダリングされる） |
+
+### 強制退室通知 / 退室リクエスト (Issue #692)
+
+| data-testid | 要素 | 説明 |
+|------------|------|------|
+| `classroom-kicked-banner` | div | 生徒の seat 画面に表示する「先生によって退室させられました」バナー |
+| `classroom-kicked-banner-dismiss` | button | バナーの × |
+| `kick-request-confirm-dialog` | div | 「使用中の席」をタップしたとき表示される退室依頼ダイアログ |
+| `kick-request-reason-input` | textarea | 任意のひと言入力欄（200 字制限）|
+| `kick-request-submit` | button | 依頼を送信 |
+| `kick-request-cancel` | button | ダイアログを閉じる |
+| `kick-request-error` | div | 依頼送信エラー表示 |
+| `kick-request-pending-banner` | div | 「先生に依頼中です…」バナー（5 秒ごとに lookupClassroom を polling）|
+| `kick-request-rejected-banner` | div | 「依頼は受理されませんでした」バナー (却下 / TTL 期限切れ検出時に pending と差し替え) |
+| `kick-request-rejected-banner-dismiss` | button | × ボタン |
+| `classroom-seat-kick-request-{seatNumber}` | span | 先生クラス詳細の座席グリッドに表示する赤いバッジ「!」|
+| `classroom-member-kick-request-panel` | div | 先生メンバー詳細パネルに表示される依頼一覧 |
+| `classroom-kick-request-row-{requestId}` | div | 1 リクエストの行 |
+| `classroom-kick-request-approve-{requestId}` | button | 承認（kick + リクエスト削除）|
+| `classroom-kick-request-reject-{requestId}` | button | 却下（リクエストのみ削除）|
 
 ### 汎用
 
@@ -188,6 +211,14 @@ http://localhost:8601?no_beforeunload=1&devlogin=<DEV_BYPASS_TOKEN>
 ```
 
 `devlogin=<DEV_BYPASS_TOKEN>` を指定すると、Google ログインをバイパスして `DEV_BYPASS_TOKEN` で先生としてログインできます（stg/ローカル環境のみ）。先生ダッシュボードへは「⚙ 設定 → クラス管理」からアクセスしてください。
+
+### tools/playwright-verify/ の手動 E2E スクリプト
+
+クラス管理を絡めた end-to-end の動作確認は [`tools/playwright-verify/`](../../tools/playwright-verify/README.md) にあるスクリプトで自動化されています（CI には組み込まれていません。手動で `node ...` で実行）。
+
+代表例: `tools/playwright-verify/mesh-v2-classroom-binding.mjs` は教師タブで devlogin → クラス作成 → サイドバーで選択、生徒タブで `?classcode=` 経由参加 という 2 タブのフローを自動で回し、Mesh v2 ドメインがクラスの参加コードに揃うことを確認します。
+
+スクリプトを書く際の落とし穴と対処は `tools/playwright-verify/README.md` を参照してください（ログインバイパスの方法、Redux store の取り出し方、サイドバー testid、tutorial overlay の dismiss 等）。
 
 ### data-testid を使ったテスト例
 

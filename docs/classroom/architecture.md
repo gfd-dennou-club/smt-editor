@@ -7,7 +7,8 @@ graph TB
     subgraph Browser["ブラウザ (Smalruby Editor)"]
         GUI["scratch-gui<br/>React / Redux"]
         API_CLIENT["classroom-api.js<br/>API クライアント"]
-        GC_AUTH["google-classroom-auth.js<br/>Google OAuth"]
+        TEACHER_AUTH["teacher-auth.js<br/>認証抽象化 (Google / Microsoft)"]
+        GC_AUTH["google-classroom-auth.js<br/>Google Classroom OAuth"]
     end
 
     subgraph AWS["AWS (ap-northeast-1)"]
@@ -24,16 +25,24 @@ graph TB
         GC_API["Google Classroom API"]
     end
 
+    subgraph Azure["Microsoft Azure"]
+        MSAUTH["Microsoft Identity Platform<br/>(ID Token 検証)"]
+    end
+
     GUI --> API_CLIENT
+    GUI --> TEACHER_AUTH
     GUI --> GC_AUTH
     API_CLIENT -->|"HTTPS"| APIGW
+    TEACHER_AUTH -->|"Google ログイン"| GAUTH
+    TEACHER_AUTH -->|"Microsoft ログイン"| MSAUTH
     GC_AUTH -->|"OAuth 同意"| GAUTH
     APIGW --> LAMBDA
     LAMBDA --> DDB_C
     LAMBDA --> DDB_M
     LAMBDA --> DDB_S
     LAMBDA -->|"Presigned URL 生成"| S3
-    LAMBDA -->|"ID Token 検証"| GAUTH
+    LAMBDA -->|"Google ID Token 検証"| GAUTH
+    LAMBDA -->|"Microsoft ID Token 検証 (JWKS)"| MSAUTH
     LAMBDA -->|"コース取得 / 課題投稿"| GC_API
     Browser -->|"Presigned URL で直接アップロード"| S3
 ```
@@ -46,14 +55,26 @@ sequenceDiagram
     participant S as 生徒 (ブラウザ)
     participant API as Lambda
     participant G as Google OAuth
+    participant MS as Microsoft Identity
     participant DB as DynamoDB
 
-    Note over T,G: 先生の認証 (Google ID Token)
-    T->>G: Google ログイン
-    G-->>T: ID Token
+    Note over T,G: 先生の認証 (Google or Microsoft)
+    alt Google ログイン
+        T->>G: Google ログイン
+        G-->>T: ID Token (iss: accounts.google.com)
+    else Microsoft ログイン
+        T->>MS: MSAL popup ログイン
+        MS-->>T: ID Token (iss: login.microsoftonline.com)
+    end
     T->>API: Authorization: Bearer {idToken}
-    API->>G: verifyIdToken(idToken)
-    G-->>API: { sub: "teacher-google-id" }
+    API->>API: iss クレームで Google / Microsoft を自動判別
+    alt Google
+        API->>G: verifyIdToken(idToken)
+        G-->>API: { sub: "teacher-google-id" }
+    else Microsoft
+        API->>MS: JWKS で JWT 検証
+        MS-->>API: { oid: "teacher-microsoft-id" }
+    end
     API->>DB: teacherSub で操作
 
     Note over S,DB: 生徒の認証 (Session Token)
@@ -65,10 +86,15 @@ sequenceDiagram
     API->>DB: sessionToken-index で検索
     DB-->>API: メンバー情報
 
-    Note over T,G: サイレント再認証 (トークン期限切れ時)
+    Note over T,MS: サイレント再認証 (トークン期限切れ時)
     T->>T: 30秒ごとの自動リフレッシュで 401 検出
-    T->>G: google.accounts.id.prompt({auto_select: true})
-    G-->>T: 新しい ID Token (サイレント)
+    alt Google
+        T->>G: google.accounts.id.prompt({auto_select: true})
+        G-->>T: 新しい ID Token (サイレント)
+    else Microsoft
+        T->>MS: acquireTokenSilent({forceRefresh: true})
+        MS-->>T: 新しい ID Token (サイレント)
+    end
     T->>API: 新トークンで再試行
     Note over T: 再認証失敗時は Alert バナーを表示
 ```
@@ -77,9 +103,9 @@ sequenceDiagram
 
 | 項目 | 内容 |
 |------|------|
-| 認証方式 | Google ID Token (JWT) |
-| 有効期限 | 1時間（Google 標準）。stg は `ID_TOKEN_MAX_AGE_SECONDS` で短縮可 |
-| サイレント再認証 | `auto_select: true` で透過的にトークン更新（FedCM 10分制限あり） |
+| 認証方式 | Google ID Token (JWT) または Microsoft ID Token (JWT) |
+| 有効期限 | 1時間（Google / Microsoft 共通）。stg は `ID_TOKEN_MAX_AGE_SECONDS` で短縮可 |
+| サイレント再認証 | Google: `auto_select: true`（FedCM 10分制限あり）、Microsoft: `acquireTokenSilent({ forceRefresh: true })` |
 | 再認証失敗時 | Alert バナー「セッションが無効になりました。」+ 「参加しなおす」ボタン |
 | 自動リフレッシュ | 30秒ごとにメンバー情報を更新（`refreshMembersOnly`、詳細パネルの状態は保持） |
 
@@ -138,8 +164,11 @@ sequenceDiagram
 | `GET` | `/classrooms/{id}` | クラス詳細 |
 | `PATCH` | `/classrooms/{id}` | クラス更新 |
 | `DELETE` | `/classrooms/{id}` | クラス削除 (アーカイブ) |
-| `GET` | `/classrooms/{id}/members` | メンバー一覧 |
-| `DELETE` | `/classrooms/{id}/members/{memberId}` | メンバー削除 |
+| `GET` | `/classrooms/{id}/members` | メンバー一覧 (kicked 行は除外) |
+| `DELETE` | `/classrooms/{id}/members/{memberId}` | メンバー削除 = ソフト kick (1h tombstone を残し、`kicked: true` をマーク)。verify-session が 410 reason='kicked' を返せるようにするための仕様。lookup の takenSeats も即座に空く |
+| `GET` | `/classrooms/{id}/kick-requests` | 退室リクエスト一覧 (Issue #692) |
+| `POST` | `/classrooms/{id}/kick-requests/{requestId}/approve` | 承認 = `handleDeleteMember` (= kick) + 同席への全リクエスト削除 |
+| `DELETE` | `/classrooms/{id}/kick-requests/{requestId}` | 却下 = リクエストのみ削除、メンバーは残る |
 | `GET` | `/classrooms/{id}/submissions` | 提出一覧 (ダウンロード URL 付き) |
 | `PATCH` | `/classrooms/{id}/submissions/{subId}` | 提出の返却・コメント |
 
@@ -148,8 +177,9 @@ sequenceDiagram
 | Method | Path | 認証 | 説明 |
 |--------|------|------|------|
 | `POST` | `/classrooms/lookup` | 不要 | 参加コードでクラス検索 |
+| `POST` | `/classrooms/lookup/kick-request` | 不要 | 「使用中の席」を空けてもらう依頼を先生に送信 (Issue #692) |
 | `POST` | `/classrooms/join` | 不要 | クラスに参加 (→ sessionToken 取得) |
-| `POST` | `/classrooms/verify-session` | Session Token | セッション検証 + 提出状況取得 |
+| `POST` | `/classrooms/verify-session` | Session Token | セッション検証 + 提出状況取得。kick された生徒には 410 + `{reason: 'kicked', joinCode, className, seatNumber}` を返す |
 | `POST` | `/classrooms/{id}/submissions` | Session Token | 提出 (Presigned URL 取得) |
 | `DELETE` | `/classrooms/{id}/members/me` | Session Token | 自主退出 |
 
@@ -203,6 +233,34 @@ erDiagram
 
 **GSI:**
 - `sessionToken-index` — セッショントークンでの認証
+
+### ClassroomKickRequests テーブル (Issue #692)
+
+```mermaid
+erDiagram
+    ClassroomKickRequests {
+        string classroomId PK "UUID"
+        string requestId SK "UUID"
+        number seatNumber "1-50"
+        string reason "任意・最大200文字"
+        string sourceIpHash "abuse trace用 (sha256 16桁)"
+        string createdAt "ISO8601"
+        number ttl "Unix timestamp (1h)"
+    }
+```
+
+**GSI:**
+- `classroomId-seatNumber-index` — 承認時に同席への全リクエストを batch-delete するため
+
+短命 (TTL 1 時間) のレコード。生徒が「使用中の席を空けてください」と先生に依頼するときに作成される。同一席への複数依頼を許容する仕様 (規制なし)。
+
+### Memberships の kick tombstone (Issue #692)
+
+`handleDeleteMember` (= 教師 kick) は **行を物理削除しない**:
+- `kicked: true, kickedAt, kickJoinCode, kickClassName, kickSeatNumber, ttl: now+1h` をセット
+- これにより、kick された生徒の次回 `verify-session` 呼出で 410 reason='kicked' を返せる
+- `listMembers` / `lookup takenSeats` は `FilterExpression: attribute_not_exists(kicked) OR kicked <> :true` で tombstone を除外
+- `joinClassroom` の `ConditionExpression: attribute_not_exists(memberId) OR kicked = :true` で新生徒が kicked 行を上書き可能 (tombstone はその時点で消滅)
 
 ### ClassroomSubmissions テーブル
 

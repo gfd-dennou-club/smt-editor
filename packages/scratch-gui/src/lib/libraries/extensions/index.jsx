@@ -19,6 +19,10 @@ import unifiedapiInsetIconURL from './smt/unifiedapi-small.png';
 import peripherals              from './smt/peripherals.png';
 import peripheralsInsetIconURL  from './smt/peripherals-small.png';
 
+// === Smalruby: Start of Ruby String extension ===
+//import ruby from './smalruby-ruby/index.jsx';
+// === Smalruby: End of Ruby String extension ===
+
 export default [
     {
         name: (
@@ -139,5 +143,8 @@ export default [
             />
         ),
         featured: true
-    }
+    },
+    // === Smalruby: Start of Ruby String extension ===
+//    ruby
+    // === Smalruby: End of Ruby String extension ===
 ];

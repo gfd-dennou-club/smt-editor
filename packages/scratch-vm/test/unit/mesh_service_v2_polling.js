@@ -5,7 +5,7 @@ minilog.suggest.deny('vm', 'debug');
 minilog.suggest.deny('vm', 'info');
 
 const MeshV2Service = require('../../src/extensions/scratch3_mesh_v2/mesh-service');
-const { GET_EVENTS_SINCE, RECORD_EVENTS } = require('../../src/extensions/scratch3_mesh_v2/gql-operations');
+const { POLL_GROUP_DATA, RECORD_EVENTS } = require('../../src/extensions/scratch3_mesh_v2/gql-operations');
 
 const createMockBlocks = () => ({
     runtime: {
@@ -19,8 +19,8 @@ const createMockBlocks = () => ({
     },
 });
 
-test('MeshV2Service Polling', t => {
-    t.test('pollEvents fetches and handles events', async st => {
+test('MeshV2Service Polling', (t) => {
+    t.test('pollEvents fetches and handles events', async (st) => {
         const blocks = createMockBlocks();
         const service = new MeshV2Service(blocks, 'node1', 'domain1');
         service.groupId = 'group1';
@@ -49,12 +49,12 @@ test('MeshV2Service Polling', t => {
         ];
 
         service.client = {
-            query: options => {
-                st.equal(options.query, GET_EVENTS_SINCE);
+            query: (options) => {
+                st.equal(options.query, POLL_GROUP_DATA);
                 st.equal(options.variables.since, 'T1');
                 return Promise.resolve({
                     data: {
-                        getEventsSince: events,
+                        pollGroupData: { events, nodeStatuses: [] },
                     },
                 });
             },
@@ -69,7 +69,7 @@ test('MeshV2Service Polling', t => {
         st.end();
     });
 
-    t.test('fireEventsBatch uses RECORD_EVENTS when useWebSocket is false', async st => {
+    t.test('fireEventsBatch uses RECORD_EVENTS when useWebSocket is false', async (st) => {
         const blocks = createMockBlocks();
         const service = new MeshV2Service(blocks, 'node1', 'domain1');
         service.groupId = 'group1';
@@ -79,7 +79,7 @@ test('MeshV2Service Polling', t => {
         const events = [{ eventName: 'e1', payload: 'p1', firedAt: 't1' }];
 
         service.client = {
-            mutate: options => {
+            mutate: (options) => {
                 st.equal(options.mutation, RECORD_EVENTS);
                 return Promise.resolve({
                     data: {
@@ -98,7 +98,7 @@ test('MeshV2Service Polling', t => {
         st.end();
     });
 
-    t.test('startPolling sets up interval', st => {
+    t.test('startPolling sets up interval', (st) => {
         const blocks = createMockBlocks();
         const service = new MeshV2Service(blocks, 'node1', 'domain1');
         service.groupId = 'group1';
@@ -121,7 +121,7 @@ test('MeshV2Service Polling', t => {
         }, 50);
     });
 
-    t.test('testWebSocket success', async st => {
+    t.test('testWebSocket success', async (st) => {
         const blocks = createMockBlocks();
         const service = new MeshV2Service(blocks, 'node1', 'domain1');
 
@@ -140,7 +140,7 @@ test('MeshV2Service Polling', t => {
         st.end();
     });
 
-    t.test('testWebSocket failure', async st => {
+    t.test('testWebSocket failure', async (st) => {
         const blocks = createMockBlocks();
         const service = new MeshV2Service(blocks, 'node1', 'domain1');
 
@@ -159,7 +159,7 @@ test('MeshV2Service Polling', t => {
         st.end();
     });
 
-    t.test('pollEvents filters out self-fired events', async st => {
+    t.test('pollEvents filters out self-fired events', async (st) => {
         const blocks = createMockBlocks();
         const service = new MeshV2Service(blocks, 'node1', 'domain1');
         service.groupId = 'group1';
@@ -182,7 +182,7 @@ test('MeshV2Service Polling', t => {
         ];
 
         service.client = {
-            query: () => Promise.resolve({ data: { getEventsSince: events } }),
+            query: () => Promise.resolve({ data: { pollGroupData: { events, nodeStatuses: [] } } }),
         };
 
         await service.pollEvents();
@@ -195,7 +195,7 @@ test('MeshV2Service Polling', t => {
         st.end();
     });
 
-    t.test('pollEvents falls back to current time if lastFetchTime is empty', async st => {
+    t.test('pollEvents falls back to current time if lastFetchTime is empty', async (st) => {
         const blocks = createMockBlocks();
         const service = new MeshV2Service(blocks, 'node1', 'domain1');
         service.groupId = 'group1';
@@ -203,14 +203,51 @@ test('MeshV2Service Polling', t => {
         service.lastFetchTime = ''; // empty
 
         service.client = {
-            query: options => {
+            query: (options) => {
                 st.ok(options.variables.since);
                 st.ok(new Date(options.variables.since).getTime() > 0);
-                return Promise.resolve({ data: { getEventsSince: [] } });
+                return Promise.resolve({ data: { pollGroupData: { events: [], nodeStatuses: [] } } });
             },
         };
 
         await service.pollEvents();
+        st.end();
+    });
+
+    // issue #554: pollGroupData が events と nodeStatuses を 1 リクエストで取得し、
+    // nodeStatuses は handleDataUpdate に流す
+    t.test('pollEvents handles nodeStatuses via handleDataUpdate (issue #554)', async (st) => {
+        const blocks = createMockBlocks();
+        const service = new MeshV2Service(blocks, 'node1', 'domain1');
+        service.groupId = 'group1';
+        service.useWebSocket = false;
+        service.lastFetchTime = 'T1';
+
+        const handled = [];
+        service.handleDataUpdate = (status) => {
+            handled.push(status);
+        };
+
+        const nodeStatuses = [
+            {
+                nodeId: 'node2',
+                groupId: 'group1',
+                domain: 'domain1',
+                data: [{ key: 'k', value: 'v' }],
+                timestamp: 'T2',
+            },
+            { nodeId: 'node3', groupId: 'group1', domain: 'domain1', data: [], timestamp: 'T2' },
+        ];
+
+        service.client = {
+            query: () => Promise.resolve({ data: { pollGroupData: { events: [], nodeStatuses } } }),
+        };
+
+        await service.pollEvents();
+
+        st.equal(handled.length, 2);
+        st.equal(handled[0].nodeId, 'node2');
+        st.equal(handled[1].nodeId, 'node3');
         st.end();
     });
 

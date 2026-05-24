@@ -307,14 +307,22 @@ class Blocks {
             typeof e.commentId !== 'string') {
             return;
         }
-        const stage = this.runtime.getTargetForStage();
-        const editingTarget = this.runtime.getEditingTarget();
-
-        // UI event: clicked scripts toggle in the runtime.
-        if (e.element === 'stackclick') {
-            this.runtime.toggleScript(e.blockId, {stackClick: true});
+        // Intermediate field changes fire on every keystroke while editing
+        // a text input. Update the field value so running scripts see the
+        // change, but skip project-changed and other side effects. Handle
+        // this before the stage/editingTarget lookups to avoid per-keystroke
+        // overhead from getTargetForStage's linear scan.
+        if (e.type === 'block_field_intermediate_change') {
+            const block = this._blocks[e.blockId];
+            if (block && block.fields && block.fields[e.name]) {
+                block.fields[e.name].value = e.newValue;
+                this._cache._executeCached = {};
+            }
             return;
         }
+
+        const stage = this.runtime.getTargetForStage();
+        const editingTarget = this.runtime.getEditingTarget();
 
         // Block create/update/destroy
         switch (e.type) {
@@ -424,11 +432,21 @@ class Blocks {
             this.emitProjectChanged();
             break;
         }
+        case 'block_comment_create':
         case 'comment_create':
             if (this.runtime.getEditingTarget()) {
                 const currTarget = this.runtime.getEditingTarget();
-                currTarget.createComment(e.commentId, e.blockId, e.text,
-                    e.xy.x, e.xy.y, e.width, e.height, e.minimized);
+                // Modern (Blockly v12) `block_comment_create` events carry
+                // x/y/width/height under e.json and have no `text`/`minimized`
+                // payload. The legacy v1 `comment_create` shape used
+                // e.xy/e.width/e.height/e.text/e.minimized. Normalize both.
+                const xy = e.json || e.xy || {};
+                const width = (e.json && e.json.width) || e.width;
+                const height = (e.json && e.json.height) || e.height;
+                const text = e.text || '';
+                const minimized = e.minimized || false;
+                currTarget.createComment(e.commentId, e.blockId, text,
+                    xy.x, xy.y, width, height, minimized);
 
                 if (currTarget.comments[e.commentId].x === null &&
                     currTarget.comments[e.commentId].y === null) {
@@ -438,12 +456,13 @@ class Blocks {
                     // comments, then the auto positioning should have taken place.
                     // Update the x and y position of these comments to match the
                     // one from the event.
-                    currTarget.comments[e.commentId].x = e.xy.x;
-                    currTarget.comments[e.commentId].y = e.xy.y;
+                    currTarget.comments[e.commentId].x = xy.x;
+                    currTarget.comments[e.commentId].y = xy.y;
                 }
             }
             this.emitProjectChanged();
             break;
+        case 'block_comment_change':
         case 'comment_change':
             if (this.runtime.getEditingTarget()) {
                 const currTarget = this.runtime.getEditingTarget();
@@ -453,25 +472,57 @@ class Blocks {
                 }
                 const comment = currTarget.comments[e.commentId];
                 const change = e.newContents_;
-                if (Object.prototype.hasOwnProperty.call(change, 'minimized')) {
-                    comment.minimized = change.minimized;
-                }
-                if (Object.prototype.hasOwnProperty.call(change, 'width') &&
-                    Object.prototype.hasOwnProperty.call(change, 'height')) {
-                    comment.width = change.width;
-                    comment.height = change.height;
-                }
-                if (Object.prototype.hasOwnProperty.call(change, 'text')) {
-                    comment.text = change.text;
+                // Modern Blockly v12 fires `block_comment_change` with
+                // e.newContents_ as a plain string (the new text). Legacy
+                // v1 used a structured object. Handle both.
+                if (typeof change === 'string') {
+                    comment.text = change;
+                } else if (change && typeof change === 'object') {
+                    if (Object.prototype.hasOwnProperty.call(change, 'minimized')) {
+                        comment.minimized = change.minimized;
+                    }
+                    if (Object.prototype.hasOwnProperty.call(change, 'width') &&
+                        Object.prototype.hasOwnProperty.call(change, 'height')) {
+                        comment.width = change.width;
+                        comment.height = change.height;
+                    }
+                    if (Object.prototype.hasOwnProperty.call(change, 'text')) {
+                        comment.text = change.text;
+                    }
                 }
                 this.emitProjectChanged();
             }
             break;
+        case 'block_comment_collapse':
+            if (this.runtime.getEditingTarget()) {
+                const currTarget = this.runtime.getEditingTarget();
+                if (!Object.prototype.hasOwnProperty.call(currTarget.comments, e.commentId)) {
+                    log.warn(`Cannot collapse comment with id ${e.commentId} because it does not exist.`);
+                    return;
+                }
+                currTarget.comments[e.commentId].minimized = !!e.newCollapsed;
+                this.emitProjectChanged();
+            }
+            break;
+        case 'block_comment_resize':
+            if (this.runtime.getEditingTarget()) {
+                const currTarget = this.runtime.getEditingTarget();
+                if (!Object.prototype.hasOwnProperty.call(currTarget.comments, e.commentId)) {
+                    log.warn(`Cannot resize comment with id ${e.commentId} because it does not exist.`);
+                    return;
+                }
+                const newSize = e.newSize || {};
+                currTarget.comments[e.commentId].width = newSize.width;
+                currTarget.comments[e.commentId].height = newSize.height;
+                this.emitProjectChanged();
+            }
+            break;
+        case 'block_comment_move':
         case 'comment_move':
             if (this.runtime.getEditingTarget()) {
                 const currTarget = this.runtime.getEditingTarget();
                 if (currTarget && !Object.prototype.hasOwnProperty.call(currTarget.comments, e.commentId)) {
-                    log.warn(`Cannot change comment with id ${e.commentId} because it does not exist.`);
+                    log.warn(`Cannot move comment with id ${e.commentId} because it does not exist.`);
                     return;
                 }
                 const comment = currTarget.comments[e.commentId];
@@ -482,6 +533,7 @@ class Blocks {
                 this.emitProjectChanged();
             }
             break;
+        case 'block_comment_delete':
         case 'comment_delete':
             if (this.runtime.getEditingTarget()) {
                 const currTarget = this.runtime.getEditingTarget();
@@ -503,6 +555,12 @@ class Blocks {
                 }
 
                 this.emitProjectChanged();
+            }
+            break;
+        case 'click':
+            // UI event: clicked scripts toggle in the runtime.
+            if (e.targetType === 'block') {
+                this.runtime.toggleScript(this.getTopLevelScript(e.blockId), {stackClick: true});
             }
             break;
         }
@@ -547,7 +605,7 @@ class Blocks {
         // Push block id to scripts array.
         // Blocks are added as a top-level stack if they are marked as a top-block
         // (if they were top-level XML in the event).
-        if (block.topLevel) {
+        if (block.topLevel && !block.shadow) {
             this._addScript(block.id);
         }
 
@@ -719,8 +777,27 @@ class Blocks {
             const oldParent = this._blocks[e.oldParent];
             if (typeof e.oldInput !== 'undefined' &&
                 oldParent.inputs[e.oldInput].block === e.id) {
-                // This block was connected to the old parent's input.
-                oldParent.inputs[e.oldInput].block = null;
+                // This block was connected to an input. We either want to
+                // restore the shadow block that previously occupied
+                // this input, or null out the input's block.
+                const shadow = oldParent.inputs[e.oldInput].shadow;
+                if (shadow && e.id !== shadow) {
+                    if (this._blocks[shadow]) {
+                        oldParent.inputs[e.oldInput].block = shadow;
+                        this._blocks[shadow].parent = oldParent.id;
+                    } else {
+                        // Shadow block is referenced but missing — clear
+                        // the stale reference rather than crashing.
+                        oldParent.inputs[e.oldInput].block = null;
+                        oldParent.inputs[e.oldInput].shadow = null;
+                    }
+                    this._blocks[e.id].parent = null;
+                } else {
+                    oldParent.inputs[e.oldInput].block = null;
+                    if (e.id !== shadow) {
+                        this._blocks[e.id].parent = null;
+                    }
+                }
             } else if (oldParent.next === e.id) {
                 // This block was connected to the old parent's next connection.
                 oldParent.next = null;
@@ -1079,12 +1156,25 @@ class Blocks {
         if (!block) return;
         // Encode properties of this block.
         const tagName = (block.shadow) ? 'shadow' : 'block';
+        // === Smalruby: Start of XML coords guard ===
+        // Smalruby の Ruby → blocks 変換は x/y を undefined のまま返し、
+        // blocks.jsx の `fromRuby` 検出で `typeof topBlock.x === 'undefined'`
+        // を見て workspace.cleanUp() で再レイアウトする。
+        // しかし scratch-blocks v2 は `x="undefined"` を含む XML を読み込むと
+        // NaN → 0 として扱った上で move イベントを発火し、VM 側の
+        // block.x を 0 に書き換えてしまう。結果として `fromRuby` 検出が
+        // 効かず、ブロックとコメントが workspace 原点付近に積み重なる。
+        // x/y が finite number のときだけ XML 属性を出力することで、v2 に
+        // 「位置未指定」を正しく伝え、上記再レイアウト経路を再び動かす。
+        const hasCoords = block.topLevel &&
+            Number.isFinite(block.x) && Number.isFinite(block.y);
         let xmlString =
             `<${tagName}
                 id="${block.id}"
                 type="${block.opcode}"
-                ${block.topLevel ? `x="${block.x}" y="${block.y}"` : ''}
+                ${hasCoords ? `x="${block.x}" y="${block.y}"` : ''}
             >`;
+        // === Smalruby: End of XML coords guard ===
         const commentId = block.comment;
         if (commentId) {
             if (comments) {

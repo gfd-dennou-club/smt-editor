@@ -55,16 +55,18 @@ const waitForActiveState = (d, testId, expected) =>
  * Click the Code tab using a stable selector instead of XPath text matching.
  * @param {import('selenium-webdriver').WebDriver} d - WebDriver instance.
  */
-const clickCodeTab = d => d.executeScript(`document.querySelector('[role="tab"]').click()`);
+const clickCodeTab = (d) => d.executeScript(`document.querySelector('[role="tab"]').click()`);
 
 /**
  * Load the editor in Ruby mode (not DNCL), clearing any localStorage state.
+ * Uses locale=ja because furigana/DNCL modes are only available in Japanese locales.
  * @param {import('selenium-webdriver').WebDriver} d - WebDriver instance.
  */
-const loadInRubyMode = async d => {
+const loadInRubyMode = async () => {
     // Use rubyMode=ruby to ensure we start in Ruby mode, regardless of localStorage
-    await loadUri(`${uri}?rubyMode=ruby`);
-    await clickText('Ruby', '*[@role="tab"]');
+    // locale=ja is required because DNCL mode is hidden for non-Japanese locales
+    // tab=ruby opens Ruby tab directly (avoids locale-dependent tab label)
+    await loadUri(`${uri}?rubyMode=ruby&locale=ja&tab=ruby`);
 };
 
 let driver;
@@ -132,8 +134,7 @@ describe('DNCL mode validation on switch', () => {
     });
 
     test('DNCL to Ruby switch is not affected', async () => {
-        await loadUri(`${uri}?rubyMode=dncl`);
-        await clickText('Ruby', '*[@role="tab"]');
+        await loadUri(`${uri}?rubyMode=dncl&locale=ja&tab=ruby`);
         await waitForActiveState(driver, 'ruby-toolbar-mode-dncl', true);
 
         await clickByTestId(driver, 'ruby-toolbar-mode-ruby');
@@ -142,8 +143,7 @@ describe('DNCL mode validation on switch', () => {
 
     test('DNCL to Ruby switch restores block palette and extension button on Code tab', async () => {
         // Start in DNCL mode
-        await loadUri(`${uri}?rubyMode=dncl`);
-        await clickText('Ruby', '*[@role="tab"]');
+        await loadUri(`${uri}?rubyMode=dncl&locale=ja&tab=ruby`);
         await waitForActiveState(driver, 'ruby-toolbar-mode-dncl', true);
 
         // Switch back to Ruby mode
@@ -166,9 +166,9 @@ describe('DNCL mode validation on switch', () => {
 
         // Verify block palette (toolbox) is visible and has multiple categories
         const categoryCount = await driver.executeScript(
-            `const toolbox = document.querySelector('.blocklyToolboxDiv');` +
+            `const toolbox = document.querySelector('.blocklyToolbox');` +
                 `if (!toolbox || toolbox.style.display === 'none') return 0;` +
-                `return toolbox.querySelectorAll('.scratchCategoryMenuItem').length;`,
+                `return toolbox.querySelectorAll('.blocklyToolboxCategory').length;`,
         );
         // Non-DNCL mode should have more categories than DNCL mode (which filters heavily)
         expect(categoryCount).toBeGreaterThan(3);
@@ -176,8 +176,7 @@ describe('DNCL mode validation on switch', () => {
 
     test('DNCL to furigana switch restores block palette on Code tab', async () => {
         // Start in DNCL mode
-        await loadUri(`${uri}?rubyMode=dncl`);
-        await clickText('Ruby', '*[@role="tab"]');
+        await loadUri(`${uri}?rubyMode=dncl&locale=ja&tab=ruby`);
         await waitForActiveState(driver, 'ruby-toolbar-mode-dncl', true);
 
         // Switch to furigana mode
@@ -200,9 +199,9 @@ describe('DNCL mode validation on switch', () => {
 
         // Verify block palette has full categories
         const categoryCount = await driver.executeScript(
-            `const toolbox = document.querySelector('.blocklyToolboxDiv');` +
+            `const toolbox = document.querySelector('.blocklyToolbox');` +
                 `if (!toolbox || toolbox.style.display === 'none') return 0;` +
-                `return toolbox.querySelectorAll('.scratchCategoryMenuItem').length;`,
+                `return toolbox.querySelectorAll('.blocklyToolboxCategory').length;`,
         );
         expect(categoryCount).toBeGreaterThan(3);
     });

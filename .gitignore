@@ -141,9 +141,17 @@ built-monorepo
 
 # Claude Code local settings
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
+.claude/worktrees/
 .*-mcp/
 
+# VSCode local-only settings (machine-specific, e.g. rust-analyzer envFile)
+.vscode/cargo.env.local
+
 /notes
+
+# Scratch directory for Playwright screenshots and other ephemeral work files (Issue #616)
+/tmp/
 
 # CDK (infra/)
 infra/**/cdk.out/
@@ -151,3 +159,6 @@ infra/**/cdk.out.*/
 infra/**/tmp/
 infra/**/.cdk.staging/
 infra/**/cdk-out-*/
+
+# devcontainer の個人別設定 (各自で .example からコピーして mounts を編集する)
+.devcontainer/devcontainer.json

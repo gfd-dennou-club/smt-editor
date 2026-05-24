@@ -102,6 +102,22 @@ const ControlConverter = {
             return block;
         });
 
+        // clone / self.clone - control_create_clone_of("myself") with @ruby:method:clone
+        // Stage cannot be cloned
+        converter.registerOnSend('self', 'clone', 0, params => {
+            if (converter._context.target && converter._context.target.isStage) {
+                return null; // fall through to ruby_statement (Stage cannot clone)
+            }
+            const block = converter._createBlock('control_create_clone_of', 'statement');
+            const optionBlock = converter._createBlock('control_create_clone_of_menu', 'value', {
+                shadow: true
+            });
+            converter._addField(optionBlock, 'CLONE_OPTION', '_myself_');
+            converter._addInput(block, 'CLONE_OPTION', optionBlock, optionBlock);
+            block.comment = converter._createComment('@ruby:method:clone', block.id);
+            return block;
+        });
+
         // number.times (without block) - returns control_repeat for chaining with with_screen_refresh
         converter.registerOnSend('any', 'times', 0, params => {
             const {receiver} = params;
@@ -119,6 +135,68 @@ const ControlConverter = {
             if (converter._hadWaitInLastRemove) {
                 block.comment = converter._createComment('@ruby:method:wait', block.id);
             }
+            return block;
+        });
+
+        // number.times { |i| block } - smalrubyRuby_numberMethodWithBlock
+        converter.registerOnSendWithBlock('any', 'times', 0, 1, params => {
+            const {receiver, rubyBlockArgs, rubyBlock} = params;
+            if (!rubyBlock || !converter._isNumberOrBlock(receiver)) return null;
+            if (!rubyBlockArgs || rubyBlockArgs.length !== 1) return null;
+
+            const block = converter._createBlock(
+                'smalrubyRuby_numberMethodWithBlock',
+                'statement'
+            );
+            converter._addNumberInput(block, 'RECEIVER', 'math_number', receiver, 5);
+            converter._addField(block, 'METHOD', 'times');
+
+            // Store block param mapping in comment
+            const paramName = rubyBlockArgs[0];
+            block.comment = converter._createComment(
+                `@ruby:block_param:1:${paramName}`, block.id
+            );
+
+            // Replace variable references in body with blockParam blocks
+            const varNameToParamIdx = {};
+            const variable = converter._lookupOrCreateVariable(paramName);
+            varNameToParamIdx[variable.name] = 0;
+
+            const replaceParamVars = (blockId) => {
+                if (!blockId) return;
+                const b = converter._context.blocks[blockId];
+                if (!b) return;
+                if (b.inputs) {
+                    for (const inputName of Object.keys(b.inputs)) {
+                        const input = b.inputs[inputName];
+                        const childBlock = converter._context.blocks[input.block];
+                        if (childBlock &&
+                            childBlock.opcode === 'data_variable' &&
+                            childBlock.fields &&
+                            childBlock.fields.VARIABLE) {
+                            const varName = childBlock.fields.VARIABLE.value;
+                            const paramIdx = varNameToParamIdx[varName];
+                            if (paramIdx >= 0) {
+                                childBlock.opcode = 'smalrubyRuby_blockParam';
+                                delete childBlock.fields.VARIABLE;
+                                childBlock.fields.PARAM = {
+                                    name: 'PARAM',
+                                    value: `_${paramIdx + 1}`
+                                };
+                                converter._setBlockType(childBlock, 'value');
+                            }
+                        }
+                        if (input.block) replaceParamVars(input.block);
+                    }
+                }
+                if (b.next) replaceParamVars(b.next);
+                if (b.inputs && b.inputs.SUBSTACK && b.inputs.SUBSTACK.block) {
+                    replaceParamVars(b.inputs.SUBSTACK.block);
+                }
+            };
+            replaceParamVars(rubyBlock.id);
+
+            converter._addSubstack(block, rubyBlock);
             return block;
         });
 

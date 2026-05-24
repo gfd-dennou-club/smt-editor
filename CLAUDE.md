@@ -21,6 +21,7 @@ The `infra/` directory contains AWS CDK infrastructure projects (independent fro
 - **`infra/smalruby-mesh-v2`**: AWS CDK project for the Mesh v2 networking service (AppSync + DynamoDB)
 - **`infra/smalruby-rubytee-relay`**: AWS CDK project for the Rubytee AI relay service (Anthropic Claude API + DynamoDB)
 - **`infra/smalruby-classroom`**: AWS CDK project for the Classroom service (API Gateway + Lambda + DynamoDB)
+- **`infra/smalruby-api`**: AWS CDK project for general API endpoints (HTTP API v2 + Lambda): cors-proxy, mesh-domain, scratch-api-proxy
 
 The `ruby/` directory contains the smalruby3 Ruby gem and its native dependencies (git submodules):
 
@@ -62,6 +63,21 @@ docker compose run --rm app bash -c "COMMAND"
 # Stop services
 docker compose stop app
 ```
+
+The compose project name is pinned to `smalruby3-editor` (see `name:` at the top of `docker-compose.yml`), so `docker compose run` from a git worktree shares the same image and named volumes as the main checkout — no per-worktree rebuild needed.
+
+After `git worktree add`, run **`bin/sync-worktree-env`** once to copy the gitignored `.env.*` files (root + per-infra) from the main checkout. Without these, CDK deploys, webpack builds, and mesh v2 integration tests fail. See `.claude/rules/git-workflow.md` for full worktree workflow.
+
+### Quick One-Shot Commands: `bin/dx`
+
+For quick lint or single-test invocations, `bin/dx` is a thin `docker run` wrapper that targets the prebuilt `smalruby3-editor-app:latest` image and mounts the same `node_modules` / npm cache volumes used by `docker compose run app`. It bypasses the compose entrypoint (which checks for monorepo setup), so it starts faster than `docker compose run`:
+
+```bash
+bin/dx bash -c "cd packages/scratch-vm && npm run lint"
+bin/dx bash -c "cd packages/scratch-gui && npm exec jest test/unit/your-test.test.js"
+```
+
+`docker compose run` is still preferred when you need the full setup (port mapping, container reuse, etc.). Use `bin/dx` for one-shot commands where startup speed matters.
 
 ## Development Commands
 
@@ -187,7 +203,7 @@ Smalruby supports loading and saving projects to Google Drive. Setup requires:
 - OAuth 2.0 client credentials
 - Environment variables: `GOOGLE_CLIENT_ID`, `GOOGLE_API_KEY`
 
-See `packages/scratch-gui/docs/google-api-setup.md` for detailed setup instructions.
+See `docs/google-drive/google-api-setup.md` for detailed setup instructions.
 
 ### Custom Extensions
 
@@ -313,6 +329,7 @@ Follow TDD (Test-Driven Development) approach:
   - `infra/smalruby-mesh-v2/`: Mesh v2 networking service (AppSync + DynamoDB)
   - `infra/smalruby-rubytee-relay/`: Rubytee AI relay service (Anthropic Claude + DynamoDB)
   - `infra/smalruby-classroom/`: Classroom service (API Gateway + Lambda + DynamoDB)
+- `docs/`: **Smalruby 独自の機能ドキュメント**（ユーザーストーリー単位の統合ドキュメント）。配置ルールは `.claude/rules/documentation.md` 参照
 - `scripts/`: Monorepo-level build scripts
 - `.github/workflows/`: CI/CD configuration
 - `.claude/rules/`: Package-specific development rules
@@ -376,3 +393,9 @@ This command provides:
 **Manual merge is NOT recommended** - use the slash command to ensure consistent process and complete documentation.
 
 See `.claude/skills/upstream-merge/SKILL.md` for detailed workflow documentation.
+
+### Cherry-Picking Individual Upstream Commits
+
+upstream の個別コミットを直接取り込む (cherry-pick) 場合は、**リリース済みかどうかを必ず確認** する。未リリースのコミットを取り込むのは「我々が再現できる致命的なバグ修正であり、取り込まないと壊れる構造的問題に限る」。
+
+判断基準・確認手順・取り込み時の必須事項は `.claude/rules/upstream-cherry-pick.md` を参照。

@@ -159,7 +159,7 @@ class FuriganaAnnotator {
 
     _walkChildren(node) {
         if (typeof node.childNodes === 'function') {
-            node.childNodes().forEach(child => {
+            node.childNodes().forEach((child) => {
                 if (child) this._walkNode(child);
             });
         }
@@ -205,6 +205,16 @@ class FuriganaAnnotator {
                         break;
                     case 'Math':
                         this._annotateMathMethod(node, name);
+                        break;
+                    case 'Array':
+                        if (name === 'new') {
+                            this._addAnnotation(node.messageLoc, '配列を作る');
+                        }
+                        break;
+                    case 'Hash':
+                        if (name === 'new') {
+                            this._addAnnotation(node.messageLoc, 'ハッシュを作る');
+                        }
                         break;
                     default:
                         break;
@@ -278,7 +288,7 @@ class FuriganaAnnotator {
 
         if (node.arguments_) {
             if (methodUnit) this._argUnit = methodUnit;
-            node.arguments_.arguments_.forEach(arg => this._walkNode(arg));
+            node.arguments_.arguments_.forEach((arg) => this._walkNode(arg));
             if (methodUnit) this._argUnit = null;
         }
         if (this._stringLabelMap) this._stringLabelMap = null;

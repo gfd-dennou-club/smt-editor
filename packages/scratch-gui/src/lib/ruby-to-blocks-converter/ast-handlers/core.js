@@ -100,13 +100,23 @@ const CoreHandlers = {
         let cond = this.visit(node);
         const split = this._splitPreBlocksAndValue(cond);
         if (split.preBlocks.length > 0) {
-            if (!this._isFalseOrBooleanBlock(split.value)) {
+            // === Smalruby: Start of returnValue to returnValueTruthy conversion ===
+            // When a smalrubyRuby method is used in a boolean context (if/unless
+            // condition), replace the returnValue REPORTER with returnValueTruthy
+            // BOOLEAN so it can be used as a condition input.
+            let value = split.value;
+            if (this._isBlock(value) &&
+                value.opcode === 'smalrubyRuby_returnValue') {
+                value = this._createBlock('smalrubyRuby_returnValueTruthy', 'value_boolean');
+            }
+            // === Smalruby: End of returnValue to returnValueTruthy conversion ===
+            if (!this._isFalseOrBooleanBlock(value)) {
                 throw new RubyToBlocksConverterError(
                     node,
                     this._translator(messages.conditionIsNotBoolean, {SOURCE: this._getSource(node)})
                 );
             }
-            return [...split.preBlocks, split.value];
+            return [...split.preBlocks, value];
         }
         cond = split.value;
         if (!this._isFalseOrBooleanBlock(cond)) {
@@ -132,15 +142,34 @@ const CoreHandlers = {
         if (!_.isArray(blocks)) {
             blocks = [blocks];
         }
+        // === Smalruby: Start of bare literal in statement context ===
+        const Primitive = require('../primitive').default;
+        blocks = blocks.map(b => {
+            if (b instanceof Primitive && b.type !== 'sym') {
+                return this._convertBareLiteralToAssignment(b);
+            }
+            return b;
+        });
+        blocks = blocks.flat();
+        // === Smalruby: End of bare literal in statement context ===
+        // === Smalruby: Start of statement-only linking ===
+        // Link only statement/terminate blocks, skipping value blocks (e.g.,
+        // orphan returnValue REPORTERs from auto-split). Value blocks in a
+        // next-chain corrupt the generator output because blockToCode returns
+        // [code, order] tuples that get string-concatenated as garbage.
         if (blocks.length >= 2 && this._isBlock(blocks[0])) {
-            // It's a multi-block result, link them
-            for (let i = 0; i < blocks.length - 1; i++) {
-                if (this._isBlock(blocks[i]) && this._isBlock(blocks[i + 1])) {
-                    blocks[i].next = blocks[i + 1].id;
-                    blocks[i + 1].parent = blocks[i].id;
+            let prevIdx = this._isStatementBlock(blocks[0]) ? 0 : -1;
+            for (let i = 1; i < blocks.length; i++) {
+                if (this._isBlock(blocks[i]) && this._isStatementBlock(blocks[i])) {
+                    if (prevIdx >= 0) {
+                        blocks[prevIdx].next = blocks[i].id;
+                        blocks[i].parent = blocks[prevIdx].id;
+                    }
+                    prevIdx = i;
                 }
             }
         }
+        // === Smalruby: End of statement-only linking ===
         const block = blocks[0];
         if (block !== null && typeof block !== 'undefined' && !this._isStatementBlock(block)) {
             if (!(this._context.inMyBlockDefinition && block.opcode === 'data_setvariableto')) {

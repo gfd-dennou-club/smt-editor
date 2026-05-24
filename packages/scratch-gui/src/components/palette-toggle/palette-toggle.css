@@ -1,35 +1,37 @@
 @import "../../css/z-index.css";
 
+/*
+ * パレットを出し入れするトグル。指でも掴めるように縦長 18×60 の
+ * tap 領域を確保する。
+ */
 .palette-toggle-button {
     position: absolute;
     top: 50%;
     transform: translateY(-50%);
     z-index: $z-index-extension-button;
-    width: 16px;
-    height: 48px;
+    width: 18px;
+    height: 60px;
     padding: 0;
-    background-color: white;
-    border: 1px solid rgba(0, 0, 0, 0.15);
-    border-left: none;
-    border-radius: 0 4px 4px 0;
+    background-color: rgba(133, 92, 214, 0.92);
+    color: white;
+    border: 0;
+    border-radius: 0 8px 8px 0;
     cursor: pointer;
-    font-size: 8px;
-    color: rgb(87, 94, 117);
+    font-size: 14px;
+    font-weight: bold;
+    line-height: 1;
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 2px 0 4px rgba(0, 0, 0, 0.1);
-    transition: opacity 0.15s ease;
+    box-shadow: 2px 2px 6px rgba(0, 0, 0, 0.18);
+    transition: background-color 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
 }
 
 .palette-toggle-button:hover {
-    opacity: 0.85;
-    background-color: #f8f8f8;
+    background-color: rgba(133, 92, 214, 1);
 }
 
 .palette-toggle-button-hidden {
-    border: 1px solid rgba(0, 0, 0, 0.15);
-    border-radius: 0 4px 4px 0;
-    border-left: none;
     left: 0;
 }

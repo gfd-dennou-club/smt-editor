@@ -29,13 +29,18 @@ import {
     closeDebugModal,
     closeKoshienTestModal,
     closeUrlLoaderModal,
-    closeTipsLibrary
+    closeTipsLibrary,
+    openWelcomeModal
 } from '../reducers/modals';
 
 import {setPlatform} from '../reducers/platform';
 import {setTheme} from '../reducers/settings';
 import {setDynamicAssets} from '../reducers/dynamic-assets';
 import {showAlertWithTimeout} from '../reducers/alerts';
+import { // === Smalruby: DNCL mode notice ===
+    setDnclMode,
+    requestExternalExitDnclMode,
+} from '../reducers/dncl-mode'; // === Smalruby: DNCL mode notice ===
 import {highlightTarget} from '../reducers/targets';
 import {
     rubyCodeShape,
@@ -219,6 +224,8 @@ GUI.propTypes = {
     isTotallyNormal: PropTypes.bool,
     loadingStateVisible: PropTypes.bool,
     manuallySaveThumbnails: PropTypes.bool,
+    onSetManualThumbnail: PropTypes.func,
+    onSetManualThumbnailButtonClick: PropTypes.func,
     onProjectLoaded: PropTypes.func,
     onSeeCommunity: PropTypes.func,
     onStorageInit: PropTypes.func,
@@ -325,6 +332,12 @@ const mapStateToProps = (state, ownProps) => {
 
 const mapDispatchToProps = dispatch => ({
     onExtensionButtonClick: () => dispatch(openExtensionLibrary()),
+    // === Smalruby: Start of DNCL mode notice ===
+    onRequestExitDnclMode: () => {
+        dispatch(setDnclMode(false));
+        dispatch(requestExternalExitDnclMode());
+    },
+    // === Smalruby: End of DNCL mode notice ===
     onActivateTab: tab => dispatch(activateTab(tab)),
     onUpdateDynamicAssets: dynamicAssets => dispatch(setDynamicAssets(dynamicAssets)),
     onActivateCostumesTab: () => dispatch(activateTab(COSTUMES_TAB_INDEX)),
@@ -344,8 +357,11 @@ const mapDispatchToProps = dispatch => ({
     onShowConvertRubyToBlocksErrorAlert: () => showAlertWithTimeout(dispatch, 'convertRubyToBlocksError'),
     updateRubyCodeErrorsState: errors => dispatch(updateRubyCodeErrors(errors)),
     // === Smalruby: Start of classcode auto-open ===
-    onOpenClassroomModal: () => dispatch(openClassroomModal())
+    onOpenClassroomModal: () => dispatch(openClassroomModal()),
     // === Smalruby: End of classcode auto-open ===
+    // === Smalruby: Start of welcome modal ===
+    onShowWelcomeModal: () => dispatch(openWelcomeModal())
+    // === Smalruby: End of welcome modal ===
 });
 
 const ConnectedGUI = injectIntl(connect(

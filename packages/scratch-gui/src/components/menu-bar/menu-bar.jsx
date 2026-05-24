@@ -35,12 +35,18 @@ import GoogleDriveSaverHOC from '../../containers/google-drive-saver-hoc.jsx';
 import GoogleDriveSaveDialog from '../google-drive-save-dialog/google-drive-save-dialog.jsx';
 import SettingsMenu from './settings-menu.jsx';
 import TutorialTooltip from './tutorial-tooltip.jsx';
+// === Smalruby: Start of welcome tooltip ===
+import WelcomeTooltip from '../welcome-tooltip/welcome-tooltip.jsx';
+// === Smalruby: End of welcome tooltip ===
 
 import {
     openDebugModal,
     openKoshienTestModal,
     openUrlLoaderModal,
-    openConnectionModal
+    openConnectionModal,
+    // === Smalruby: Start of welcome tooltip ===
+    openWelcomeModal,
+    // === Smalruby: End of welcome tooltip ===
 } from '../../reducers/modals';
 import {
     setDomain as setMeshV2Domain
@@ -280,6 +286,7 @@ class MenuBar extends React.Component {
             'handleMeshV2MenuClick',
             'handleSmalrubotS1FirmwareFlash',
             'handleClickTutorials',
+            'handleClickWelcomeTooltip', // === Smalruby: welcome tooltip ===
             'handleUpdateAvailable',
             'handleUpdateNotificationClick'
         ]);
@@ -390,9 +397,11 @@ class MenuBar extends React.Component {
     handleClickSeeCommunity (waitForUpdate) {
         if (this.props.shouldSaveBeforeTransition()) {
             this.props.autoUpdateProject(); // save before transitioning to project page
-            waitForUpdate(true); // queue the transition to project page
+            waitForUpdate({
+                isSaving: true
+            }); // queue the transition to project page
         } else {
-            waitForUpdate(false); // immediately transition to project page
+            waitForUpdate(); // immediately transition to project page
         }
     }
     handleClickShare (waitForUpdate) {
@@ -402,9 +411,10 @@ class MenuBar extends React.Component {
             }
             if (this.props.canSave) { // save before transitioning to project page
                 this.props.autoUpdateProject();
-                waitForUpdate(true); // queue the transition to project page
-            } else {
-                waitForUpdate(false); // immediately transition to project page
+                waitForUpdate({
+                    isSaving: true,
+                    isSharing: true
+                }); // queue the transition to project page
             }
         }
     }
@@ -479,6 +489,11 @@ class MenuBar extends React.Component {
             this.props.onOpenTipsLibrary();
         }
     }
+    // === Smalruby: Start of welcome tooltip ===
+    handleClickWelcomeTooltip () {
+        this.props.onShowWelcomeModal();
+    }
+    // === Smalruby: End of welcome tooltip ===
     getSaveAIAsHandler (downloadProjectCallback) {
         return () => {
             // Set AI save status to 'saving'
@@ -639,8 +654,14 @@ class MenuBar extends React.Component {
                 className={classNames(styles.menuBarItem, styles.hoverable, {
                     [styles.active]: this.props.aboutMenuOpen
                 })}
+                // === Smalruby: Start of welcome tooltip ===
+                style={{position: 'relative'}}
+                // === Smalruby: End of welcome tooltip ===
                 onClick={this.props.onRequestOpenAbout}
             >
+                {/* === Smalruby: Start of welcome tooltip === */}
+                <WelcomeTooltip onClick={this.handleClickWelcomeTooltip} />
+                {/* === Smalruby: End of welcome tooltip === */}
                 <img
                     className={styles.aboutIcon}
                     src={aboutIcon}
@@ -1025,7 +1046,10 @@ class MenuBar extends React.Component {
                     <div className={classNames(styles.menuBarItem)}>
                         {this.props.canShare ? (
                             (this.props.isShowingProject || this.props.isUpdating) && (
-                                <ProjectWatcher onDoneUpdating={this.props.onSeeCommunity}>
+                                <ProjectWatcher
+                                    onDoneUpdating={this.props.onSeeCommunity}
+                                    isShared={this.props.isShared}
+                                >
                                     {
                                         waitForUpdate => (
                                             <ShareButton
@@ -1242,20 +1266,19 @@ class MenuBar extends React.Component {
                                     onClick={this.props.onOpenClassroomModal}
                                 >
                                     <span data-testid="classroom-menu-label">
-                                        {this.props.classroomClassName ? (
-                                            <React.Fragment>
-                                                <span data-testid="classroom-menu-class-name">
-                                                    {this.props.classroomAssignmentName || this.props.classroomClassName}
-                                                </span>
-                                                {this.props.classroomSeatNumber && (
-                                                    <React.Fragment>
-                                                        {' / '}
+                                        {this.props.classroomClassName && this.props.classroomSeatNumber ? (
+                                            <FormattedMessage
+                                                defaultMessage="Class: Seat {seatNumber}"
+                                                description="Menu bar label shown while the student is in a class. The number after the colon is the student's seat number."
+                                                id="gui.menuBar.classroomJoined"
+                                                values={{
+                                                    seatNumber: (
                                                         <span data-testid="classroom-menu-seat-number">
                                                             {String(this.props.classroomSeatNumber).padStart(2, '0')}
                                                         </span>
-                                                    </React.Fragment>
-                                                )}
-                                            </React.Fragment>
+                                                    ),
+                                                }}
+                                            />
                                         ) : (
                                             <FormattedMessage
                                                 defaultMessage="Classroom"
@@ -1719,6 +1742,7 @@ MenuBar.propTypes = {
     onActivateRubyTab: PropTypes.func,
     onActivateTutorial: PropTypes.func,
     showTutorialTooltip: PropTypes.bool,
+    onShowWelcomeModal: PropTypes.func, // === Smalruby: welcome tooltip ===
     onClickMeshV2: PropTypes.func,
     onClickSmalrubotS1: PropTypes.func, // === Smalruby: smalrubot firmware menu ===
     onClickMode: PropTypes.func,
@@ -1883,6 +1907,9 @@ const mapDispatchToProps = (dispatch, ownProps) => ({
     // === Smalruby: Start of classroom button ===
     onOpenClassroomModal: () => dispatch(openClassroomModal()),
     // === Smalruby: End of classroom button ===
+    // === Smalruby: Start of welcome tooltip ===
+    onShowWelcomeModal: () => dispatch(openWelcomeModal()),
+    // === Smalruby: End of welcome tooltip ===
     onClickLogin: ownProps.onClickLogin ?? (() => dispatch(openLoginMenu())),
     onRequestCloseLogin: () => dispatch(closeLoginMenu()),
     onClickMode: () => dispatch(openModeMenu()),

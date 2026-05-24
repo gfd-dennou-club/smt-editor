@@ -2,21 +2,24 @@ import React from 'react';
 import PropTypes from 'prop-types';
 import bindAll from 'lodash.bindall';
 import BackpackComponent from '../components/backpack/backpack.jsx';
-import {
-    getBackpackContents,
-    saveBackpackObject,
-    deleteBackpackObject,
-    soundPayload,
-    costumePayload,
-    spritePayload,
-    codePayload
-} from '../lib/backpack-api';
+import soundPayload from '../lib/backpack/sound-payload';
+import costumePayload from '../lib/backpack/costume-payload';
+import spritePayload from '../lib/backpack/sprite-payload';
+import codePayload from '../lib/backpack/code-payload';
+import {PayloadSerializableData} from '../lib/backpack/payload-serializable-data.ts';
 import DragConstants from '../lib/drag-constants';
 import DropAreaHOC from '../lib/drop-area-hoc.jsx';
 import {GUIStoragePropType} from '../gui-config';
 
 import {connect} from 'react-redux';
 import VM from '@smalruby/scratch-vm';
+
+// === Smalruby: Start of mesh v1 backpack auto-migration ===
+import {injectIntl} from 'react-intl';
+import intlShape from '../lib/intlShape.js';
+import sharedMessages from '../lib/shared-messages';
+import {migrateMeshV1InLocalStorageBackpack} from '../lib/backpack-mesh-v1-migration';
+// === Smalruby: End of mesh v1 backpack auto-migration ===
 
 
 const dragTypes = [DragConstants.COSTUME, DragConstants.SOUND, DragConstants.SPRITE];
@@ -30,8 +33,8 @@ class Backpack extends React.Component {
             'handleToggle',
             'handleDelete',
             'getContents',
-            'handleMouseEnter',
-            'handleMouseLeave',
+            'handlePointerEnter',
+            'handlePointerLeave',
             'handleBlockDragEnd',
             'handleBlockDragUpdate',
             'handleMore'
@@ -53,14 +56,46 @@ class Backpack extends React.Component {
         if (props.host) {
             props.storage.setBackpackHost?.(props.host);
         }
+        // Set initial session
+        this.updateBackpackSession(props);
     }
     componentDidMount () {
         this.props.vm.addListener('BLOCK_DRAG_END', this.handleBlockDragEnd);
         this.props.vm.addListener('BLOCK_DRAG_UPDATE', this.handleBlockDragUpdate);
+        // === Smalruby: Start of mesh v1 backpack auto-migration ===
+        // Skyway shut down — eagerly rewrite any v1 mesh blocks/sprites in
+        // localStorage so users never restore them. One-shot per browser.
+        migrateMeshV1InLocalStorageBackpack(this.props.vm)
+            .then(count => {
+                if (count > 0) {
+                    // eslint-disable-next-line no-alert
+                    alert(this.props.intl.formatMessage(
+                        sharedMessages.meshV1BackpackAutoMigrated,
+                        {count}
+                    ));
+                }
+            })
+            // eslint-disable-next-line no-console
+            .catch(error => console.warn('[Smalruby] backpack mesh v1 migration failed', error));
+        // === Smalruby: End of mesh v1 backpack auto-migration ===
+    }
+    componentDidUpdate (prevProps) {
+        // Update session when credentials change
+        if (prevProps.username !== this.props.username || prevProps.token !== this.props.token) {
+            this.updateBackpackSession(this.props);
+        }
     }
     componentWillUnmount () {
         this.props.vm.removeListener('BLOCK_DRAG_END', this.handleBlockDragEnd);
         this.props.vm.removeListener('BLOCK_DRAG_UPDATE', this.handleBlockDragUpdate);
+    }
+    updateBackpackSession (props) {
+        const {username, token} = props;
+        if (username && token) {
+            props.storage.backpackStorage?.setSession?.({username, token});
+        } else {
+            props.storage.backpackStorage?.setSession?.(null);
+        }
     }
     handleToggle () {
         const newState = !this.state.expanded;
@@ -74,6 +109,7 @@ class Backpack extends React.Component {
     }
     handleDrop (dragInfo) {
         const scratchStorage = this.props.storage.scratchStorage;
+        const backpackStorage = this.props.storage.backpackStorage;
 
         let payloader = null;
         let presaveAsset = null;
@@ -97,6 +133,11 @@ class Backpack extends React.Component {
 
         // Creating the payload is async, so set loading before starting
         this.setState({loading: true}, () => {
+            // If there's a failure before the backpack state changes, then we don't need to set the backpack into an
+            // error state. The operation failed, but the backpack is still potentially usable and consistent. If the
+            // backpack state might have changed on the server OR client by the time of the failure, then we should
+            // set the backpack into an error state.
+            let backpackMightHaveChanged = false;
             payloader(dragInfo.payload, this.props.vm)
                 .then(payload => {
                     if (this.props.host === 'localStorage') {
@@ -118,12 +159,26 @@ class Backpack extends React.Component {
                     }
                     return payload;
                 })
-                .then(payload => saveBackpackObject({
-                    host: this.props.host,
-                    token: this.props.token,
-                    username: this.props.username,
-                    ...payload
-                }))
+                .then(payload => {
+                    // If the backpack save fails, the local and server backpack may or may not be out of sync.
+                    // The editor might be able to function, but that might lead to lost work.
+                    // In other words, a failure here or later should set the backpack into an error state.
+                    backpackMightHaveChanged = true;
+                    if (!backpackStorage) {
+                        // Shouldn't happen as this component shouldn't be rendered without a backpack, but
+                        // adding this just in case
+                        return;
+                    }
+
+                    const serializableData = new PayloadSerializableData(payload);
+                    return backpackStorage.save(
+                        {
+                            type: serializableData.getType(),
+                            name: serializableData.getName()
+                        },
+                        serializableData
+                    );
+                })
                 .then(item => {
                     this.setState({
                         loading: false,
@@ -131,19 +186,14 @@ class Backpack extends React.Component {
                     });
                 })
                 .catch(error => {
-                    this.setState({error: true, loading: false});
+                    this.setState({error: backpackMightHaveChanged, loading: false});
                     throw error;
                 });
         });
     }
     handleDelete (id) {
         this.setState({loading: true}, () => {
-            deleteBackpackObject({
-                host: this.props.host,
-                token: this.props.token,
-                username: this.props.username,
-                id: id
-            })
+            this.props.storage.backpackStorage.delete(id)
                 .then(() => {
                     this.setState({
                         loading: false,
@@ -157,42 +207,37 @@ class Backpack extends React.Component {
         });
     }
     getContents () {
-        if (this.props.token && this.props.username) {
-            this.setState({loading: true, error: false}, () => {
-                getBackpackContents({
-                    host: this.props.host,
-                    token: this.props.token,
-                    username: this.props.username,
-                    offset: this.state.contents.length,
-                    limit: this.state.itemsPerPage
-                })
-                    .then(contents => {
-                        this.setState({
-                            contents: this.state.contents.concat(contents),
-                            moreToLoad: contents.length === this.state.itemsPerPage,
-                            loading: false
-                        });
-                    })
-                    .catch(error => {
-                        this.setState({error: true, loading: false});
-                        throw error;
+        this.setState({loading: true, error: false}, () => {
+            this.props.storage.backpackStorage.list({
+                offset: this.state.contents.length,
+                limit: this.state.itemsPerPage
+            })
+                .then(contents => {
+                    this.setState({
+                        contents: this.state.contents.concat(contents),
+                        moreToLoad: contents.length === this.state.itemsPerPage,
+                        loading: false
                     });
-            });
-        }
+                })
+                .catch(error => {
+                    this.setState({error: true, loading: false});
+                    throw error;
+                });
+        });
     }
     handleBlockDragUpdate (isOutsideWorkspace) {
         this.setState({
             blockDragOutsideWorkspace: isOutsideWorkspace
         });
     }
-    handleMouseEnter () {
+    handlePointerEnter () {
         if (this.state.blockDragOutsideWorkspace) {
             this.setState({
                 blockDragOverBackpack: true
             });
         }
     }
-    handleMouseLeave () {
+    handlePointerLeave () {
         this.setState({
             blockDragOverBackpack: false
         });
@@ -227,8 +272,8 @@ class Backpack extends React.Component {
                 onDelete={this.handleDelete}
                 onDrop={this.handleDrop}
                 onMore={this.handleMore}
-                onMouseEnter={this.handleMouseEnter}
-                onMouseLeave={this.handleMouseLeave}
+                onPointerEnter={this.handlePointerEnter}
+                onPointerLeave={this.handlePointerLeave}
                 onToggle={this.props.host ? this.handleToggle : null}
                 ariaRole={this.props.ariaRole}
                 ariaLabel={this.props.ariaLabel}
@@ -244,7 +289,10 @@ Backpack.propTypes = {
     username: PropTypes.string,
     vm: PropTypes.instanceOf(VM),
     ariaRole: PropTypes.string,
-    ariaLabel: PropTypes.string
+    ariaLabel: PropTypes.string,
+    // === Smalruby: Start of mesh v1 backpack auto-migration ===
+    intl: intlShape
+    // === Smalruby: End of mesh v1 backpack auto-migration ===
 };
 
 const getTokenAndUsername = state => {
@@ -277,4 +325,7 @@ const mapStateToProps = state => Object.assign(
 
 const mapDispatchToProps = () => ({});
 
-export default connect(mapStateToProps, mapDispatchToProps)(Backpack);
+// === Smalruby: Start of mesh v1 backpack auto-migration ===
+// Wrap with injectIntl so the eager-migration alert can be localized.
+export default injectIntl(connect(mapStateToProps, mapDispatchToProps)(Backpack));
+// === Smalruby: End of mesh v1 backpack auto-migration ===

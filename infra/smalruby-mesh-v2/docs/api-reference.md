@@ -67,8 +67,31 @@ type Event {
   payload: String
   timestamp: AWSDateTime!
   cursor: String           # NEW: ポーリング用のカーソル（SK）
+  orderKey: String         # NEW (issue #556): クライアント側ソートキー
 }
 ```
+
+##### `orderKey` フィールド (issue #556)
+
+クライアントが `EventInput.orderKey` を送信していたイベントの場合、サーバーは
+DynamoDB の Sort Key と属性に保存し、`Event.orderKey` で返却します。
+ポーリング (`getEventsSince`) や Subscription (`onMessageInGroup` の
+`batchEvent.events`) 経由で受信したクライアントは、同一タイムスタンプの
+イベントを `orderKey` の辞書順でソートすることで送信順を再現できます。
+
+旧クライアントが送信していない場合は `null` が返ります（後方互換）。
+
+##### `EventInput.orderKey` フォーマット
+
+クライアントから送信する場合のフォーマット: `<YYYYMMDDHHMMSS>-<NNNNNNN>`
+
+- `YYYYMMDDHHMMSS`: 14 桁のローカル時刻（人間可読、デバッグ用）
+- `NNNNNNN`: 7 桁 0 詰め連番。クライアントがグループ作成/参加直後に 0 リセット、`fireEvent()` 呼び出しごとに +1
+- 例: `20260428090000-0000001`, `20260428090000-9999999`
+
+**桁数の根拠**: 接続上限 35 分 × min batch interval 100ms × queue 100 件 = **2.1M 件**が理論最大スループット。7 桁 (max 9,999,999) で約 4.7x の余裕。3 桁では 1000 件目で `"1000" < "999"` 辞書順となり順序保証が破綻するため不可。
+
+**サーバー側の扱い**: サーバーは `orderKey` を opaque な文字列として保存します。`#` を含む値も受け付けますが、クライアント側で生成する場合は上記フォーマットに従ってください。同一バッチ内に同じ `orderKey` が複数あっても、SK 末尾の short UUID で一意性が確保されます。
 
 #### NodeStatus
 
@@ -281,6 +304,7 @@ query GetEventsSince($groupId: ID!, $domain: String!, $since: String!) {
     payload
     timestamp
     cursor
+    orderKey
   }
 }
 ```
@@ -288,7 +312,69 @@ query GetEventsSince($groupId: ID!, $domain: String!, $since: String!) {
 **パラメータ**:
 - `since: String!` - 前回の `nextSince` または最後に取得したイベントの `cursor` を指定します。
 
-**戻り値**: イベントの配列。最大 100 件まで取得されます。
+**戻り値**: イベントの配列。最大 100 件まで取得されます。100 件超の場合は最後のイベントの `cursor` を `since` に指定して再 query することでページングできます。
+
+**`orderKey` フィールド** (issue #556): クライアントが `EventInput.orderKey` を送信していたイベントのみ含まれます。受信側クライアントが同一タイムスタンプのイベントを送信順で並べる安定ソートに使用します。詳細は [EventInput](#eventinput) 参照。
+
+> **注意**: ポーリングモードのクライアントは `getEventsSince` 単体ではなく、
+> [`pollGroupData`](#pollgroupdata-issue-554) を 2 秒間隔で呼ぶことで events
+> と nodeStatuses を同時取得します。`getEventsSince` は引き続き API として
+> 利用可能 (旧クライアントとの後方互換、デバッグ用途)。
+
+### pollGroupData (issue #554)
+
+ポーリング時のイベント取得とノードステータス取得を **1 リクエストに統合**した
+Pipeline Resolver。`getEventsSince` (events) + `listGroupStatuses`
+(nodeStatuses) を 1 つの AppSync リクエストで返します。
+
+```graphql
+query PollGroupData($groupId: ID!, $domain: String!, $since: String!) {
+  pollGroupData(groupId: $groupId, domain: $domain, since: $since) {
+    events {
+      name
+      firedByNodeId
+      groupId
+      domain
+      payload
+      timestamp
+      cursor
+      orderKey
+    }
+    nodeStatuses {
+      nodeId
+      groupId
+      domain
+      data { key value }
+      timestamp
+    }
+  }
+}
+```
+
+**パラメータ**:
+- `since: String!` - `getEventsSince` と同じ。前回の `Event.cursor` または空文字 (`""`) を指定。
+
+**戻り値**: `PollGroupData { events, nodeStatuses }`
+- `events`: `Event[]` (`getEventsSince` 相当、limit 100、`cursor` でページング可能)
+- `nodeStatuses`: `NodeStatus[]` (`listGroupStatuses` 相当、TTL 内のノードのみ)
+
+**用途**:
+- ポーリングモード (`useWebSocket=false`) のクライアントが 2 秒間隔で呼び、events 受信とデータ同期を同時に行う
+- WebSocket モードでは使わない（subscription + 15 秒間隔の `listGroupStatuses` を使う）
+
+**実装**: AppSync Pipeline Resolver。内部で 2 つの DynamoDB Query を直列実行
+（`fetchEventsForPoll` → `fetchNodeStatusesForPoll`）するが、AppSync の課金は
+**1 リクエスト = 1 op**。詳細は `docs/architecture.md` および
+`/docs/mesh/cost.md` の "Polling Sync (HTTPS Polling Mode)" セクション。
+
+**コスト効果**:
+- AppSync requests: 旧 `getEventsSince` (30/min) + `listGroupStatuses`
+  (4/min) = 34 → 新 `pollGroupData` (30/min) = **30 (12% 削減)**
+- データ同期遅延: **15s → 2s** (約 87% 短縮)
+
+**後方互換性**: 既存の `getEventsSince` / `listGroupStatuses` は変更なし。
+旧クライアントは引き続きそれらを使用可能。新クライアント (this PR 以降) は
+`pollGroupData` を使用する。
 
 ## Mutations
 
@@ -351,8 +437,18 @@ mutation CreateGroup(
 ノードがグループに参加します。
 
 ```graphql
-mutation JoinGroup($groupId: ID!, $nodeId: ID!, $domain: String!) {
-  joinGroup(groupId: $groupId, nodeId: $nodeId, domain: $domain) {
+mutation JoinGroup(
+  $groupId: ID!
+  $nodeId: ID!
+  $domain: String!
+  $useWebSocket: Boolean
+) {
+  joinGroup(
+    groupId: $groupId
+    nodeId: $nodeId
+    domain: $domain
+    useWebSocket: $useWebSocket
+  ) {
     id
     name
     groupId
@@ -362,6 +458,14 @@ mutation JoinGroup($groupId: ID!, $nodeId: ID!, $domain: String!) {
   }
 }
 ```
+
+**パラメータ**:
+- `useWebSocket: Boolean` (optional) - クライアントが WebSocket を使用しているかを示すフラグ。サーバー側で CloudWatch ログにプロトコル情報を記録するために使用される。
+  - `true`: WebSocket を使用 → INFO レベルで記録（stg のみ）
+  - `false`: HTTPS ポーリングを使用 → ERROR レベルで記録（prod でも記録、フォールバック警告として扱う）
+  - 省略 / `null`: 旧クライアント互換 — ログには `protocol: "unknown"` と記録される（INFO レベル、stg のみ）
+
+サーバー側のリゾルバーロジック（Node 型の構築、TTL 設定など）には影響しない。詳細は `operations.md` の「プロトコルログ」セクションを参照。
 
 ### reportDataByNode
 
@@ -423,6 +527,7 @@ mutation FireEventsByNode(
         firedByNodeId
         payload
         timestamp
+        orderKey   # NEW (issue #556)
       }
       firedByNodeId
       groupId
@@ -435,6 +540,8 @@ mutation FireEventsByNode(
 
 **戻り値**: `MeshMessage` — `batchEvent` フィールドにイベントデータが含まれます。この mutation は `onMessageInGroup` subscription をトリガーします。
 
+`EventInput.orderKey` を送信した場合は `batchEvent.events[].orderKey` でパススルーされ、subscription 受信側のクライアントが安定ソートに使えます (issue #556)。
+
 ### recordEventsByNode
 
 ノードが複数のイベントを一度に送信し、DynamoDB に保存します（ポーリング用）。
@@ -444,7 +551,7 @@ mutation RecordEventsByNode(
   $nodeId: ID!
   $groupId: ID!
   $domain: String!
-  $events: [EventInput!]!
+  $events: [EventInput!]!  # EventInput.orderKey で同一バッチ内の順序保証 (#556)
 ) {
   recordEventsByNode(
     nodeId: $nodeId
@@ -461,6 +568,8 @@ mutation RecordEventsByNode(
 ```
 
 **用途**: WebSocket が使用できない環境でのイベント送信に使用。この mutation は `onMessageInGroup` subscription を**トリガーしません**。
+
+**順序保証** (issue #556): 同一バッチ内のイベントは同じ `server_timestamp` で保存されるため、SK 末尾だけがランダム UUID だと取得時の順序が送信順と一致しません。クライアントは `EventInput.orderKey` (フォーマット: `<YYYYMMDDHHMMSS>-<NNNNNNN>`) を送信することで、SK = `EVENT#<server_timestamp>#<orderKey>#<short_uuid>` 形式で保存され、`getEventsSince` で送信順 = orderKey 辞書順で取得できます。詳細は [Event 型の orderKey](#orderkey-フィールド-issue-556)。
 
 ---
 
