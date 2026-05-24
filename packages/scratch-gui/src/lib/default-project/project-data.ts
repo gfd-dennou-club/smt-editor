@@ -23,7 +23,18 @@ const projectData = (translateFunction?: TranslatorFunction): object => {
                     '`jEk@4|i[#Fk?(8x)AV.-my variable': [
                         translator(messages.variable),
                         0
-                    ]
+                    ],
+		   'my_custom_var_gpio0':   ['gpio0', 0],
+		   'my_custom_var_gpio1':   ['gpio1', 0],
+                   'my_custom_var_pwm0':    ['pwm0',  0],
+                   'my_custom_var_pwm1':    ['pwm1',  0],
+                   'my_custom_var_adc0':    ['adc0',  0],
+                   'my_custom_var_adc1':    ['adc1',  0],
+                   'my_custom_var_i2c':     ['i2c',   0],
+                   'my_custom_var_spi':     ['spi',   0],
+                   'my_custom_var_uart':    ['uart',  0],
+                   'my_custom_var_sensor0': ['sensor0',  0],
+                   'my_custom_var_sensor1': ['sensor1',  0]
                 },
                 lists: {},
                 broadcasts: {},

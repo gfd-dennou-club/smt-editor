@@ -78,7 +78,7 @@ class UnifiedAPI {
                         },
 			INSTANCE:{
 			    type: ArgumentType.STRING,
-			    defaultValue: '[gpio]'
+			    defaultValue: '$gpio'
 			}			
                     }
                 },
@@ -96,7 +96,7 @@ class UnifiedAPI {
                         },
 			INSTANCE:{
 			    type: ArgumentType.STRING,
-			    defaultValue: '[gpio]'
+			    defaultValue: '$gpio'
 			}
                     }
                 },
@@ -110,7 +110,7 @@ class UnifiedAPI {
                     arguments: {
 			INSTANCE:{
 			    type: ArgumentType.STRING,
-			    defaultValue: '[gpio]'
+			    defaultValue: '$gpio'
 			}
                     }
                 },
@@ -136,7 +136,7 @@ class UnifiedAPI {
                         },
 			INSTANCE:{
 			    type: ArgumentType.STRING,
-			    defaultValue: '[pwm]'
+			    defaultValue: '$pwm'
 			}			
                     }
                 },
@@ -150,7 +150,7 @@ class UnifiedAPI {
                     arguments: {
                         INSTANCE: {
                             type: ArgumentType.STRING,
-                            defaultValue: '[pwm]'
+                            defaultValue: '$pwm'
                         },                        
                         DUTY: {
                             type: ArgumentType.NUMBER,
@@ -169,7 +169,7 @@ class UnifiedAPI {
                     arguments: {
                         INSTANCE: {
                             type: ArgumentType.STRING,
-                            defaultValue: '[pwm]'
+                            defaultValue: '$pwm'
                         },                        
                         FREQ: {
                             type: ArgumentType.NUMBER,
@@ -188,7 +188,7 @@ class UnifiedAPI {
                     arguments: {
                         INSTANCE: {
                             type: ArgumentType.STRING,
-                            defaultValue: '[pwm]'
+                            defaultValue: '$pwm'
                         },                        
                         PULSE: {
                             type: ArgumentType.NUMBER,
@@ -211,7 +211,7 @@ class UnifiedAPI {
                         },
 			INSTANCE:{
 			    type: ArgumentType.STRING,
-			    defaultValue: '[adc]'
+			    defaultValue: '$adc'
 			}
                     }
                 },
@@ -225,7 +225,7 @@ class UnifiedAPI {
                     arguments: {                     
                         INSTANCE: {
 			    type: ArgumentType.STRING,    
-                            defaultValue: '[adc]'
+                            defaultValue: '$adc'
                         },
                     }
                 },
@@ -239,7 +239,7 @@ class UnifiedAPI {
                     arguments: {                     
                         INSTANCE: {
                             type: ArgumentType.STRING,
-                            defaultValue: '[adc]'
+                            defaultValue: '$adc'
                         },
                     }
                 },
@@ -253,7 +253,7 @@ class UnifiedAPI {
                     arguments: {                     
                         INSTANCE: {
                             type: ArgumentType.STRING,
-                            defaultValue: '[i2c]'
+                            defaultValue: '$i2c'
                         },
                     }
                 },
@@ -267,7 +267,7 @@ class UnifiedAPI {
                     arguments: {
                         INSTANCE: {
 			    type: ArgumentType.STRING,
-                            defaultValue: '[i2c]'
+                            defaultValue: '$i2c'
 			},
 			ADDR: {
                             type: ArgumentType.STRING, 
@@ -293,7 +293,7 @@ class UnifiedAPI {
                     arguments: {
                         INSTANCE: {
                             type: ArgumentType.STRING,
-                            defaultValue: '[i2c]'
+                            defaultValue: '$i2c'
 			},
 			ADDR: {
                             type: ArgumentType.STRING, 
@@ -319,7 +319,7 @@ class UnifiedAPI {
                     arguments: {
                         INSTANCE: {
                             type: ArgumentType.STRING,
-                            defaultValue: '[spi]'
+                            defaultValue: '$spi'
 			},
                         MISO: {
                             type: ArgumentType.NUMBER,
@@ -345,7 +345,7 @@ class UnifiedAPI {
                     arguments: {
                         INSTANCE: {
                             type: ArgumentType.STRING,
-                            defaultValue: '[spi]'
+                            defaultValue: '$spi'
 			},
                         HEX1: {
                             type: ArgumentType.STRING, 
@@ -367,7 +367,7 @@ class UnifiedAPI {
                     arguments: {
                         INSTANCE: {
                             type: ArgumentType.STRING,
-                            defaultValue: '[spi]'
+                            defaultValue: '$spi'
 			},			
 			BYTES: {
                             type: ArgumentType.NUMBER,
@@ -385,7 +385,7 @@ class UnifiedAPI {
                     arguments: {
                         INSTANCE: {
                             type: ArgumentType.STRING,
-                            defaultValue: '[uart]'
+                            defaultValue: '$uart'
 			},			
                         UART: {
                             type: ArgumentType.NUMBER,
@@ -407,7 +407,7 @@ class UnifiedAPI {
                     arguments: {
                         INSTANCE: {
                             type: ArgumentType.STRING,
-                            defaultValue: '[uart]'
+                            defaultValue: '$uart'
 			},			
                         COMM: {
                             type: ArgumentType.STRING,
@@ -425,7 +425,7 @@ class UnifiedAPI {
                     arguments: {
                         INSTANCE: {
                             type: ArgumentType.STRING,
-                            defaultValue: '[uart]'
+                            defaultValue: '$uart'
 			}
                     }
                 },		
@@ -439,7 +439,7 @@ class UnifiedAPI {
                     arguments: {
                         INSTANCE: {
                             type: ArgumentType.STRING,
-                            defaultValue: '[uart]'
+                            defaultValue: '$uart'
 			},
                         TXRX: {
                             type: ArgumentType.STRING,
