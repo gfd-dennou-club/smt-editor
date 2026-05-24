@@ -33,7 +33,7 @@
   ],
   "name": "Smalruby",
   "short_name": "Smalruby",
-  "orientation": "any",
+  "orientation": "landscape",
   "display": "standalone",
   "start_url": ".",
   "description": "GraphicaL User Interface for creating and running Smalruby 3.0 projects",
