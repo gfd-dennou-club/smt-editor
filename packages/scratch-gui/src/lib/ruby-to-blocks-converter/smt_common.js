@@ -13,12 +13,32 @@ const SmT_Common = {
     attachVariableBlock: function (converter, parentBlock, inputName, varSource) {
         if (!varSource) return "";
 
-        const varField = varSource.fields && varSource.fields.VARIABLE;
-        const varName = varField ? varField.value : (varSource.name || "");
-        const varId = varField ? varField.id : null;
+        if (typeof varSource === 'string') {
+            const vBlock = converter.createBlock('data_variable', 'value');
+            converter.addField(vBlock, 'VARIABLE', varSource);
+            converter.addInput(parentBlock, inputName, vBlock);
+            return varSource;
+        }
+
+        let varName = "";
+        let varId = null;
+
+        if (varSource.opcode === 'data_variable') {
+            // すでに生成された「変数ブロック」が渡ってきた場合
+            const varField = varSource.fields && varSource.fields.VARIABLE;
+            varName = varField ? varField.value : "";
+            varId = varField ? varField.id : null; // 正しい変数IDはここに隠れています
+        } else {
+            // 上流のASTから渡ってきた「変数のメタデータ」の場合
+            const varField = varSource.fields && varSource.fields.VARIABLE;
+            varName = varSource.name || varSource.value || (varField ? varField.value : "");
+            varId = varSource.id || (varField ? varField.id : null);
+        }
 
         const vBlock = converter.createBlock('data_variable', 'value');
         converter.addField(vBlock, 'VARIABLE', varName);
+        
+        // 正しい変数IDをセットする
         if (varId) {
             vBlock.fields.VARIABLE.id = varId;
         }
@@ -26,7 +46,7 @@ const SmT_Common = {
         converter.addInput(parentBlock, inputName, vBlock);
         return varName;
     },
-
+    
     /**
      * ブロックの表示範囲（Location）を行頭からに補正する
      * @param {object} block - 補正対象のブロック
