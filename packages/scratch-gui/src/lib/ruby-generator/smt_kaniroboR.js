@@ -9,8 +9,8 @@ export default function (Generator) {
         return (
 	    `$gpio11 = GPIO.new(11, GPIO::OUT)\n` +
 	    `$gpio16 = GPIO.new(16, GPIO::OUT)\n` +
-  	    `$pwm2 = PWM.new(2,  timer:0, frequency:1000)\n` +
-	    `$pwm10= PWM.new(10, timer:0, frequency:1000)\n`
+  	    `$pwm2 = PWM.new(2,  timer:0, frequency:1000, duty:0)\n` +
+	    `$pwm10= PWM.new(10, timer:0, frequency:1000, duty:0)\n`
 	);
     };
 

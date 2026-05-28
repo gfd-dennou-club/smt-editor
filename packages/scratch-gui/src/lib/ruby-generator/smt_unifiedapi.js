@@ -40,7 +40,9 @@ export default function (Generator) {
             Generator.valueToCode(block, "FREQ", Generator.ORDER_NONE) || null;
         const instance =
             Generator.valueToCode(block, "INSTANCE", Generator.ORDER_NONE) || null;
-        return `${instance} = PWM.new( ${pin}, timer:${timer}, frequency:${freq} )\n`;
+        const duty =
+            Generator.valueToCode(block, "DUTY", Generator.ORDER_NONE) || null;
+        return `${instance} = PWM.new( ${pin}, timer:${timer}, frequency:${freq}, duty:${duty} )\n`;
     };
 
     Generator.unifiedapi_pwm_duty = function (block) {

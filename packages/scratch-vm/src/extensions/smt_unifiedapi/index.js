@@ -118,7 +118,7 @@ class UnifiedAPI {
                     opcode :'pwm_init',
                     text: formatMessage({
                         id: 'unifiedapi.pwm_init',
-                        default:'PWM: setup pin [PIN] named [INSTANCE] (timer: [TIMER],frequency: [FREQ] Hz)',
+                        default:'PWM: setup pin [PIN] named [INSTANCE] (timer: [TIMER], frequency: [FREQ] Hz, duty: [DUTY]%)',
                     }),
                     blockType:BlockType.COMMAND,
                     arguments: {
@@ -133,6 +133,10 @@ class UnifiedAPI {
                         FREQ: {
                             type: ArgumentType.NUMBER,
                             defaultValue: 1000
+                        },
+                        DUTY: {
+                            type: ArgumentType.NUMBER,
+                            defaultValue: 0
                         },
 			INSTANCE:{
 			    type: ArgumentType.STRING,

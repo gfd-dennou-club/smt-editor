@@ -86,14 +86,14 @@ export default function (Generator) {
     //
     Generator.mctboard_pwm_led_init = function (block){
         return (
-	    `$pwm13 = PWM.new( 13, timer: 0, frequency:440 )\n` +
-	    `$pwm12 = PWM.new( 12, timer: 0, frequency:440 )\n` +
-	    `$pwm14 = PWM.new( 14, timer: 0, frequency:440 )\n` +
-	    `$pwm27 = PWM.new( 27, timer: 0, frequency:440 )\n` +
-	    `$pwm26 = PWM.new( 26, timer: 0, frequency:440 )\n` +
-	    `$pwm25 = PWM.new( 25, timer: 0, frequency:440 )\n` +
-	    `$pwm33 = PWM.new( 33, timer: 0, frequency:440 )\n` +
-	    `$pwm32 = PWM.new( 32, timer: 0, frequency:440 )\n` 
+	    `$pwm13 = PWM.new( 13, timer: 0, frequency:440, duty:0 )\n` +
+	    `$pwm12 = PWM.new( 12, timer: 0, frequency:440, duty:0 )\n` +
+	    `$pwm14 = PWM.new( 14, timer: 0, frequency:440, duty:0 )\n` +
+	    `$pwm27 = PWM.new( 27, timer: 0, frequency:440, duty:0 )\n` +
+	    `$pwm26 = PWM.new( 26, timer: 0, frequency:440, duty:0 )\n` +
+	    `$pwm25 = PWM.new( 25, timer: 0, frequency:440, duty:0 )\n` +
+	    `$pwm33 = PWM.new( 33, timer: 0, frequency:440, duty:0 )\n` +
+	    `$pwm32 = PWM.new( 32, timer: 0, frequency:440, duty:0 )\n` 
 	);
     };
 
@@ -111,7 +111,7 @@ export default function (Generator) {
     //
     Generator.mctboard_pwm_buzzer_init = function (block){
         return (
-   	    `$pwm15 = PWM.new( 15, timer: 1, frequency:440 )\n` 
+   	    `$pwm15 = PWM.new( 15, timer: 1, frequency:440, duty:0 )\n` 
 	);
     };
     

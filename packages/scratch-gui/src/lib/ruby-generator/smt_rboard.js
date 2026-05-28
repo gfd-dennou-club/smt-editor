@@ -21,10 +21,10 @@ export default function (Generator) {
 
     Generator.rboard_pwm_init = function (block){
         return (
-	    `$pwm0 = PWM.new( 0, timer: 0, frequency:1000 )\n` +
-	    `$pwm1 = PWM.new( 1, timer: 1, frequency:1000 )\n` +
-	    `$pwm5 = PWM.new( 5, timer: 2, frequency:1000 )\n` +
-	    `$pwm6 = PWM.new( 6, timer: 3, frequency:1000 )\n` 
+	    `$pwm0 = PWM.new( 0, timer: 0, frequency:1000, duty:0 )\n` +
+	    `$pwm1 = PWM.new( 1, timer: 1, frequency:1000, duty:0 )\n` +
+	    `$pwm5 = PWM.new( 5, timer: 2, frequency:1000, duty:0 )\n` +
+	    `$pwm6 = PWM.new( 6, timer: 3, frequency:1000, duty:0 )\n` 
 	);
     };
 

@@ -820,7 +820,7 @@ export default {
     "unifiedapi.gpio_init":  "GPIO: ピン[PIN] を [INSTANCE] という名前で初期化する (モード:[DIRECTION])",
     "unifiedapi.gpio_write": "GPIO: [INSTANCE] に [VALUE] を書き込む",
     "unifiedapi.gpio_read":  "GPIO: [INSTANCE] の値を読み込む",
-    "unifiedapi.pwm_init": "PWM: ピン[PIN] を [INSTANCE] という名前で初期化する (周波数:[FREQ]Hz，タイマー:[TIMER])",
+    "unifiedapi.pwm_init": "PWM: ピン[PIN] を [INSTANCE] という名前で初期化する (周波数:[FREQ]Hz，タイマー:[TIMER]，デューティ比:[DUTY]%)",
     "unifiedapi.pwm_duty": "PWM: [INSTANCE] のデューティ比を [DUTY]% にする",
     "unifiedapi.pwm_frequency": "PWM: [INSTANCE] の周波数を [FREQ]Hz にする",
     "unifiedapi.pwm_pulse": "PWM: [INSTANCE] のパルス幅を [PULSE]us にする",
