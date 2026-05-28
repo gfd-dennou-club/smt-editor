@@ -39,6 +39,7 @@ import KoshienBlocks from './koshien.js';
 
 import KaniroboBlocks from './smt_kanirobo.js'
 import KaniroboRBlocks from './smt_kaniroboR.js'
+import KaniroboPBlocks from './smt_kaniroboP.js'
 import RBoardBlocks from './smt_rboard.js'
 import MCTBoardBlocks from './smt_mctboard.js'
 import UnifiedAPIBlocks from './smt_unifiedapi.js'
@@ -694,6 +695,7 @@ KoshienBlocks(RubyGenerator);
 
 KaniroboBlocks(RubyGenerator);
 KaniroboRBlocks(RubyGenerator);
+KaniroboPBlocks(RubyGenerator);
 RBoardBlocks(RubyGenerator);
 MCTBoardBlocks(RubyGenerator);
 UnifiedAPIBlocks(RubyGenerator);

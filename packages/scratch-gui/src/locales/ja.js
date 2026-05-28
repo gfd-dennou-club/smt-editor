@@ -687,10 +687,11 @@ export default {
     "gui.kanirobo.name": "かにロボ",
     "gui.kanirobo.description": "かにロボブロック",
 
-
     "gui.kaniroboR.name": "かにロボ(RBoard)",
     "gui.kaniroboR.description": "かにロボブロック(RBoard)",
 
+    "gui.kaniroboP.name": "かにロボ(RPi pico)",
+    "gui.kaniroboP.description": "かにロボブロック(RPi pico)",
 
     "gui.unifiedapi.name": "共通 I/O API",
     "gui.unifiedapi.description": "GPIO, PWM, ADC, I2C, UART",
@@ -727,6 +728,15 @@ export default {
     "kaniroboR.motor": "モーター[ID]を[DIR]方向にセット. スピード[PWR]%",
     "kaniroboR.sensor": "ライトセンサー[ID]の値",
     "kaniroboR.servo": "サーボモーター[ID]を[AGL]度にする",
+
+    "kaniroboP.name": "かにロボ",
+    "kaniroboP.menuMotorDir.forward": "前",
+    "kaniroboP.menuMotorDir.backward": "後ろ",
+    "kaniroboP.menuMotorID.right": "1",
+    "kaniroboP.menuMotorID.left": "2",
+    "kaniroboP.motor": "モーター[ID]を[DIR]方向にセット. スピード[PWR]%",
+    "kaniroboP.sensor": "ライトセンサー[ID]の値",
+    "kaniroboP.servo": "サーボモーター[ID]を[AGL]度にする",
 
     // MBoard共通
     "mctboard.name": "MCTBoard",

@@ -5,54 +5,49 @@
  */
 export default function (Generator) {
 
-    Generator.kaniroboR_motor_init = function (block) {
+    Generator.kaniroboP_motor_init = function (block) {
         return (
-	    `$gpio11 = GPIO.new(11, GPIO::OUT)\n` +
-	    `$gpio16 = GPIO.new(16, GPIO::OUT)\n` +
-  	    `$pwm2 = PWM.new(2,  timer:0, frequency:1000, duty:0)\n` +
-	    `$pwm10= PWM.new(10, timer:0, frequency:1000, duty:0)\n`
+	    `$gpio2 = GPIO.new(2, GPIO::OUT)\n` +
+	    `$gpio6 = GPIO.new(6, GPIO::OUT)\n` +
+  	    `$pwm3 = PWM.new(3, timer:0, frequency:1000, duty:0)\n` +
+	    `$pwm7 = PWM.new(7, timer:0, frequency:1000, duty:0)\n`
 	);
     };
 
-    Generator.kaniroboR_sensor_init = function (block) {
+    Generator.kaniroboP_sensor_init = function (block) {
 	return (
-	    `$adc18 = ADC.new(18)\n` +
-	    `$adc17 = ADC.new(17)\n` + 
-	    `$adc19 = ADC.new(19)\n` + 
-  	    `$adc20 = ADC.new(20)\n`
+	    `$adc26 = ADC.new(26)\n` +
+	    `$adc27 = ADC.new(27)\n` 
 	);
     };
 
-    Generator.kaniroboR_servo_init = function (block) {
+    Generator.kaniroboP_servo_init = function (block) {
 	return (
-	    `$pwm12 = PWM.new(12, timer:1, frequency:50, duty:0)\n` +
- 	    `$pwm14 = PWM.new(14, timer:1, frequency:50, duty:0)\n`
+	    `$pwm0 = PWM.new(0, timer:1, frequency:50, duty:0)\n` +
+ 	    `$pwm1 = PWM.new(1, timer:1, frequency:50, duty:0)\n`
 	);
     };
     
-    Generator.kaniroboR_motor = function (block) {
-	Generator.prepares_[`motor`] = Generator.kaniroboR_motor_init(null);
+    Generator.kaniroboP_motor = function (block) {
+	Generator.prepares_[`motor`] = Generator.kaniroboP_motor_init(null);
         const id  = Generator.getFieldValue(block, 'ID',  Generator.ORDER_NONE) || null;
         const dir = Generator.getFieldValue(block, 'DIR', Generator.ORDER_NONE) || null;
         const pwr = Generator.getFieldValue(block, 'PWR', Generator.ORDER_NONE) || null;
+	const id2 = Number(id) + 1;
 	const duty = ( 100 - 2 * Number(pwr) ) * Number(dir) + Number(pwr);
-	let id2 = '2'
-	if (id == '16'){
-	    id2 = '10'
-	}	
         return (
 	    `$gpio${id}.write(${dir})\n` +
 	    `$pwm${id2}.duty( ${duty} ) \n`
 	);
     };
-    Generator.kaniroboR_sensor = function (block) {
-	Generator.prepares_[`sensor`] = Generator.kaniroboR_sensor_init(null);
+    Generator.kaniroboP_sensor = function (block) {
+	Generator.prepares_[`sensor`] = Generator.kaniroboP_sensor_init(null);
         const id = Generator.getFieldValue(block, 'ID', Generator.ORDER_NONE) || null;
 	return [`$adc${id}.read_raw`, Generator.ORDER_ATOMIC];
     };
 
-    Generator.kaniroboR_servo = function (block) {
-	Generator.prepares_[`servo`] = Generator.kaniroboR_servo_init(null);
+    Generator.kaniroboP_servo = function (block) {
+	Generator.prepares_[`servo`] = Generator.kaniroboP_servo_init(null);
         const id  = Generator.getFieldValue(block, 'ID',  Generator.ORDER_NONE) || null;
         const agl = Generator.getFieldValue(block, 'AGL', Generator.ORDER_NONE)  || 0;
 	return (

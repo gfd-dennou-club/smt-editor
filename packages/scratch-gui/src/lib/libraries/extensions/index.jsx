@@ -7,6 +7,9 @@ import kaniroboInsetIconURL from './smt/kanirobo-small.png';
 import kaniroboR             from './smt/kaniroboR.png';
 import kaniroboRInsetIconURL from './smt/kaniroboR-small.png';
 
+import kaniroboP             from './smt/kaniroboP.png';
+import kaniroboPInsetIconURL from './smt/kaniroboP-small.png';
+
 import mctboard             from './smt/mctboard.png';
 import mctboardInsetIconURL from './smt/mctboard-small.png';
 
@@ -60,6 +63,26 @@ export default [
                 defaultMessage="KaniroboR Blocks"
                 description="Description for the 'KaniroboR' extension"
                 id="gui.kaniroboR.description"
+            />
+        ),
+        featured: true
+    },
+    {
+        name: (
+            <FormattedMessage
+                defaultMessage="KaniroboP"
+                description="Name for the 'KaniroboP' extension"
+                id="gui.kaniroboP.name"
+            />
+        ),
+        extensionId: 'kaniroboP',
+        iconURL: kaniroboP,
+        insetIconURL: kaniroboPInsetIconURL,
+        description: (
+            <FormattedMessage
+                defaultMessage="KaniroboP Blocks"
+                description="Description for the 'KaniroboP' extension"
+                id="gui.kaniroboP.description"
             />
         ),
         featured: true

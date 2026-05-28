@@ -25,8 +25,8 @@ export default function (Generator) {
 
     Generator.kanirobo_servo_init = function (block) {
 	return (
-	    `$pwm27 = PWM.new(27, timer:1, frequency:50)\n` +
-  	    `$pwm14 = PWM.new(14, timer:1, frequency:50)\n`
+	    `$pwm27 = PWM.new(27, timer:1, frequency:50, duty:0)\n` +
+  	    `$pwm14 = PWM.new(14, timer:1, frequency:50, duty:0)\n`
 	);
     };
     

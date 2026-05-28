@@ -32,6 +32,7 @@ const builtinExtensions = {
 */
     kanirobo:   () => require('../extensions/smt_kanirobo'),
     kaniroboR:  () => require('../extensions/smt_kaniroboR'),
+    kaniroboP:  () => require('../extensions/smt_kaniroboP'),
     unifiedapi: () => require('../extensions/smt_unifiedapi'),
     mctboard:   () => require('../extensions/smt_mctboard'),
     rboard:     () => require('../extensions/smt_rboard'),
