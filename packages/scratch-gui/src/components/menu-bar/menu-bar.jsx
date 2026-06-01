@@ -882,7 +882,7 @@ class MenuBar extends React.Component {
             formData.append("filename", filename);
             formData.append("file", content, `${filename}.sb3`);
 
-            fetch("./smt_storage.php?action=save", {
+            fetch("/smt_storage.php?action=save", {
                 method: "POST",
                 body: formData
             })
@@ -915,7 +915,7 @@ class MenuBar extends React.Component {
         if (password === null) return;
 
         // 1. サーバーからファイル一覧を取得
-        fetch(`./smt_storage.php?action=list&password=${encodeURIComponent(password)}`)
+        fetch(`/smt_storage.php?action=list&password=${encodeURIComponent(password)}`)
         .then(async res => {
 
             if (!res.ok) {
@@ -973,7 +973,7 @@ class MenuBar extends React.Component {
                 const selectedFilename = select.value;
                 if (!selectedFilename) return alert("ファイルを選択してください。");
 
-                fetch(`./smt_storage.php?action=load&password=${encodeURIComponent(password)}&filename=${encodeURIComponent(selectedFilename)}`)
+                fetch(`/smt_storage.php?action=load&password=${encodeURIComponent(password)}&filename=${encodeURIComponent(selectedFilename)}`)
                 .then(async res => {
                     if (!res.ok) {
                         const text = await res.text();
@@ -1182,7 +1182,24 @@ class MenuBar extends React.Component {
                         )}
                         {this.props.canRemix ? remixButton : []}
                     </div>
-                    <div className={classNames(styles.menuBarItem, styles.communityButtonWrapper)}>
+
+{/* 「ESP32ファームウェア書き込み」メニューを追加 */}
+<div style={{marginLeft: 'auto'}} />
+<div
+    className={classNames(styles.menuBarItem, styles.hoverable)}
+    onClick={() => {
+        // 指定されたURLを別タブで開く
+        window.open(
+            '/esp32/', 
+            '_blank', 
+            'noopener,noreferrer'
+        );
+    }}
+>
+    {/* アイコンを置く場合はここに img タグを追加してください。文字だけなら不要です */}
+    <span>ESP32ファームウェア書き込み</span>
+</div>
+		     <div className={classNames(styles.menuBarItem, styles.communityButtonWrapper)}>
                         {this.props.enableCommunity ? (
                             (this.props.isShowingProject || this.props.isUpdating) && (
                                 <ProjectWatcher onDoneUpdating={this.props.onSeeCommunity}>
@@ -1205,42 +1222,6 @@ class MenuBar extends React.Component {
                                 <CommunityButton className={styles.menuBarButton} />
                             </MenuBarItemTooltip>
                         ) : [])}
-                    </div>
-                    <Divider className={classNames(styles.divider)} />
-                    <div className={styles.fileGroup}>
-                        <div
-                            className={styles.tutorialButtonWrapper}
-                        >
-                            <div
-                                aria-label={this.props.intl.formatMessage(ariaMessages.tutorials)}
-                                className={classNames(styles.menuBarItem, styles.noOffset, styles.hoverable)}
-                                onClick={this.handleClickTutorials}
-                            >
-                                <img
-                                    className={styles.helpIcon}
-                                    src={helpIcon}
-                                />
-                                <span className={styles.learnLabel}>
-                                    <FormattedMessage {...ariaMessages.tutorials} />
-                                </span>
-                            </div>
-                            {this.props.showTutorialTooltip ? (
-                                <TutorialTooltip onClick={this.handleClickTutorials} />
-                            ) : null}
-                        </div>
-                        <div
-                            aria-label={this.props.intl.formatMessage(ariaMessages.debug)}
-                            className={classNames(styles.menuBarItem, styles.noOffset, styles.hoverable)}
-                            onClick={this.props.onOpenDebugModal}
-                        >
-                            <img
-                                className={styles.helpIcon}
-                                src={debugIcon}
-                            />
-                            <span className={styles.debugLabel}>
-                                <FormattedMessage {...ariaMessages.debug} />
-                            </span>
-                        </div>
                     </div>
                     <Divider className={classNames(styles.divider)} />
                     <div className={styles.fileGroup}>
