@@ -867,47 +867,155 @@ class MenuBar extends React.Component {
                                                 />
                                             </MenuItem>
                                         )}</SB3Downloader>
-                                    </MenuSection>
-                                    <MenuSection>
-                                        <MenuItem
-                                            onClick={this.handleClickLoadFromUrl}
-                                        >
-                                            <FormattedMessage
-                                                defaultMessage="Load from Scratch"
-                                                description="Menu bar item for loading from Scratch"
-                                                id="gui.menuBar.loadFromUrl"
-                                            />
-                                        </MenuItem>
-                                    </MenuSection>
-                                    <MenuSection>
-                                        <MenuItem
-                                            onClick={this.props.onStartSelectingGoogleDrive}
-                                        >
-                                            <FormattedMessage
-                                                defaultMessage="Load from Google Drive"
-                                                description="Menu bar item for loading from Google Drive"
-                                                id="gui.menuBar.loadFromGoogleDrive"
-                                            />
-                                        </MenuItem>
-                                        <MenuItem
-                                            className={classNames({[styles.disabled]: !this.props.isGoogleDriveFile})}
-                                            onClick={this.props.onSaveDirectlyToGoogleDrive}
-                                        >
-                                            <FormattedMessage
-                                                defaultMessage="Save directly to Google Drive"
-                                                description="Menu bar item for direct save to current Google Drive file"
-                                                id="gui.menuBar.saveDirectlyToGoogleDrive"
-                                            />
-                                        </MenuItem>
-                                        <MenuItem
-                                            onClick={this.props.onStartSavingToGoogleDrive}
-                                        >
-                                            <FormattedMessage
-                                                defaultMessage="Save a copy to Google Drive..."
-                                                description="Menu bar item for saving a copy to Google Drive"
-                                                id="gui.menuBar.saveToGoogleDrive"
-                                            />
-                                        </MenuItem>
+{/* 1. サーバーに保存 */}
+<MenuItem
+    onClick={() => {
+        const password = prompt("共通パスワードを入力してください：");
+        if (password === null) return;
+
+        const filename = this.props.projectTitle || "project";
+        
+        // 画面からプロジェクトのバイナリを取得
+        this.props.vm.saveProjectSb3().then(content => {
+            const formData = new FormData();
+            formData.append("password", password);
+            formData.append("filename", filename);
+            formData.append("file", content, `${filename}.sb3`);
+
+            fetch("./smt_storage.php?action=save", {
+                method: "POST",
+                body: formData
+            })
+
+	    .then(res => res.json()) // 最初からJSONとして解析する
+            .then(json => {
+                // サーバーがエラー（errorキー）を返してきた場合
+                if (json.error) {
+                    alert(`保存に失敗しました: ${json.error}`);
+                } 
+                // サーバーが成功（successキー）を返してきた場合
+                else if (json.success) {
+                    alert(json.success); // 「サーバーへの保存に成功しました！...」を表示
+                }
+            })
+            .catch(err => {
+                // 通信自体が失敗した場合（ネットワークエラーなど）
+                alert(`通信エラーが発生しました: ${err.message}`);
+            });
+        });
+    }}
+>
+    サーバーに保存
+</MenuItem>
+
+{/* 2. サーバーから呼び出し */}
+<MenuItem
+    onClick={() => {
+        const password = prompt("共通パスワードを入力してください：");
+        if (password === null) return;
+
+        // 1. サーバーからファイル一覧を取得
+        fetch(`./smt_storage.php?action=list&password=${encodeURIComponent(password)}`)
+        .then(async res => {
+
+            if (!res.ok) {
+                const text = await res.text();
+                try {
+                    const json = JSON.parse(text);
+                    throw new Error(json.error);
+                } catch (e) {
+                    throw new Error(text || "サーバーエラーが発生しました。");
+                }
+            }
+            return res.json();
+        })
+        .then(files => {
+            if (files.length === 0) return alert("サーバー上に保存されたプログラムがありません。");
+
+            // --- 2. 簡易エクスプローラー風のダイアログを表示 ---
+            const modalOverlay = document.createElement('div');
+            modalOverlay.style = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:99999;display:flex;justify-content:center;align-items:center;font-family:sans-serif;";
+
+            const modalWindow = document.createElement('div');
+            modalWindow.style = "background:white;padding:25px;border-radius:8px;width:450px;box-shadow:0 4px 15px rgba(0,0,0,0.2);";
+            
+            const title = document.createElement('h3');
+            title.innerText = "📁 サーバーファイルエクスプローラー";
+            title.style = "margin-top:0;margin-bottom:15px;color:#333;border-bottom:2px solid #4c97ff;padding-bottom:8px;";
+            modalWindow.appendChild(title);
+
+            const select = document.createElement('select');
+            select.size = 10;
+            select.style = "width:100%;padding:8px;border:1px solid #ccc;border-radius:4px;margin-bottom:20px;font-size:14px;outline:none;background:#f9f9f9;";
+            
+            files.forEach(file => {
+                const option = document.createElement('option');
+                option.value = file.name;
+                option.innerText = `📄 ${file.name}  [更新: ${file.time}]`;
+                option.style = "padding:4px;cursor:pointer;";
+                select.appendChild(option);
+            });
+            modalWindow.appendChild(select);
+
+            const buttonArea = document.createElement('div');
+            buttonArea.style = "display:flex;justify-content:flex-end;gap:10px;";
+
+            const cancelBtn = document.createElement('button');
+            cancelBtn.innerText = "キャンセル";
+            cancelBtn.style = "padding:8px 15px;background:#e0e0e0;border:none;border-radius:4px;cursor:pointer;font-weight:bold;";
+            cancelBtn.onclick = () => document.body.removeChild(modalOverlay);
+            
+            const openBtn = document.createElement('button');
+            openBtn.innerText = "開く";
+            openBtn.style = "padding:8px 20px;background:#4c97ff;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:bold;";
+            
+            openBtn.onclick = () => {
+                const selectedFilename = select.value;
+                if (!selectedFilename) return alert("ファイルを選択してください。");
+
+                fetch(`./smt_storage.php?action=load&password=${encodeURIComponent(password)}&filename=${encodeURIComponent(selectedFilename)}`)
+                .then(async res => {
+                    if (!res.ok) {
+                        const text = await res.text();
+                        try {
+                            const json = JSON.parse(text);
+                            throw new Error(json.error);
+                        } catch (e) {
+                            throw new Error(text || "ファイルのダウンロードに失敗しました。");
+                        }
+                    }
+                    return res.arrayBuffer();
+                })
+                .then(arrayBuffer => {
+                    const uint8Array = new Uint8Array(arrayBuffer);
+                    return this.props.vm.loadProject(uint8Array);
+                })
+                .then(() => {
+                    const cleanName = selectedFilename.replace('.sb3', '');
+                    if (this.props.onUpdateProjectTitle) {
+                        this.props.onUpdateProjectTitle(cleanName);
+                    }
+                    document.body.removeChild(modalOverlay);
+                    alert(`「${cleanName}」を読み込みました！`);
+                })
+                .catch(err => {
+                    alert(`プロジェクトの読み込みに失敗しました: ${err.message}`);
+                });
+            };
+
+            buttonArea.appendChild(cancelBtn);
+            buttonArea.appendChild(openBtn);
+            modalWindow.appendChild(buttonArea);
+            modalOverlay.appendChild(modalWindow);
+            document.body.appendChild(modalOverlay);
+        })
+        .catch(err => {
+            alert(`処理に失敗しました: パスワードが違います`);
+        });
+    }}
+>
+    サーバーから呼び出し
+</MenuItem>
                                     </MenuSection>
                                 </MenuBarMenu>
                             </div>
