@@ -7,6 +7,8 @@ export default function (Generator) {
 
     Generator.kanirobo_motor_init = function (block) {
         return (
+	    `$gpio13 = GPIO.new(13, GPIO::OUT)\n` +
+	    `$gpio12 = GPIO.new(12, GPIO::OUT)\n` +
 	    `$gpio25 = GPIO.new(25, GPIO::OUT)\n` +
 	    `$gpio32 = GPIO.new(32, GPIO::OUT)\n` +
   	    `$pwm26  = PWM.new(26, timer:0, frequency:1000, duty:0)\n` +
@@ -35,11 +37,26 @@ export default function (Generator) {
         const id  = Generator.getFieldValue(block, 'ID',  Generator.ORDER_NONE) || null;
         const dir = Generator.getFieldValue(block, 'DIR', Generator.ORDER_NONE) || null;
         const pwr = Generator.getFieldValue(block, 'PWR', Generator.ORDER_NONE) || null;
-	const id2 = Number(id) + 1;
 	const duty = ( 100 - 2 * Number(pwr) ) * Number(dir) + Number(pwr);
+	var idP, idL, onoff;
+	if (Number(id) == 25) {
+	    console.log("25");
+	    idP = 26;
+	    idL = 13;
+	} else if (Number(id) == 32) {
+	    idP = 33;
+	    idL = 12;
+	};
+	if (Math.abs(Number(dir) * 100 - duty) < 20 ) {
+	    onoff = 0;
+	} else {
+	    onoff = 1;
+	};
+//	const id2 = Number(id) + 1;
         return (
+	    `$gpio${idL}.write(${onoff})\n` +
 	    `$gpio${id}.write(${dir})\n` +
-	    `$pwm${id2}.duty( ${duty} ) \n`
+	    `$pwm${idP}.duty( ${duty} ) \n`
 	);
     };
     Generator.kanirobo_sensor = function (block) {
