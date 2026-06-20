@@ -8,7 +8,7 @@ export default function (Generator) {
     //
     // GPIO (output)
     //
-    Generator.mctboard_led_init = function (block){
+    Generator.mctboard_led_init = function (){
         return (
 	    `$gpio13 = GPIO.new( 13, GPIO::OUT )\n` +
 	    `$gpio12 = GPIO.new( 12, GPIO::OUT )\n` +
@@ -43,10 +43,16 @@ export default function (Generator) {
 	);
     };
 
+    Generator.mctboard_led_init2 = function (pin){
+        return (
+	    `$gpio${pin} = GPIO.new( ${pin}, GPIO::OUT )\n`
+	);
+    };
+
     Generator.mctboard_led = function (block) {
-	Generator.prepares_.led = Generator.mctboard_led_init(null);
         const pin   = Generator.getFieldValue(block, 'PIN',   Generator.ORDER_NONE);
         const onoff = Generator.getFieldValue(block, 'ONOFF', Generator.ORDER_NONE);
+	Generator.prepares_.led = Generator.mctboard_led_init2( pin );	
         return (
 	    `$gpio${pin}.write(${onoff})\n`
 	);
@@ -55,7 +61,7 @@ export default function (Generator) {
     //
     // GPIO (SW)
     //
-    Generator.mctboard_sw_init = function (block){
+    Generator.mctboard_sw_init = function (){
         return (
 	    `$gpio34 = GPIO.new( 34, GPIO::IN ) \n` +
 	    `$gpio35 = GPIO.new( 35, GPIO::IN ) \n` +
@@ -73,10 +79,22 @@ export default function (Generator) {
         return [ `($gpio34.read == ${onoff1}) && ($gpio35.read == ${onoff2}) && ($gpio18.read == ${onoff3}) && ($gpio19.read == ${onoff4})`, Generator.ORDER_ATOMIC ];
     };
 
+    Generator.mctboard_sw_init2 = function (pin){
+	if (pin == 34 && pin == 35) {
+            return (	    
+		`$gpio${pin} = GPIO.new( ${pin}, GPIO::IN ) \n` 
+	    );
+	} else {
+            return (	    
+		`$gpio${pin} = GPIO.new( ${pin}, GPIO::IN|GPIO::PULL_UP ) \n`
+	    );
+	}
+    };
+
     Generator.mctboard_sw = function (block) {
-	Generator.prepares_.sw = Generator.mctboard_sw_init(null);
 	const pin   = Generator.getFieldValue(block, 'PIN',   Generator.ORDER_NONE);
         const onoff = Generator.getFieldValue(block, 'ONOFF', Generator.ORDER_NONE);
+	Generator.prepares_.sw = Generator.mctboard_sw_init2( pin );	
         return [`$gpio${pin}.read == ${onoff}`, Generator.ORDER_ATOMIC];
     };
 
@@ -84,7 +102,7 @@ export default function (Generator) {
     //
     // PWM LEDs
     //
-    Generator.mctboard_pwm_led_init = function (block){
+/*    Generator.mctboard_pwm_led_init = function ( ){
         return (
 	    `$pwm13 = PWM.new( 13, timer: 0, frequency:440, duty:0 )\n` +
 	    `$pwm12 = PWM.new( 12, timer: 0, frequency:440, duty:0 )\n` +
@@ -96,11 +114,17 @@ export default function (Generator) {
 	    `$pwm32 = PWM.new( 32, timer: 0, frequency:440, duty:0 )\n` 
 	);
     };
+*/
+    Generator.mctboard_pwm_led_init = function ( pin ){
+        return (
+	    `$pwm${pin} = PWM.new( ${pin}, timer: 0, frequency:440, duty:0 )\n` 
+	);
+    };
 
     Generator.mctboard_pwm_duty = function (block) {
-	Generator.prepares_.pwm_led = Generator.mctboard_pwm_led_init(null);
         const pin  = Generator.getFieldValue(block, 'PIN',  Generator.ORDER_NONE);
 	const duty = Generator.valueToCode(block, 'DUTY', Generator.ORDER_NONE) || 0;
+	Generator.prepares_.pwm_led = Generator.mctboard_pwm_led_init( pin );	
         return (
 	    `$pwm${pin}.duty( ${duty} )\n`
 	);
@@ -109,7 +133,7 @@ export default function (Generator) {
     //
     // PWM buzzer
     //
-    Generator.mctboard_pwm_buzzer_init = function (block){
+    Generator.mctboard_pwm_buzzer_init = function (){
         return (
    	    `$pwm15 = PWM.new( 15, timer: 1, frequency:440, duty:0 )\n` 
 	);
@@ -179,7 +203,7 @@ export default function (Generator) {
     //
     // Wi-Fi
     //
-    Generator.mctboard_wifi_init = function (block) {
+    Generator.mctboard_wifi_init = function () {
         const ssid = Generator.valueToCode(block, 'SSID', Generator.ORDER_NONE);
         const pass = Generator.valueToCode(block, 'PASS', Generator.ORDER_NONE);
         return (
