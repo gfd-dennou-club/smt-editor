@@ -61,7 +61,13 @@ const SubscriptionManagerMixin = {
     },
 
     handleDataUpdate(nodeStatus) {
-        if (!nodeStatus || nodeStatus.nodeId === this.meshId) return;
+        // Issue #707: store data from every node, including this node itself.
+        // AppSync echoes the sender's own nodeStatus back; we keep it so the
+        // "sensor value" block can read this node's own global variables, treating
+        // self and peers uniformly (all values arrive via the network with server
+        // timestamps). A one-time UI notice informs users whose project has a
+        // global variable name colliding with a sensor value lookup.
+        if (!nodeStatus) return;
 
         const nodeId = nodeStatus.nodeId;
         if (!this.remoteData[nodeId]) {
@@ -74,6 +80,20 @@ const SubscriptionManagerMixin = {
             : (log.warn('Mesh V2: Missing server timestamp, using client time'), Date.now());
 
         nodeStatus.data.forEach(item => {
+            // Issue #713: own values always originate locally (seeded by
+            // sendData with a client timestamp), so an echo can never carry
+            // newer information than the local seed.
+            // - Same value: store with the server timestamp, normalizing the
+            //   seed's client-clock timestamp into the server time domain so
+            //   cross-node comparison self-heals despite clock skew.
+            // - Different value: it is the echo of an OLDER local write
+            //   (rapid successive writes) — keep the seed untouched.
+            if (nodeId === this.meshId) {
+                const existing = this.remoteData[nodeId][item.key];
+                if (existing && existing.value !== item.value) {
+                    return;
+                }
+            }
             this.remoteData[nodeId][item.key] = {
                 value: item.value,
                 timestamp: serverTimestamp,

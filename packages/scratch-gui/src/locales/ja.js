@@ -151,6 +151,14 @@ export default {
     'gui.classroom.teacherDetail.seated': '着席中',
     'gui.classroom.teacherDetail.notSeated': '離席',
     'gui.classroom.teacherDetail.downloadAll': '全作品ダウンロード',
+    'gui.classroom.coTeachers.title': '共同管理者',
+    'gui.classroom.coTeachers.hint':
+        'ほかの先生をメールアドレスで招待して、このクラスを一緒に管理できます。あなたと同じことができます。',
+    'gui.classroom.coTeachers.empty': 'まだ共同管理者がいません。',
+    'gui.classroom.coTeachers.remove': '解除',
+    'gui.classroom.coTeachers.invite': '招待',
+    'gui.classroom.coTeachers.emailPlaceholder': 'teacher@example.com',
+    'gui.classroom.management.coManagedBadge': '共同管理',
     'gui.classroom.teacherCreate.hint':
         '1つの授業に1つのクラスを作ります。クラス名（例：「5-2」）、人数、課題名（例：「第3回 チャットアプリを作ろう」）を入力してください。',
     'gui.classroom.teacherCreate.className': 'クラス名',
@@ -529,6 +537,48 @@ export default {
     'gui.smalruby3.gui.feedback': 'フィードバックを送信',
     'gui.smalruby3.feedbackConfirm':
         'スモウルビーをよりよくするためのフィードバック（ご意見）を送信する外部サイトを開きます。よろしいですか？',
+
+    // Bug Report (program bug report with attached project)
+    'gui.smalruby3.gui.bugReport': '不具合を報告',
+    'gui.bugReportModal.title': '不具合を報告する',
+    'gui.bugReportModal.loginIntro':
+        'ログインすると、作品を添付して送れます。直ったときにお知らせするためにも使います。',
+    'gui.bugReportModal.loginGoogle': 'Googleでログイン',
+    'gui.bugReportModal.loginMicrosoft': 'Microsoftでログイン',
+    'gui.bugReportModal.descriptionLabel': 'どんな不具合ですか？（何をしたか・どうなったか・どうなってほしかったか）',
+    'gui.bugReportModal.descriptionPlaceholder': '例：緑の旗を押したら、スプライトが消えてしまいました。',
+    'gui.bugReportModal.attachmentNote': '今編集している作品とブロックのスクリーンショットが自動で添付されます。',
+    'gui.bugReportModal.submit': '報告を送る',
+    'gui.bugReportModal.sending': '送信中…',
+    'gui.bugReportModal.successTitle': 'ありがとうございます！報告を送りました。',
+    'gui.bugReportModal.successBody': '開発者が確認します。返事は「わたしの不具合報告」からあとで確認できます。',
+    'gui.bugReportModal.viewMyReports': 'わたしの不具合報告',
+    'gui.bugReportModal.backToForm': '別の不具合を報告する',
+    'gui.bugReportModal.close': '閉じる',
+    'gui.bugReportModal.noReports': 'まだ不具合を報告していません。',
+    'gui.bugReportModal.reportsLoading': '読み込み中…',
+    'gui.bugReportModal.replyLabel': '開発者からの返事：',
+    'gui.bugReportModal.statusOpen': '受付ました',
+    'gui.bugReportModal.statusInProgress': '対応中',
+    'gui.bugReportModal.statusResolved': '直りました',
+    'gui.bugReportModal.statusWontFix': '対応終了',
+    'gui.bugReportModal.hideButton': '一覧からかくす',
+    'gui.bugReportModal.hideToast': '一覧からかくしました。けすわけではないので、開発者にはとどいたままです。',
+    'gui.bugReportModal.undo': 'もとにもどす',
+    'gui.bugReportModal.errorLogin': 'ログインに失敗しました。もう一度お試しください。',
+    'gui.bugReportModal.errorReauth': 'ログインの有効期限が切れました。もう一度ログインしてください。',
+    'gui.bugReportModal.errorFileTooLarge': '作品が大きすぎて送れません（最大10MB）。',
+    'gui.bugReportModal.errorGeneric': '問題が発生しました。しばらくしてからもう一度お試しください。',
+    'gui.bugReportConsent.title': '不具合を報告するまえに',
+    'gui.bugReportConsent.intro': '不具合を直すために、今編集している作品が開発者に共有されます。',
+    'gui.bugReportConsent.pointShared': '送った作品を見られるのは、あなたと開発者だけです。',
+    'gui.bugReportConsent.pointLogin': '直ったときにお知らせできるように、GoogleまたはMicrosoftでログインします。',
+    'gui.bugReportConsent.pointNoPersonalInfo': '説明には個人情報（名前・住所など）を書かないでください。',
+    'gui.bugReportConsent.guardianNote':
+        '保護者の方へ：送られた作品・サムネイル・スクリーンショット・説明・アカウントのメールアドレスは安全に保管され、スモウルビーの開発者のみが扱います。対応が終わったあとに削除されます。',
+    'gui.bugReportConsent.privacyLink': 'プライバシーポリシー',
+    'gui.bugReportConsent.cancel': 'いまはやめる',
+    'gui.bugReportConsent.accept': 'OK',
 
     // Block Display Modal - Block Messages
     // Motion blocks
@@ -913,6 +963,8 @@ export default {
     'gui.rubyToolbar.modeDncl': '日本語モード',
     'gui.rubyToolbar.stopExecution': '実行を停止',
     'gui.rubyToolbar.search': '検索',
+    'gui.rubyToolbar.keyboardShow': 'キーボードを表示',
+    'gui.rubyToolbar.keyboardHide': 'キーボードを隠す',
     'gui.rubyToolbar.prevSprite': '前のスプライト',
     'gui.rubyToolbar.nextSprite': '次のスプライト',
     'gui.rubyToolbar.undo': '元に戻す',
@@ -1137,6 +1189,10 @@ export default {
         '日本語モードでは拡張機能は使えません。\nRubyふりがなモードに戻すと拡張機能が使えるようになります。\n戻しますか？',
     'gui.dnclModeNotice.message': '日本語モード：ブロックが制限されています',
     'gui.dnclModeNotice.exitButton': 'Rubyふりがなモードに戻す',
+    'gui.meshSelfSensorNotice.message':
+        'メッシュの「センサーの値」は、同じ名前のグローバル変数があると、自分の値も読むようになりました。',
+    'gui.meshSelfSensorNotice.learnMore': 'くわしくはこちら',
+    'gui.meshSelfSensorNotice.dismiss': '閉じる',
     'gui.rubyTab.dnclValidationError':
         '日本語モードでは対応していない記述です。\n対応している命令のみにしてから、モード切り替えを行ってください。',
 

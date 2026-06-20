@@ -156,6 +156,14 @@ export default {
     'gui.classroom.teacherDetail.seated': 'ちゃくせきちゅう',
     'gui.classroom.teacherDetail.notSeated': 'りせき',
     'gui.classroom.teacherDetail.downloadAll': 'ぜんさくひんダウンロード',
+    'gui.classroom.coTeachers.title': 'きょうどうかんりしゃ',
+    'gui.classroom.coTeachers.hint':
+        'ほかのせんせいをメールアドレスでしょうたいして、このクラスをいっしょにかんりできます。あなたとおなじことができます。',
+    'gui.classroom.coTeachers.empty': 'まだきょうどうかんりしゃがいません。',
+    'gui.classroom.coTeachers.remove': 'かいじょ',
+    'gui.classroom.coTeachers.invite': 'しょうたい',
+    'gui.classroom.coTeachers.emailPlaceholder': 'teacher@example.com',
+    'gui.classroom.management.coManagedBadge': 'きょうどうかんり',
     'gui.classroom.teacherCreate.hint':
         '1つのじゅぎょうに1つのクラスをつくります。クラスめい（れい：「5-2」）、にんずう、かだいめい（れい：「だい3かい チャットアプリをつくろう」）をにゅうりょくしてください。',
     'gui.classroom.teacherCreate.className': 'クラスめい',
@@ -547,6 +555,54 @@ export default {
     'gui.menuBar.learn': 'まなぶ',
 
 
+    // Bug Report (program bug report with attached project)
+    'gui.smalruby3.gui.bugReport': 'ふぐあいをほうこく',
+    'gui.bugReportModal.title': 'ふぐあいをほうこくする',
+    'gui.bugReportModal.loginIntro':
+        'ログインすると、さくひんをそえておくれます。なおったときにおしらせするためにもつかいます。',
+    'gui.bugReportModal.loginGoogle': 'Googleでログイン',
+    'gui.bugReportModal.loginMicrosoft': 'Microsoftでログイン',
+    'gui.bugReportModal.descriptionLabel':
+        'どんなふぐあいですか？（なにをしたか・どうなったか・どうなってほしかったか）',
+    'gui.bugReportModal.descriptionPlaceholder': 'れい：みどりのはたをおしたら、スプライトがきえてしまいました。',
+    'gui.bugReportModal.attachmentNote':
+        'いまへんしゅうしているさくひんとブロックのスクリーンショットがじどうでそえられます。',
+    'gui.bugReportModal.submit': 'ほうこくをおくる',
+    'gui.bugReportModal.sending': 'そうしんちゅう…',
+    'gui.bugReportModal.successTitle': 'ありがとうございます！ほうこくをおくりました。',
+    'gui.bugReportModal.successBody':
+        'かいはつしゃがかくにんします。へんじは「わたしのふぐあいほうこく」からあとでかくにんできます。',
+    'gui.bugReportModal.viewMyReports': 'わたしのふぐあいほうこく',
+    'gui.bugReportModal.backToForm': 'べつのふぐあいをほうこくする',
+    'gui.bugReportModal.close': 'とじる',
+    'gui.bugReportModal.noReports': 'まだふぐあいをほうこくしていません。',
+    'gui.bugReportModal.reportsLoading': 'よみこみちゅう…',
+    'gui.bugReportModal.replyLabel': 'かいはつしゃからのへんじ：',
+    'gui.bugReportModal.statusOpen': 'うけつけました',
+    'gui.bugReportModal.statusInProgress': 'たいおうちゅう',
+    'gui.bugReportModal.statusResolved': 'なおりました',
+    'gui.bugReportModal.statusWontFix': 'たいおうしゅうりょう',
+    'gui.bugReportModal.hideButton': 'いちらんから かくす',
+    'gui.bugReportModal.hideToast':
+        'いちらんから かくしました。けす わけ では ないので、かいはつしゃには とどいた ままです。',
+    'gui.bugReportModal.undo': 'もとに もどす',
+    'gui.bugReportModal.errorLogin': 'ログインにしっぱいしました。もういちどおためしください。',
+    'gui.bugReportModal.errorReauth': 'ログインのゆうこうきげんがきれました。もういちどログインしてください。',
+    'gui.bugReportModal.errorFileTooLarge': 'さくひんがおおきすぎておくれません（さいだい10MB）。',
+    'gui.bugReportModal.errorGeneric': 'もんだいがおきました。しばらくしてからもういちどおためしください。',
+    'gui.bugReportConsent.title': 'ふぐあいをほうこくするまえに',
+    'gui.bugReportConsent.intro':
+        'ふぐあいをなおすために、いまへんしゅうしているさくひんがかいはつしゃにきょうゆうされます。',
+    'gui.bugReportConsent.pointShared': 'おくったさくひんをみられるのは、あなたとかいはつしゃだけです。',
+    'gui.bugReportConsent.pointLogin': 'なおったときにおしらせできるように、GoogleまたはMicrosoftでログインします。',
+    'gui.bugReportConsent.pointNoPersonalInfo':
+        'せつめいにはこじんじょうほう（なまえ・じゅうしょなど）をかかないでください。',
+    'gui.bugReportConsent.guardianNote':
+        'ほごしゃのかたへ：おくられたさくひん・サムネイル・スクリーンショット・せつめい・アカウントのメールアドレスはあんぜんにほかんされ、スモウルビーのかいはつしゃのみがあつかいます。たいおうがおわったあとにさくじょされます。',
+    'gui.bugReportConsent.privacyLink': 'プライバシーポリシー',
+    'gui.bugReportConsent.cancel': 'いまはやめる',
+    'gui.bugReportConsent.accept': 'OK',
+
     // Block Display Modal - Block Messages (Hiragana)
     // Motion blocks
     'gui.smalruby3.blockDisplayModal.motion_movesteps': '(10) ほうごかす',
@@ -935,6 +991,8 @@ export default {
     'gui.rubyToolbar.modeDncl': 'にほんごモード',
     'gui.rubyToolbar.stopExecution': 'じっこうをていし',
     'gui.rubyToolbar.search': 'けんさく',
+    'gui.rubyToolbar.keyboardShow': 'キーボードをひょうじ',
+    'gui.rubyToolbar.keyboardHide': 'キーボードをかくす',
     'gui.rubyToolbar.prevSprite': 'まえのスプライト',
     'gui.rubyToolbar.nextSprite': 'つぎのスプライト',
     'gui.rubyToolbar.undo': 'もとにもどす',
@@ -1161,6 +1219,10 @@ export default {
         'にほんごモードではかくちょうきのうはつかえません。\nRubyふりがなモードにもどすとかくちょうきのうがつかえるようになります。\nもどしますか？',
     'gui.dnclModeNotice.message': 'にほんごモード：ブロックがせいげんされています',
     'gui.dnclModeNotice.exitButton': 'Rubyふりがなモードにもどす',
+    'gui.meshSelfSensorNotice.message':
+        'メッシュの「センサーのあたい」は、おなじなまえのグローバルへんすうがあると、じぶんのあたいもよむようになりました。',
+    'gui.meshSelfSensorNotice.learnMore': 'くわしくはこちら',
+    'gui.meshSelfSensorNotice.dismiss': 'とじる',
     'gui.rubyTab.dnclValidationError':
         'にほんごモードではたいおうしていないきじゅつです。\nたいおうしているめいれいのみにしてから、モードきりかえをおこなってください。',
 

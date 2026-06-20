@@ -15,6 +15,8 @@ upstream (Scratch) ファイルは対象外。
 - `src/components/auto-correct-modal/`
 - `src/components/dncl-mode-notice/`
 - `src/components/block-display-modal/`
+- `src/components/bug-report-consent/`
+- `src/components/bug-report-modal/`
 - `src/components/classroom-modal/`
 - `src/components/classroom-teacher-modal/`
 - `src/components/classroom-tutorial/`
@@ -22,6 +24,7 @@ upstream (Scratch) ファイルは対象外。
 - `src/components/blocks-screenshot-button/`
 - `src/components/google-drive-save-dialog/`
 - `src/components/koshien-test-modal/`
+- `src/components/mesh-self-sensor-notice/`
 - `src/components/mobile-bottom-tabs/`
 - `src/components/mobile-drawer/`
 - `src/components/mobile-gui/`
@@ -64,6 +67,8 @@ upstream (Scratch) ファイルは対象外。
 
 **個別ファイル:**
 - `src/containers/block-display-modal.jsx`
+- `src/containers/bug-report-modal.jsx`
+- `src/containers/use-bug-report-submit.js`
 - `src/containers/classroom-classcode-utils.js`
 - `src/containers/classroom-error-utils.js`
 - `src/containers/classroom-modal.jsx`
@@ -76,6 +81,7 @@ upstream (Scratch) ファイルは対象外。
 - `src/containers/use-teacher-submissions.js`
 - `src/containers/extension-library.css`
 - `src/containers/google-drive-loader-hoc.jsx`
+- `src/containers/mesh-self-sensor-notice.jsx`
 - `src/containers/google-drive-saver-hoc.jsx`
 - `src/containers/ruby-downloader.jsx`
 - `src/containers/ruby-tab.jsx`
@@ -100,6 +106,7 @@ upstream (Scratch) ファイルは対象外。
 **個別ファイル:**
 - `src/lib/auto-correct.js`
 - `src/lib/backpack-mesh-v1-migration.js`
+- `src/lib/bug-report-api.js`
 - `src/lib/classroom-api.js`
 - `src/lib/classroom-kick-request-storage.js`
 - `src/lib/deck-setup.js`
@@ -119,6 +126,7 @@ upstream (Scratch) ファイルは対象外。
 - `src/lib/join-code-history.js`
 - `src/lib/log-suppression.js`
 - `src/lib/mesh-v2-classroom-binding.jsx`
+- `src/lib/mesh-v2-sensor-collision.js`
 - `src/lib/microsoft-auth.js`
 - `src/lib/microbit-more-update.js`
 - `src/lib/teacher-auth.js`
@@ -131,6 +139,7 @@ upstream (Scratch) ファイルは対象外。
 - `src/lib/ruby-parser.js`
 - `src/lib/ruby-screenshot.js`
 - `src/lib/smalrubot-firmware-flasher.js`
+- `src/lib/stale-block-delete-guard.js`
 - `src/lib/smalrubot-firmware.hex.js`
 - `src/lib/storage-worker-timeout.js`
 - `src/lib/storage-worker-timeout-hoc.jsx`
@@ -140,6 +149,7 @@ upstream (Scratch) ファイルは対象外。
 - `src/lib/scratch-blocks-comment-icon-patch.js`
 - `src/lib/rubytee-api.js`
 - `src/lib/rubytee-context.js`
+- `src/lib/touch-device.js`
 - `src/lib/url-loader-hoc.jsx`
 - `src/lib/url-loader.js`
 - `src/lib/url-params.js`
@@ -157,6 +167,7 @@ upstream (Scratch) ファイルは対象外。
 ### src/reducers/
 
 - `src/reducers/block-display.js`
+- `src/reducers/bug-report.js`
 - `src/reducers/classroom.js`
 - `src/reducers/classroom-tutorial.js`
 - `src/reducers/dncl-mode.js`
@@ -195,6 +206,8 @@ upstream (Scratch) ファイルは対象外。
 - `test/integration/ruby-super.test.js`
 - `test/integration/ruby-tab-completion-and-indent.test.js`
 - `test/integration/ruby-tab-furigana-zoom.test.js`
+- `test/integration/ruby-tab-ipad-keyboard.test.js`
+- `test/integration/ruby-tab-monitor-sync.test.js`
 - `test/integration/ruby-tab.test.js`
 - `test/integration/smalrubot-firmware.test.js`
 - `test/integration/smalrubot-s1-connection-flow.test.js`
@@ -205,9 +218,11 @@ upstream (Scratch) ファイルは対象外。
 - `test/integration/version-update-notification.test.js`
 - `test/integration/workspace-glow-regression.test.js`
 - `test/unit/components/action-menu.test.jsx`
+- `test/unit/components/bug-report-consent.test.jsx`
 - `test/unit/components/dncl-mode-notice.test.jsx`
 - `test/unit/components/extension-button-dncl.test.jsx`
 - `test/unit/components/connected-step.test.jsx`
+- `test/unit/components/mesh-self-sensor-notice.test.jsx`
 - `test/unit/components/mobile-bottom-tabs.test.jsx`
 - `test/unit/components/mobile-drawer.test.jsx`
 - `test/unit/components/mobile-orientation-gate.test.jsx`
@@ -217,6 +232,7 @@ upstream (Scratch) ファイルは対象外。
 - `test/unit/components/palette-toggle.test.jsx`
 - `test/unit/components/welcome-tooltip.test.jsx`
 - `test/unit/components/ruby-toolbar-analytics.test.jsx`
+- `test/unit/components/ruby-toolbar-keyboard.test.jsx`
 - `test/unit/components/project-title-input.test.jsx`
 - `test/unit/components/scanning-step-name-search.test.js`
 - `test/unit/components/student-join-form.test.js`
@@ -236,6 +252,7 @@ upstream (Scratch) ファイルは対象外。
 - `test/unit/lib/analytics.test.js`
 - `test/unit/lib/auto-correct.test.js`
 - `test/unit/lib/backpack-api.test.js`
+- `test/unit/lib/bug-report-api.test.js`
 - `test/unit/lib/backpack-mesh-v1-migration.test.js`
 - `test/unit/lib/block-display-initialization.test.js`
 - `test/unit/lib/blockly-private-api.test.js`
@@ -251,6 +268,7 @@ upstream (Scratch) ファイルは対象外。
 - `test/unit/lib/google-drive-api.test.js`
 - `test/unit/lib/responsive-gui.test.jsx`
 - `test/unit/lib/scratch-blocks-auto-style-patch.test.js`
+- `test/unit/lib/touch-device.test.js`
 - `test/unit/lib/url-loader.test.js`
 - `test/unit/lib/use-is-narrow-screen.test.js`
 - `test/unit/lib/insert-class.test.js`
@@ -258,6 +276,7 @@ upstream (Scratch) ファイルは対象外。
 - `test/unit/lib/layout-constants.test.js`
 - `test/unit/lib/legacy-storage.test.js`
 - `test/unit/lib/mesh-v2-classroom-binding.test.js`
+- `test/unit/lib/mesh-v2-sensor-collision.test.js`
 - `test/unit/lib/make-toolbox-xml.test.js`
 - `test/unit/lib/module-sync.test.js`
 - `test/unit/lib/prism-parser.test.js`
@@ -276,6 +295,7 @@ upstream (Scratch) ファイルは対象外。
 - `test/unit/lib/ruby-screenshot.test.js`
 - `test/unit/lib/smalruby-original-sprites.test.js`
 - `test/unit/lib/smalrubot-firmware-flasher.test.js`
+- `test/unit/lib/stale-block-delete-guard.test.js`
 - `test/unit/lib/ruby-script-preview.test.js`
 - `test/unit/lib/ruby-to-blocks-converter-version.test.js`
 - `test/unit/lib/rubytee-api.test.js`
@@ -286,6 +306,7 @@ upstream (Scratch) ファイルは対象外。
 - `test/unit/make-toolbox-xml-exact-match.test.js`
 - `test/unit/make-toolbox-xml-hex.test.js`
 - `test/unit/only-blocks-initialization.test.js`
+- `test/unit/reducers/bug-report-reducer.test.js`
 - `test/unit/reducers/cards_reducer.test.js`
 - `test/unit/reducers/dncl-mode-reducer.test.js`
 - `test/unit/reducers/classroom-reducer.test.js`

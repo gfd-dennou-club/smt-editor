@@ -145,6 +145,14 @@ export default {
     'gui.classroom.teacherDetail.seated': 'Seated',
     'gui.classroom.teacherDetail.notSeated': 'Not seated',
     'gui.classroom.teacherDetail.downloadAll': 'Download All',
+    'gui.classroom.coTeachers.title': 'Co-teachers',
+    'gui.classroom.coTeachers.hint':
+        'Invite other teachers by email to co-manage this class. They have the same permissions as you.',
+    'gui.classroom.coTeachers.empty': 'No co-teachers yet.',
+    'gui.classroom.coTeachers.remove': 'Remove',
+    'gui.classroom.coTeachers.invite': 'Invite',
+    'gui.classroom.coTeachers.emailPlaceholder': 'teacher@example.com',
+    'gui.classroom.management.coManagedBadge': 'Co-managed',
     'gui.classroom.teacherCreate.hint':
         'Create one class per lesson. Enter the class name (e.g. "5-2"), student count, and assignment name (e.g. "Lesson 3: Build a Chat App").',
     'gui.classroom.teacherCreate.className': 'Class Name',
@@ -328,6 +336,49 @@ export default {
     'gui.smalruby3.gui.feedback': 'Send feedback',
     'gui.smalruby3.feedbackConfirm':
         'You are about to open an external site to send feedback to help us improve Smalruby. Is it okay?',
+
+    // Bug Report (program bug report with attached project)
+    'gui.smalruby3.gui.bugReport': 'Report a bug',
+    'gui.bugReportModal.title': 'Report a bug',
+    'gui.bugReportModal.loginIntro': 'Sign in so we can attach your project and tell you when the bug is fixed.',
+    'gui.bugReportModal.loginGoogle': 'Sign in with Google',
+    'gui.bugReportModal.loginMicrosoft': 'Sign in with Microsoft',
+    'gui.bugReportModal.descriptionLabel': 'What happened? (what you did, what went wrong, what you expected)',
+    'gui.bugReportModal.descriptionPlaceholder': 'Example: When I clicked the green flag, the sprite disappeared.',
+    'gui.bugReportModal.attachmentNote': 'Your current project and block screenshots are attached automatically.',
+    'gui.bugReportModal.submit': 'Send report',
+    'gui.bugReportModal.sending': 'Sending…',
+    'gui.bugReportModal.successTitle': 'Thank you! Your report was sent.',
+    'gui.bugReportModal.successBody':
+        'The developers will look into it. You can check the reply later from "My bug reports".',
+    'gui.bugReportModal.viewMyReports': 'My bug reports',
+    'gui.bugReportModal.backToForm': 'Report another bug',
+    'gui.bugReportModal.close': 'Close',
+    'gui.bugReportModal.noReports': 'You have not reported any bugs yet.',
+    'gui.bugReportModal.reportsLoading': 'Loading…',
+    'gui.bugReportModal.replyLabel': 'Reply from the developers:',
+    'gui.bugReportModal.statusOpen': 'Received',
+    'gui.bugReportModal.statusInProgress': 'In progress',
+    'gui.bugReportModal.statusResolved': 'Fixed',
+    'gui.bugReportModal.statusWontFix': 'Closed',
+    'gui.bugReportModal.hideButton': 'Hide from list',
+    'gui.bugReportModal.hideToast': "Hidden from your list. It's not deleted — the developers still have it.",
+    'gui.bugReportModal.undo': 'Undo',
+    'gui.bugReportModal.errorLogin': 'Sign-in failed. Please try again.',
+    'gui.bugReportModal.errorReauth': 'Your sign-in expired. Please sign in again.',
+    'gui.bugReportModal.errorFileTooLarge': 'The project is too large to send (maximum 10MB).',
+    'gui.bugReportModal.errorGeneric': 'Something went wrong. Please try again later.',
+    'gui.bugReportConsent.title': 'Before reporting a bug',
+    'gui.bugReportConsent.intro': 'To fix the bug, your current project is shared with the Smalruby developers.',
+    'gui.bugReportConsent.pointShared': 'Only you and the developers can see the project you send.',
+    'gui.bugReportConsent.pointLogin': 'You sign in with Google or Microsoft so we can tell you when it is fixed.',
+    'gui.bugReportConsent.pointNoPersonalInfo':
+        'Do not write personal information (name, address, etc.) in the description.',
+    'gui.bugReportConsent.guardianNote':
+        'For parents/guardians: the project, thumbnail, screenshots, description and account email are stored securely, handled only by the Smalruby developers, and deleted after the bug is resolved.',
+    'gui.bugReportConsent.privacyLink': 'Privacy Policy',
+    'gui.bugReportConsent.cancel': 'Not now',
+    'gui.bugReportConsent.accept': 'OK',
 
     // Block Display Modal - Block Messages
     // Motion blocks
@@ -513,6 +564,8 @@ export default {
     'gui.rubyToolbar.executeLine': 'Execute current line',
     'gui.rubyToolbar.stopExecution': 'Stop execution',
     'gui.rubyToolbar.search': 'Search',
+    'gui.rubyToolbar.keyboardShow': 'Show keyboard',
+    'gui.rubyToolbar.keyboardHide': 'Hide keyboard',
     'gui.rubyToolbar.prevSprite': 'Previous sprite',
     'gui.rubyToolbar.nextSprite': 'Next sprite',
     'gui.rubyToolbar.undo': 'Undo',

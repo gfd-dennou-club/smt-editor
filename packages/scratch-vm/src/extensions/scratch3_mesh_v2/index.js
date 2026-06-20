@@ -194,9 +194,13 @@ class Scratch3MeshV2Blocks {
     /* istanbul ignore next */
     getVariableNamesMenuItems () {
         if (!this.meshService) return [' '];
-        const names = Object.values(this.meshService.remoteData)
+        // Include this project's own global variables so the dropdown is useful
+        // immediately (e.g. the preset variable) before any network round-trip,
+        // in addition to names received from other nodes.
+        const ownNames = this.meshService.getGlobalVariables().map(v => v.key);
+        const remoteNames = Object.values(this.meshService.remoteData)
             .reduce((acc, nodeData) => acc.concat(Object.keys(nodeData)), []);
-        return [' '].concat([...new Set(names)]);
+        return [' '].concat([...new Set([...ownNames, ...remoteNames])]);
     }
 
     /* istanbul ignore next */
@@ -524,7 +528,7 @@ class Scratch3MeshV2Blocks {
         }
         if (variable && variable.type === Variable.SCALAR_TYPE) {
             // Send as array of SensorDataInput
-            this.meshService.sendData([{key: variable.name, value: String(variable.value)}]);
+            this.meshService.sendData([{key: variable.name, value: String(variable.value)}], {force: true});
         }
     }
 
@@ -556,7 +560,7 @@ class Scratch3MeshV2Blocks {
     createNewGlobalVariable (variableName, optVarId, optVarType) {
         const variable = this.variableFunctions.runtime.createNewGlobalVariable(variableName, optVarId, optVarType);
         if (this.meshService && variable.type === Variable.SCALAR_TYPE) {
-            this.meshService.sendData([{key: variable.name, value: String(variable.value)}]);
+            this.meshService.sendData([{key: variable.name, value: String(variable.value)}], {force: true});
         }
         return variable;
     }
@@ -573,7 +577,7 @@ class Scratch3MeshV2Blocks {
         const newVariable = new Variable(id, name, Variable.SCALAR_TYPE, false);
         stage.variables[id] = newVariable;
         if (this.meshService) {
-            this.meshService.sendData([{key: newVariable.name, value: String(newVariable.value)}]);
+            this.meshService.sendData([{key: newVariable.name, value: String(newVariable.value)}], {force: true});
         }
         return newVariable;
     }
@@ -585,7 +589,7 @@ class Scratch3MeshV2Blocks {
             this.variableFunctions.stage.createVariable(id, name, type, isCloud);
             if (this.meshService && type === Variable.SCALAR_TYPE) {
                 const variable = stage.variables[id];
-                this.meshService.sendData([{key: variable.name, value: String(variable.value)}]);
+                this.meshService.sendData([{key: variable.name, value: String(variable.value)}], {force: true});
             }
         }
     }
@@ -597,7 +601,7 @@ class Scratch3MeshV2Blocks {
             const variable = stage.variables[id];
             this.variableFunctions.stage.setVariableValue(id, newValue);
             if (this.meshService && variable.type === Variable.SCALAR_TYPE) {
-                this.meshService.sendData([{key: variable.name, value: String(newValue)}]);
+                this.meshService.sendData([{key: variable.name, value: String(newValue)}], {force: true});
             }
         }
     }
@@ -609,7 +613,7 @@ class Scratch3MeshV2Blocks {
             const variable = stage.variables[id];
             this.variableFunctions.stage.renameVariable(id, newName);
             if (this.meshService && variable.type === Variable.SCALAR_TYPE) {
-                this.meshService.sendData([{key: newName, value: String(variable.value)}]);
+                this.meshService.sendData([{key: newName, value: String(variable.value)}], {force: true});
             }
         }
     }

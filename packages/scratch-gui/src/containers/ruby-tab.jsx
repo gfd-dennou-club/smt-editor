@@ -31,7 +31,7 @@ import { containsV1Code } from '../lib/ruby-to-blocks-converter/v1-detection';
 import { getUrlParams } from '../lib/url-params';
 import { showAlertWithTimeout, closeAlertWithId } from '../reducers/alerts';
 import { setDnclMode as setDnclModeAction, clearExternalExitDnclModeRequest } from '../reducers/dncl-mode';
-import { BLOCKS_TAB_INDEX, RUBY_TAB_INDEX } from '../reducers/editor-tab';
+import { BLOCKS_TAB_INDEX, RUBY_TAB_INDEX, activateTab } from '../reducers/editor-tab';
 import { setAiSaveStatus, clearAiSaveStatus } from '../reducers/koshien-file';
 import { closeFileMenu } from '../reducers/menus.js';
 import { setProjectChanged } from '../reducers/project-changed';
@@ -125,6 +125,7 @@ const RubyTab = (props) => {
         onSetDnclMode,
         exitDnclModeExternallyRequested,
         onClearExitDnclModeRequest,
+        onActivateTab,
     } = props;
 
     // --- State ---
@@ -716,7 +717,14 @@ const RubyTab = (props) => {
                 showErrors(converter.errors);
                 return;
             }
-            await converter.apply();
+            try {
+                await converter.apply();
+            } catch (error) {
+                // eslint-disable-next-line no-console
+                console.error('[handlePreviewRubyScript] Apply error:', error);
+                onShowAlert('convertRubyToBlocksError');
+                return;
+            }
             props.onChange(rubyCode.code);
         }
         const code = generatePreviewCode(vm.editingTarget, rubyVersion);
@@ -743,18 +751,27 @@ const RubyTab = (props) => {
         if (rubyCode.modified) {
             const converter = await targetCodeToBlocksHOC(intl);
             if (converter.result) {
-                converter.apply().then(async () => {
-                    clearErrors();
-                    if (rubyCode.target && String(newVersion) === '2') {
-                        try {
-                            await syncModules(vm, rubyCode.target, intl, newVersion);
-                        } catch (e) {
-                            // eslint-disable-next-line no-console
-                            console.error('Module sync error:', e);
+                converter
+                    .apply()
+                    .then(async () => {
+                        clearErrors();
+                        if (rubyCode.target && String(newVersion) === '2') {
+                            try {
+                                await syncModules(vm, rubyCode.target, intl, newVersion);
+                            } catch (e) {
+                                // eslint-disable-next-line no-console
+                                console.error('Module sync error:', e);
+                            }
                         }
-                    }
-                    updateRubyCodeTargetState(vm.editingTarget, newVersion);
-                });
+                        updateRubyCodeTargetState(vm.editingTarget, newVersion);
+                    })
+                    .catch((error) => {
+                        // eslint-disable-next-line no-console
+                        console.error('[handleRubyVersionChange] Apply error:', error);
+                        lastProcessedVersionRef.current = oldVersion;
+                        onRevertRubyVersion(oldVersion);
+                        onShowAlert('rubyVersionChangeFailed');
+                    });
             } else {
                 lastProcessedVersionRef.current = oldVersion;
                 onRevertRubyVersion(oldVersion);
@@ -1024,6 +1041,20 @@ const RubyTab = (props) => {
 
     // componentDidUpdate equivalent
     const prevPropsRef = useRef(null);
+    // Guard against starting a second Ruby→blocks conversion while one is
+    // already running. The conversion's own side effects (extension loads,
+    // emitWorkspaceUpdate, alerts) re-render this component while
+    // rubyCode.modified is still true, so without this guard the effect
+    // below starts the whole convert+apply pipeline twice per tab switch
+    // (issue #710).
+    const conversionInFlightRef = useRef(false);
+    // When the user leaves the Ruby tab with modified code, this holds the
+    // tab they were headed to. The effect below bounces back to the Ruby tab
+    // while the conversion runs and activates this destination once the
+    // blocks were applied successfully. RubyTab is the single owner of this
+    // transition (the equivalent hook that used to live in containers/gui.jsx
+    // was removed to stop the two pipelines from racing — issue #710).
+    const pendingDestinationTabRef = useRef(null);
     useEffect(() => {
         const prev = prevPropsRef.current;
         const savePrev = () => {
@@ -1070,6 +1101,16 @@ const RubyTab = (props) => {
             handleDismissBubbleStable();
         }
 
+        // Leaving the Ruby tab with modified code: remember the destination
+        // tab and immediately bounce back to the Ruby tab while the
+        // conversion runs. The conversion itself is started by the
+        // `modified` block below, and the destination is activated once the
+        // blocks were applied successfully.
+        if (prev.activeTabIndex === RUBY_TAB_INDEX && activeTabIndex !== RUBY_TAB_INDEX && rubyCode.modified) {
+            pendingDestinationTabRef.current = activeTabIndex;
+            onActivateTab(RUBY_TAB_INDEX);
+        }
+
         // Visibility off → clear errors
         if (prev.isVisible && !isVisible) {
             if (editorRef.current && monacoRef.current) {
@@ -1092,7 +1133,7 @@ const RubyTab = (props) => {
         if (modified) {
             const targetId = rubyCode.target ? rubyCode.target.id : null;
             const changedTarget = vm.editingTarget && rubyCode.target && vm.editingTarget.id !== targetId;
-            if (changedTarget || blocksTabVisible) {
+            if (changedTarget || blocksTabVisible || pendingDestinationTabRef.current !== null) {
                 if (String(rubyVersion) === '2' && !v1PromptDismissed && containsV1Code(rubyCode.code)) {
                     const message = intlRef.current.formatMessage({
                         id: 'gui.rubyTab.v1CodeDetected',
@@ -1102,41 +1143,69 @@ const RubyTab = (props) => {
                     });
                     // eslint-disable-next-line no-alert
                     if (window.confirm(message)) {
+                        // Stay on the Ruby tab after switching versions; the
+                        // version-change flow runs its own conversion.
+                        pendingDestinationTabRef.current = null;
                         onRevertRubyVersion('1');
                         return;
                     }
                     onDismissV1Prompt();
                 }
-                targetCodeToBlocksHOC(intl).then((converter) => {
-                    if (converter.result) {
-                        converter.apply().then(async () => {
-                            modified = false;
-                            clearErrors();
-                            if (rubyCode.target && String(rubyVersion) === '2') {
-                                try {
-                                    await syncModules(vm, rubyCode.target, intl, rubyVersion);
-                                } catch (e) {
-                                    // eslint-disable-next-line no-console
-                                    console.error('Module sync error:', e);
-                                }
+                if (!conversionInFlightRef.current) {
+                    conversionInFlightRef.current = true;
+                    targetCodeToBlocksHOC(intl)
+                        .then((converter) => {
+                            if (converter.result) {
+                                return converter.apply().then(async () => {
+                                    modified = false;
+                                    clearErrors();
+                                    if (rubyCode.target && String(rubyVersion) === '2') {
+                                        try {
+                                            await syncModules(vm, rubyCode.target, intl, rubyVersion);
+                                        } catch (e) {
+                                            // eslint-disable-next-line no-console
+                                            console.error('Module sync error:', e);
+                                        }
+                                    }
+                                    if (!modified) {
+                                        const etChanged = editingTarget && editingTarget !== prev.editingTarget;
+                                        if ((isVisible && !prev.isVisible) || etChanged) {
+                                            updateRubyCodeTargetState(vm.editingTarget, rubyVersion);
+                                        }
+                                    }
+                                    if (isVisible && !prev.isVisible) {
+                                        if (editorRef.current) {
+                                            editorRef.current.focus();
+                                            editorRef.current.layout();
+                                        }
+                                    }
+                                    // The user was headed to another tab when
+                                    // the conversion started — take them
+                                    // there now that the blocks are applied.
+                                    if (pendingDestinationTabRef.current !== null) {
+                                        const destination = pendingDestinationTabRef.current;
+                                        pendingDestinationTabRef.current = null;
+                                        onActivateTab(destination);
+                                    }
+                                });
                             }
-                            if (!modified) {
-                                const etChanged = editingTarget && editingTarget !== prev.editingTarget;
-                                if ((isVisible && !prev.isVisible) || etChanged) {
-                                    updateRubyCodeTargetState(vm.editingTarget, rubyVersion);
-                                }
-                            }
-                            if (isVisible && !prev.isVisible) {
-                                if (editorRef.current) {
-                                    editorRef.current.focus();
-                                    editorRef.current.layout();
-                                }
-                            }
+                            showErrors(converter.errors);
+                        })
+                        .catch((error) => {
+                            // apply() failed and rolled the target back
+                            // (issue #710) — surface the error instead of
+                            // letting it vanish as an unhandled rejection.
+                            // eslint-disable-next-line no-console
+                            console.error('[RubyTab] Ruby to blocks apply error:', error);
+                            onShowAlert('convertRubyToBlocksError');
+                        })
+                        .finally(() => {
+                            conversionInFlightRef.current = false;
+                            // Conversion failed or produced errors: stay on
+                            // the Ruby tab so the user can fix the code.
+                            pendingDestinationTabRef.current = null;
                         });
-                        return;
-                    }
-                    showErrors(converter.errors);
-                });
+                }
             }
         }
 
@@ -1337,6 +1406,7 @@ RubyTab.propTypes = {
     onSetDnclMode: PropTypes.func,
     exitDnclModeExternallyRequested: PropTypes.bool,
     onClearExitDnclModeRequest: PropTypes.func,
+    onActivateTab: PropTypes.func,
 };
 
 const mapStateToProps = (state) => ({
@@ -1370,6 +1440,7 @@ const mapDispatchToProps = (dispatch) => ({
     onDismissV1Prompt: () => dispatch(dismissV1Prompt()),
     onSetDnclMode: (dnclMode) => dispatch(setDnclModeAction(dnclMode)),
     onClearExitDnclModeRequest: () => dispatch(clearExternalExitDnclModeRequest()),
+    onActivateTab: (tab) => dispatch(activateTab(tab)),
 });
 
 const ConnectedRubyTab = RubyteeModalHOC(

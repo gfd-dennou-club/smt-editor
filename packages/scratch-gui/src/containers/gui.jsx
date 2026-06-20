@@ -36,20 +36,13 @@ import {
 import {setPlatform} from '../reducers/platform';
 import {setTheme} from '../reducers/settings';
 import {setDynamicAssets} from '../reducers/dynamic-assets';
-import {showAlertWithTimeout} from '../reducers/alerts';
 import { // === Smalruby: DNCL mode notice ===
     setDnclMode,
     requestExternalExitDnclMode,
 } from '../reducers/dncl-mode'; // === Smalruby: DNCL mode notice ===
-import {highlightTarget} from '../reducers/targets';
-import {
-    rubyCodeShape,
-    updateRubyCodeErrors,
-    convertedRubyCode
-} from '../reducers/ruby-code';
-import {
-    targetCodeToBlocks
-} from '../lib/ruby-to-blocks-converter';
+// === Smalruby: Start of bug report modal ===
+import {openBugReportModal} from '../reducers/bug-report';
+// === Smalruby: End of bug report modal ===
 
 import FontLoaderHOC from '../lib/font-loader-hoc.jsx';
 import LocalizationHOC from '../lib/localization-hoc.jsx';
@@ -122,36 +115,8 @@ class GUI extends React.Component {
         if (this.props.shouldStopProject && !prevProps.shouldStopProject) {
             this.props.vm.stopAll();
         }
-        // When leaving Ruby tab with modified code, convert Ruby to blocks
-        if (prevProps.activeTabIndex === RUBY_TAB_INDEX &&
-            this.props.activeTabIndex !== RUBY_TAB_INDEX &&
-            prevProps.rubyCode.modified) {
-            const destinationTab = this.props.activeTabIndex;
-            // Immediately switch back to Ruby tab while conversion runs
-            this.props.onActivateTab(RUBY_TAB_INDEX);
-            targetCodeToBlocks(
-                this.props.vm,
-                prevProps.rubyCode.target,
-                prevProps.rubyCode.code,
-                this.props.intl,
-                {version: prevProps.rubyVersion}
-            ).then(converter => {
-                if (converter.result) {
-                    this.props.updateRubyCodeErrorsState(converter.errors);
-                    this.props.convertedRubyCodeState();
-                    converter.apply().then(() => {
-                        this.props.onActivateTab(destinationTab);
-                    });
-                    return;
-                }
-                this.props.vm.setEditingTarget(prevProps.rubyCode.target.id);
-                if (!prevProps.rubyCode.target.isStage) {
-                    this.props.onHighlightTarget(prevProps.rubyCode.target.id);
-                }
-                this.props.onShowConvertRubyToBlocksErrorAlert();
-                this.props.updateRubyCodeErrorsState(converter.errors);
-            });
-        }
+        // NOTE: the "leaving Ruby tab with modified code" conversion is
+        // owned by containers/ruby-tab.jsx (single owner — issue #710).
     }
     handleActivateTab (tab) {
         this.props.onActivateTab(tab);
@@ -180,12 +145,6 @@ class GUI extends React.Component {
             isLoading,
             loadingStateVisible,
             onActivateTab: _onActivateTab,
-            rubyCode: _rubyCode,
-            rubyVersion: _rubyVersion,
-            convertedRubyCodeState: _convertedRubyCodeState,
-            onHighlightTarget: _onHighlightTarget,
-            onShowConvertRubyToBlocksErrorAlert: _onShowConvertRubyToBlocksErrorAlert,
-            updateRubyCodeErrorsState: _updateRubyCodeErrorsState,
             ...componentProps
         } = this.props;
 
@@ -257,12 +216,6 @@ GUI.propTypes = {
     theme: PropTypes.string,
     blockDisplayModalVisible: PropTypes.bool,
     onSetTheme: PropTypes.func,
-    rubyCode: rubyCodeShape,
-    rubyVersion: PropTypes.string,
-    convertedRubyCodeState: PropTypes.func,
-    onHighlightTarget: PropTypes.func,
-    onShowConvertRubyToBlocksErrorAlert: PropTypes.func,
-    updateRubyCodeErrorsState: PropTypes.func,
     username: PropTypes.string,
     userOwnsProject: PropTypes.bool,
     // TODO: Is this unused?
@@ -324,8 +277,6 @@ const mapStateToProps = (state, ownProps) => {
         teacherModalVisible: state.scratchGui.classroom ? state.scratchGui.classroom.teacherModalVisible : false,
         // === Smalruby: End of classroom modal ===
         dnclMode: state.scratchGui.dnclMode.dnclMode, // === Smalruby: DNCL block filtering ===
-        rubyCode: state.scratchGui.rubyCode,
-        rubyVersion: state.scratchGui.settings.rubyVersion,
         vm: state.scratchGui.vm
     };
 };
@@ -352,16 +303,15 @@ const mapDispatchToProps = dispatch => ({
     onRequestCloseKoshienTestModal: () => dispatch(closeKoshienTestModal()),
     onRequestCloseUrlLoaderModal: () => dispatch(closeUrlLoaderModal()),
     onRequestCloseTipsLibrary: () => dispatch(closeTipsLibrary()),
-    convertedRubyCodeState: () => dispatch(convertedRubyCode()),
-    onHighlightTarget: id => dispatch(highlightTarget(id)),
-    onShowConvertRubyToBlocksErrorAlert: () => showAlertWithTimeout(dispatch, 'convertRubyToBlocksError'),
-    updateRubyCodeErrorsState: errors => dispatch(updateRubyCodeErrors(errors)),
     // === Smalruby: Start of classcode auto-open ===
     onOpenClassroomModal: () => dispatch(openClassroomModal()),
     // === Smalruby: End of classcode auto-open ===
     // === Smalruby: Start of welcome modal ===
-    onShowWelcomeModal: () => dispatch(openWelcomeModal())
+    onShowWelcomeModal: () => dispatch(openWelcomeModal()),
     // === Smalruby: End of welcome modal ===
+    // === Smalruby: Start of bug report modal ===
+    onOpenBugReportModal: () => dispatch(openBugReportModal())
+    // === Smalruby: End of bug report modal ===
 });
 
 const ConnectedGUI = injectIntl(connect(

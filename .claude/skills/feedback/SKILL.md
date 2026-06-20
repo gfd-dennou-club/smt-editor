@@ -181,6 +181,65 @@ rm /tmp/feedback-graphql-query.txt
 
 ---
 
+## 回答コメントの投稿（転記後の運用）
+
+作成済みの Discussion に開発チームの回答を投稿する場合（`$ARGUMENTS` に Discussion URL と回答方針が渡される場合）は、以下のルールに従う。
+
+### 回答の言語
+
+フィードバック原文が英語の場合は英語で回答する（指示があればそれに従う）。
+
+### 対応するもの
+
+1. `smalruby/smalruby3-editor` に Issue を作成する（Feedback の Discussion URL を「関連」として本文に記載）
+2. Discussion へのコメントに Issue URL を含める
+
+### 対応しないもの（「対応しません」「予定はありません」と回答するもの）
+
+回答コメントの投稿に加えて、**必ず以下の 2 つを行う**:
+
+1. **タイトルに「【回答済み】」prefix を付与する**（既存タイトルの先頭にそのまま付ける）:
+
+   ```bash
+   gh api graphql -f query='mutation { updateDiscussion(input: { discussionId: "<discussion-node-id>", title: "【回答済み】<元のタイトル>" }) { discussion { title } } }'
+   ```
+
+2. **`close` ラベルを付与する**（label ID: `LA_kwDOFahn7M8AAAACakeKNg`）:
+
+   ```bash
+   gh api graphql -f query='mutation { addLabelsToLabelable(input: { labelableId: "<discussion-node-id>", labelIds: ["LA_kwDOFahn7M8AAAACakeKNg"] }) { clientMutationId } }'
+   ```
+
+### 対応完了したもの（修正がデプロイされたもの）
+
+修正完了・デプロイ済みを伝えるフォローアップコメント（PR リンク + 変更内容の要約 + リロード依頼）を投稿した上で、**必ず以下の 2 つを行う**:
+
+1. **タイトルに「【修正済み】」prefix を付与する**（mutation は上記「対応しないもの」と同じ。prefix のみ異なる）
+2. **`close` ラベルを付与する**（同上）
+
+prefix の使い分け: 「【回答済み】」= 対応しないと回答してクローズ、「【修正済み】」= 修正を完了してクローズ。
+
+### コメント投稿方法
+
+本文は Write ツールで `/tmp/comment-N.md` に書き出し、`-F body=@` で投稿する（Phase 5 と同じ理由）:
+
+```bash
+gh api graphql \
+  -F query='mutation($discussionId: ID!, $body: String!) { addDiscussionComment(input: { discussionId: $discussionId, body: $body }) { comment { url } } }' \
+  -F discussionId='<discussion-node-id>' \
+  -F body=@/tmp/comment-N.md
+```
+
+discussion の node ID は以下で取得できる:
+
+```bash
+gh api graphql -f query='query { repository(owner: "smalruby", name: "smalruby3-develop") { discussion(number: <N>) { id title body url } } }'
+```
+
+投稿前に、全コメント・Issue の内容をユーザーに提示して承認を得ること（Phase 4 と同様）。
+
+---
+
 ## エラーハンドリング
 
 - GraphQL API エラーが発生した場合はエラー内容を表示し、リトライするか確認する

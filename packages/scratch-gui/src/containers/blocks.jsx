@@ -47,6 +47,9 @@ import {downloadBlocksAsImage} from '../lib/blocks-screenshot';
 // === Smalruby: Start of DNCL block filtering ===
 import {DNCL_ALLOWED_BLOCKS} from '../lib/dncl/dncl-block-filter';
 // === Smalruby: End of DNCL block filtering ===
+// === Smalruby: Start of stale block delete event guard ===
+import {createStaleBlockDeleteGuard} from '../lib/stale-block-delete-guard';
+// === Smalruby: End of stale block delete event guard ===
 
 const addFunctionListener = (object, property, callback) => {
     const oldFn = object[property];
@@ -557,7 +560,16 @@ class Blocks extends React.Component {
     }
 
     attachVM () {
-        this.workspace.addChangeListener(this.props.vm.blockListener);
+        // === Smalruby: Start of stale block delete event guard ===
+        // scratch-blocks v2 delivers events asynchronously (~1 frame later),
+        // so a queued delete can arrive after onWorkspaceUpdate reloaded the
+        // workspace and wipe the just-reloaded script from the VM
+        // (issue #710). Drop deletes for blocks that are still rendered —
+        // only possible when the event is stale.
+        this.workspace.addChangeListener(
+            createStaleBlockDeleteGuard(this.workspace, this.props.vm.blockListener)
+        );
+        // === Smalruby: End of stale block delete event guard ===
         this.flyoutWorkspace = this.workspace
             .getFlyout()
             .getWorkspace();
@@ -762,6 +774,14 @@ class Blocks extends React.Component {
         // Disabling events entirely during the load ensures nothing is queued.
         this.workspace.removeChangeListener(this.toolboxUpdateChangeListener);
         let fromRuby = false;
+        // === Smalruby: Ruby-converted toolbox update deferral (issue #719) ===
+        // Set inside the fromRuby branch below; the actual updateToolbox()
+        // call runs after `finally { Events.enable(); }` so the flyout
+        // rebuild's create/delete events reach vm.flyoutBlockListener /
+        // vm.monitorBlockListener instead of being discarded by the
+        // disable window (Blockly v12 drops events fired while disabled).
+        let toolboxNeedsUpdate = false;
+        // === Smalruby: End of Ruby-converted toolbox update deferral ===
 
         try {
             this.ScratchBlocks.Events.disable();
@@ -809,7 +829,9 @@ class Blocks extends React.Component {
                         }
                     }
 
-                    this.updateToolbox();
+                    // Defer the flyout rebuild until events are re-enabled
+                    // (issue #719) — see toolboxNeedsUpdate above.
+                    toolboxNeedsUpdate = true;
                 }
             }
             // === Smalruby: End of Ruby-converted block positioning ===
@@ -830,6 +852,29 @@ class Blocks extends React.Component {
         } finally {
             this.ScratchBlocks.Events.enable();
         }
+
+        // === Smalruby: Start of Ruby-converted toolbox update deferral ===
+        // Now that events are enabled, rebuild the toolbox/flyout so the
+        // flyout workspace's create events (e.g. data_variable reporters for
+        // variables created by the Ruby -> blocks conversion) are fired and
+        // reach runtime.flyoutBlocks / runtime.monitorBlocks. Running this
+        // inside the disable window silently dropped those events, leaving
+        // monitor checkboxes inert for newly created variables (issue #719).
+        if (toolboxNeedsUpdate) {
+            try {
+                this.updateToolbox();
+            } catch (error) {
+                // Keep the original swallow-and-log semantics this call had
+                // when it lived inside the try block above: a toolbox
+                // rebuild failure must not break the rest of the workspace
+                // update (metrics restore, clearUndo, listener re-add).
+                if (error.message) {
+                    error.message = `Workspace Update Error: ${error.message}`;
+                }
+                log.error(error);
+            }
+        }
+        // === Smalruby: End of Ruby-converted toolbox update deferral ===
 
         if (!fromRuby &&
             this.props.vm.editingTarget &&

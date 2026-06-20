@@ -8,9 +8,30 @@
 |---|---|
 | 主用途 | devcontainer の中で開発 (Claude Code, npm, git すべて中で完結) |
 | エディタ | devpod ssh + tmux (VS Code Dev Containers でも可) |
+| **ホスト側ターミナル** | **iTerm2 必須**（macOS 標準 Terminal.app は OSC 52 非対応のためクリップボード連携不可） |
 | host から見える環境 | ブラウザ (port forwarding 経由)、git の push/PR (gh CLI 経由)、CDK deploy |
 | 採用していないもの | `docker compose run --rm app ...`, `bin/dx`, `bin/setup-worktree` (compose 前提なので不要) |
 | 例外的に host で必要 | `docker compose` 自体は dev server を host から開きたい人のために残してあるが、本人は使わない |
+
+### iTerm2 のクリップボード設定（初回のみ）
+
+```
+iTerm2 > Preferences > General > Selection >
+    ☑ Applications in terminal may access clipboard
+```
+
+これを有効にしないと tmux コピーがホストのクリップボードに届かない。
+
+### git の push 認証 (自動設定)
+
+コンテナ内の `git push` は **gh のクレデンシャルヘルパー経由**で認証する。`post-create.sh` が
+`git config --local credential.https://github.com.helper '!gh auth git-credential'` を設定するため、
+通常どおり `git push origin <branch>` で push できる（URL へのトークン埋め込み不要）。
+
+- ホストの `~/.gitconfig` は読み取り専用バインドマウント (`fakeowner ro`) なので
+  `gh auth setup-git`（global 書き込み）は使えない → repo-local 設定で回避している。
+- git push も `gh` の issue/PR 作成も同一の `GH_TOKEN` に一本化される。
+- `gh auth status` で `Logged in ... (GH_TOKEN)` を確認できれば push も通る。
 
 ## 起動からの流れ (毎日のルーチン)
 
@@ -40,8 +61,12 @@ devpod up . --ide none             # 初回 build はかかる、以降は数秒
 ### 3. tmux で入って作業
 
 ```bash
-devpod ssh smalruby3-editor -- bash -lc 'tmux new -A -s work'
+devpod ssh smalruby3-editor
 ```
+
+SSH ログイン時に `.bash_profile` の自動アタッチ設定が働き、`work` セッションに
+入る（なければ新規作成）。`-- bash -lc 'tmux ...'` は TTY が割り当てられないため
+tmux が起動しない。
 
 container 内で:
 ```bash
@@ -75,7 +100,7 @@ compose で動かしている場合に違いを理解しておくため。
 | `docker compose run` でテスト | `docker compose run --rm app npm test` | container 内で `npm test` |
 | 単独のフリー仕事 (curl 確認等) | host 上で実行 | 任意。container 内でも OK |
 | Playwright MCP | host の Playwright が動く想定 | host の Playwright が container の `localhost:8601` (forwardPorts) を見る |
-| CDK deploy | host の `aws-vault` 等で | **同じく host で実行** (container には `~/.aws` を mount していないため) |
+| CDK deploy | host の `aws-vault` 等で | **container 内で AWS IAM Identity Center (SSO) ログインして実行**。`bin/setup-aws-sso` で `~/.aws/config` を生成 → `aws sso login --sso-session smalruby --use-device-code` の URL をホストのブラウザで承認 → 一時クレデンシャルがコンテナ内にキャッシュされる (詳細: `.claude/rules/infra/development.md` の AWS Credentials)。host で実行してもよい |
 
 ### named volume の共有挙動 (重要)
 
@@ -229,7 +254,7 @@ devpod では **複数 workspace が同時に container 起動可能**。これ�
 |---|---|---|
 | `bin/dx bash -c "..."` の手軽さ | container 内で同じことを 1 コマンドで | host 上 docker run が不便なので tmux に入って実行 |
 | 1 つの container で全 worktree を切替使用 | 各 worktree が独立 container | devpod の workspace 設計上 |
-| host の `~/.aws` を使った CDK deploy を container 内から | **そのまま host で実行** | secret leak 防止のため container には mount しない |
+| host の `~/.aws` を使った CDK deploy を container 内から | **container 内で SSO ログインして deploy** (`bin/setup-aws-sso` → `aws sso login --sso-session smalruby`) | host の `~/.aws` は mount しない (secret leak 防止)。代わりに IAM Identity Center の一時クレデンシャルをコンテナ内に取得する |
 | host の Claude Code 認証を共有 | container 内で別途ログイン | host secrets 持ち込み禁止原則 |
 | smalruby3 (Ruby gem) の SDL2 GUI | host で動かす (X server / SDL2 が container 内に無い) | devcontainer は GUI 想定外 |
 | docker compose の他サービス (`infra`, `smalruby3-gui`) との同時起動 | devpod は `app` 相当のみ。他サービスは host から `docker compose up <service>` | devcontainer は単一サービス |
