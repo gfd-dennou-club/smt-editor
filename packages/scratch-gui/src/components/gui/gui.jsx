@@ -589,7 +589,6 @@ const GUIComponent = props => {
                                                 id="gui.gui.codeTab"
                                             />
                                         </Tab>
-					{/*					
                                         <Tab
                                             className={tabClassNames.tab}
                                             onClick={onActivateCostumesTab}
@@ -614,8 +613,6 @@ const GUIComponent = props => {
                                                 />
                                             )}
                                         </Tab>
-					 */}
-					{/*
                                         <Tab
                                             className={tabClassNames.tab}
                                             onClick={onActivateSoundsTab}
@@ -632,7 +629,6 @@ const GUIComponent = props => {
                                                 id="gui.gui.soundsTab"
                                             />
                                             </Tab>
-					 */}
                                         <Tab
                                             className={tabClassNames.tab}
                                             onClick={onActivateRubyTab}
@@ -740,7 +736,6 @@ const GUIComponent = props => {
                                         <Watermark />
                                     </Box>
                                 </TabPanel>
-					{/*					
                                 <TabPanel
                                     className={tabClassNames.tabPanel}
                                     role="tabpanel"
@@ -765,7 +760,6 @@ const GUIComponent = props => {
                                             vm={vm}
                                         /> : null}
                                 </TabPanel>
-					*/}
                                 <TabPanel
                                     className={tabClassNames.tabPanel}
                                     role="tabpanel"
