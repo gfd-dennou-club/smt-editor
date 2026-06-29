@@ -205,31 +205,19 @@ The mesh v2 extension uses AWS AppSync for real-time collaboration:
 
 マーカーの書式・ルールは `.claude/rules/code-style.md` の「Smalruby Marker Comments」を参照。
 
-**重要**: Smalruby 固有ファイル（`smalruby-prettier-files.md` に記載されたファイル）にはマーカー不要。
-このセクションに記載するのは **upstream ファイルに埋め込んだマーカーのみ**。
+**upstream ファイルに埋め込んだ scratch-vm のマーカー一覧は `docs/maintenance/smalruby-markers-vm.md`** に
+ある（実装中に頻繁に編集するため、Claude Code の「設定ファイル編集」確認プロンプトで自動実行が
+止まらないよう `.claude/` の外に置く）。マーカーを追加・削除したらそのファイルを更新する。
 
-### 現在のマーカー一覧
-
-| ファイル | 機能名 | 説明 |
-|----------|--------|------|
-| `src/extension-support/extension-manager.js` | extension registration | Smalruby 拡張機能の登録 |
-| `src/blocks/scratch3_operators.js` | regex support | operator_contains で正規表現マッチングをサポート |
-| `src/engine/comment.js` | toXML modernization | Blockly v12 対応: `pinned="${!minimized}"` (cherry-pick from upstream spork@29bdbd1fe) + (0,0) 時の x/y 属性省略 (Smalruby 独自) |
-| `src/engine/runtime.js` | toolboxitemid for extension categories | Blockly v12 対応: 拡張機能のカテゴリ XML に `toolboxitemid` 属性を追加。Blockly v12 の ContinuousToolbox は `toolboxitemid` から id を読むため、未指定だと `blockly-XXX` の auto-id が StatusIndicatorLabel.extensionId に伝搬し、`!` 接続モーダルが拡張機能を見つけられず scanning で固まる |
-
-### 関連ファイル
-
-マーカーで囲まれたコードが参照するファイル:
-- `src/extension-support/smalruby-extensions.js` — extension-manager.js のマーカーから参照
-- `test/unit/blocks_operators_regex.js` — scratch3_operators.js の regex support のテスト
+**重要**: Smalruby 固有ファイル（`packages/scratch-vm/.prettierignore` のホワイトリストに含まれるファイル）には
+マーカー不要。記録するのは upstream ファイルに埋め込んだマーカーのみ。
 
 ## Prettier (Code Formatting)
 
 Smalruby 固有ファイルのみに Prettier を適用。upstream ファイルは `.prettierignore` で除外。
 
-**新しい Smalruby 固有ファイルを追加した場合は、必ず以下を更新すること:**
-1. `packages/scratch-vm/.prettierignore` — ホワイトリストに追加
-2. `.claude/rules/scratch-vm/smalruby-prettier-files.md` — 一覧に追加
+**新しい Smalruby 固有ファイルを追加した場合は、`packages/scratch-vm/.prettierignore` の
+ホワイトリストに追加すること**（`.prettierignore` が対象ファイルの唯一の真実）。
 
 ```bash
 # フォーマット実行
