@@ -70,7 +70,7 @@ class RubyUploader extends React.Component {
             })
         }).then(r => r.json().then(j => {
             // console.table(j);
-            window.open(`https://ceres.epi.it.matsue-ct.ac.jp/writer?id=${j.id}`, '_blank', 'noopener');
+            window.open(`https://kaniwriter.poporon.org/?id=${j.id}`, '_blank', 'noopener');
         }))
             .catch(r => {
             // eslint-disable-next-line no-console

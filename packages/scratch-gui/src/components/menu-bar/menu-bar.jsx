@@ -867,55 +867,15 @@ class MenuBar extends React.Component {
                                                 />
                                             </MenuItem>
                                         )}</SB3Downloader>
-{/* 1. サーバーに保存 */}
-<MenuItem
-    onClick={() => {
-        const password = prompt("共通パスワードを入力してください：");
-        if (password === null) return;
 
-        const filename = this.props.projectTitle || "project";
-        
-        // 画面からプロジェクトのバイナリを取得
-        this.props.vm.saveProjectSb3().then(content => {
-            const formData = new FormData();
-            formData.append("password", password);
-            formData.append("filename", filename);
-            formData.append("file", content, `${filename}.sb3`);
-
-            fetch("/smt_storage.php?action=save", {
-                method: "POST",
-                body: formData
-            })
-
-	    .then(res => res.json()) // 最初からJSONとして解析する
-            .then(json => {
-                // サーバーがエラー（errorキー）を返してきた場合
-                if (json.error) {
-                    alert(`保存に失敗しました: ${json.error}`);
-                } 
-                // サーバーが成功（successキー）を返してきた場合
-                else if (json.success) {
-                    alert(json.success); // 「サーバーへの保存に成功しました！...」を表示
-                }
-            })
-            .catch(err => {
-                // 通信自体が失敗した場合（ネットワークエラーなど）
-                alert(`通信エラーが発生しました: ${err.message}`);
-            });
-        });
-    }}
->
-    サーバーに保存
-</MenuItem>
-
-{/* 2. サーバーから呼び出し */}
+{/* サーバーから呼び出し */}
 <MenuItem
     onClick={() => {
         const password = prompt("共通パスワードを入力してください：");
         if (password === null) return;
 
         // 1. サーバーからファイル一覧を取得
-        fetch(`/smt_storage.php?action=list&password=${encodeURIComponent(password)}`)
+        fetch(`https://mrubyc.gfd-dennou.org/smt_storage.php?action=list&password=${encodeURIComponent(password)}`)
         .then(async res => {
 
             if (!res.ok) {
@@ -973,7 +933,7 @@ class MenuBar extends React.Component {
                 const selectedFilename = select.value;
                 if (!selectedFilename) return alert("ファイルを選択してください。");
 
-                fetch(`/smt_storage.php?action=load&password=${encodeURIComponent(password)}&filename=${encodeURIComponent(selectedFilename)}`)
+                fetch(`https://mrubyc.gfd-dennou.org/smt_storage.php?action=load&password=${encodeURIComponent(password)}&filename=${encodeURIComponent(selectedFilename)}`)
                 .then(async res => {
                     if (!res.ok) {
                         const text = await res.text();
@@ -1016,6 +976,48 @@ class MenuBar extends React.Component {
 >
     サーバーから呼び出し
 </MenuItem>
+
+{/* サーバーに保存 */}
+<MenuItem
+    onClick={() => {
+        const password = prompt("共通パスワードを入力してください：");
+        if (password === null) return;
+
+        const filename = this.props.projectTitle || "project";
+        
+        // 画面からプロジェクトのバイナリを取得
+        this.props.vm.saveProjectSb3().then(content => {
+            const formData = new FormData();
+            formData.append("password", password);
+            formData.append("filename", filename);
+            formData.append("file", content, `${filename}.sb3`);
+
+            fetch("https://mrubyc.gfd-dennou.org/smt_storage.php?action=save", {
+                method: "POST",
+                body: formData
+            })
+
+	    .then(res => res.json()) // 最初からJSONとして解析する
+            .then(json => {
+                // サーバーがエラー（errorキー）を返してきた場合
+                if (json.error) {
+                    alert(`保存に失敗しました: ${json.error}`);
+                } 
+                // サーバーが成功（successキー）を返してきた場合
+                else if (json.success) {
+                    alert(json.success); // 「サーバーへの保存に成功しました！...」を表示
+                }
+            })
+            .catch(err => {
+                // 通信自体が失敗した場合（ネットワークエラーなど）
+                alert(`通信エラーが発生しました: ${err.message}`);
+            });
+        });
+    }}
+>
+    サーバーに保存
+</MenuItem>
+
                                     </MenuSection>
                                 </MenuBarMenu>
                             </div>
@@ -1184,13 +1186,13 @@ class MenuBar extends React.Component {
                     </div>
 
 {/* 「ESP32ファームウェア書き込み」メニューを追加 */}
-<div style={{marginLeft: 'auto'}} />
+
 <div
     className={classNames(styles.menuBarItem, styles.hoverable)}
     onClick={() => {
         // 指定されたURLを別タブで開く
         window.open(
-            '/esp32/', 
+            'https://mrubyc.gfd-dennou.org/esp32/', 
             '_blank', 
             'noopener,noreferrer'
         );
