@@ -11,12 +11,19 @@
 const { execFileSync } = require('child_process');
 const { setTimeout: sleep } = require('timers/promises');
 const fs = require('fs');
-const { evaluate, shouldResend, DEFAULT_WATCHDOG, DEFAULT_CLAUDE_COMMAND } = require('./phases');
+const {
+    evaluate, shouldResend, DEFAULT_WATCHDOG, DEFAULT_CLAUDE_COMMAND, phasePromptCommand,
+    shouldSignalCheckpoint, CHECKPOINT_SIGNAL_MESSAGE,
+} = require('./phases');
 
 // claude TUI が「実行中」のときに pane に出る指標（spinner のトークンカウンタ "· ↓"、
 // 中断ヒント "esc to interrupt"）。これらが見えていれば、テキストが変わらなくても
 // 作業中とみなし idle 判定をリセットする。
 const BUSY_RE = /esc to interrupt|·\s*↓/;
+// 対話プロンプト（許可/確認/選択ダイアログ）が pane に出ているか。Claude Code の選択 UI は
+// 「❯ 1. …」の選択肢と「Esc to cancel …」フッターを持つ。busy でなくこれが見えていれば
+// 人間の入力待ち = worker は進めない → HITL に落とす（auto mode でも稀に出る soft_deny 等）。
+const PROMPT_RE = /(^|\n)\s*❯\s*\d+\.\s|Esc to cancel|Do you want to (proceed|create|run|make)/;
 
 function tmux(args, { check = true } = {}) {
     // stderr は握りつぶす（has-session 等の "can't find session" は想定内）
@@ -31,6 +38,18 @@ function tmux(args, { check = true } = {}) {
 
 function hasSession(session) {
     return tmux(['has-session', '-t', session], { check: false }).code === 0;
+}
+
+/**
+ * 生存中の tmux セッション名を一覧する（#953）。孤児 worker 復帰で、daemon crash を
+ * 跨いで生き残った worker セッション（`autopilot-<phase>-<issue>`）を検出するために使う。
+ * tmux サーバーが無い（1 つも session が無い）ときは非ゼロ終了するので、空配列を返す。
+ * @returns {string[]} セッション名の配列
+ */
+function listSessions() {
+    const r = tmux(['list-sessions', '-F', '#{session_name}'], { check: false });
+    if (r.code !== 0 || !r.out) return [];
+    return r.out.split('\n').map((s) => s.trim()).filter(Boolean);
 }
 
 function capture(session) {
@@ -63,7 +82,9 @@ function sendLine(session, text) {
  * @param {string} opts.cwd worktree パス
  * @param {object} opts.env claude に渡す環境（AUTOPILOT_* 等）
  * @param {string} opts.command claude 起動コマンド（既定 'claude --permission-mode acceptEdits'）
- * @param {string} opts.skill 実行スキル名（例 'autopilot-triage'）
+ * @param {string} opts.skill フェーズプロンプト basename（例 'autopilot-triage'。`tools/autopilot/prompts/<skill>.md`）
+ * @param {string} [opts.promptDir] プロンプト配置ディレクトリ（daemon の起動時スナップショットの
+ *   絶対パス等。省略時は worktree 内 `tools/autopilot/prompts`）
  * @param {number} opts.issue 対象 Issue 番号
  * @param {string} opts.resultFile 結果ファイルの絶対パス
  * @param {object} [opts.watchdog] タイマー設定（既定 DEFAULT_WATCHDOG）
@@ -94,7 +115,10 @@ async function runPhase(opts) {
         let sendAttempts = 0;
         let prevPane = null;
         let lastChangeAt = Date.now();
-        const slash = `/${opts.skill} ${opts.issue}`;
+        let promptSince = 0; // 対話プロンプトを最初に検知した時刻（0 = 出ていない）
+        let softSignalSent = false; // checkpoint 信号を送信済みか（試行ごとにリセット・#911）
+        // Skill のスラッシュコマンドではなく、プロンプトファイルを読ませる指示を送る（#プロンプト移設）
+        const slash = phasePromptCommand(opts.skill, opts.issue, opts.promptDir);
 
         let outcome = null;
         while (!outcome) {
@@ -108,6 +132,11 @@ async function runPhase(opts) {
             const busy = BUSY_RE.test(pane);
             if (pane !== prevPane || busy) { lastChangeAt = Date.now(); prevPane = pane; }
             const idleMs = Date.now() - lastChangeAt;
+            // 対話プロンプトが出て人間入力待ちか（busy でない＝作業中でない場合のみ）。
+            // 一度検知したら継続時間を測り、tPromptMs 超で HITL に落とす（evaluate 側）。
+            const prompting = ready && !busy && PROMPT_RE.test(pane);
+            if (prompting) { if (!promptSince) promptSince = Date.now(); } else { promptSince = 0; }
+            const promptingMs = promptSince ? Date.now() - promptSince : 0;
 
             // 起動完了の汎用判定: 非空 & 直近で安定 & 最低ブート時間経過（課題1）
             if (!ready && pane.trim() && idleMs >= cfg.pollMs && elapsedMs >= minBootMs) {
@@ -142,7 +171,16 @@ async function runPhase(opts) {
                 }
             }
 
-            const action = evaluate({ resultPresent, ready, dead, elapsedMs, idleMs, restarts }, cfg);
+            // 協調的チェックポイント（EPIC #906・#911）: soft-limit 超過で 1 回だけ worker に
+            // 「まとめに入れ」信号を送る。多重送信防止（softSignalSent）は shouldSignalCheckpoint
+            // の責務、実際の送信とフラグの立ち上げは呼び出し側（ここ）の責務。
+            if (shouldSignalCheckpoint({ elapsedMs, ready, dead, resultPresent, softSignalSent }, cfg)) {
+                log(`soft-limit exceeded (${elapsedMs}ms) -> send checkpoint signal (#${opts.issue})`);
+                sendLine(opts.session, CHECKPOINT_SIGNAL_MESSAGE);
+                softSignalSent = true;
+            }
+
+            const action = evaluate({ resultPresent, ready, dead, elapsedMs, idleMs, restarts, promptingMs }, cfg);
             if (action.action === 'wait') continue;
             outcome = action;
         }
@@ -152,6 +190,11 @@ async function runPhase(opts) {
             // 結果ファイルは呼び出し側が読む。セッションは後始末。
             killSession(opts.session);
             return { ok: true, action: 'collect', reason: outcome.reason };
+        }
+        if (outcome.action === 'hitl') {
+            // 対話プロンプトで人間入力待ちになった → 質問はさせず即中断し、daemon 側で HITL にする。
+            killSession(opts.session);
+            return { ok: false, action: 'hitl', reason: outcome.reason };
         }
         if (outcome.action === 'fail') {
             killSession(opts.session);
@@ -164,4 +207,4 @@ async function runPhase(opts) {
     }
 }
 
-module.exports = { runPhase, launch, capture, hasSession, killSession, sendLine };
+module.exports = { runPhase, launch, capture, hasSession, listSessions, killSession, sendLine, BUSY_RE, PROMPT_RE };

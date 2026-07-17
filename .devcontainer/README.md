@@ -176,6 +176,69 @@ iptables -L OUTPUT -n --line-numbers    # ルールを確認
 - 一時的に切りたいときは `devcontainer.json` の `postStartCommand` 行をコメントアウト
   (非推奨)。次回起動から firewall 無しになる。
 
+## Playwright MCP (devpod 内外どちらでも動く headless 構成)
+
+リポジトリの `.mcp.json` は `playwright` MCP サーバを **committed 済み**で、devpod 内でも
+ホストでも**追加設定なしで headless 動作**する。実体は薄いラッパー
+`tools/mcp/playwright-mcp.mjs` を経由する:
+
+```json
+"playwright": {
+  "type": "stdio",
+  "command": "node",
+  "args": ["tools/mcp/playwright-mcp.mjs"],
+  "env": {}
+}
+```
+
+### なぜ素の `npx @playwright/mcp@latest` ではダメか (Issue #999)
+
+- `@playwright/mcp@latest` は既定で **headful** 起動する → **display の無い devpod
+  コンテナではブラウザ起動に失敗**する。
+- `--browser chromium --headless` を足しても、その MCP 版がバンドルする playwright-core は
+  **自分専用の新しい chromium リビジョン**を要求し、未導入なら**起動時に
+  `cdn.playwright.dev` からダウンロード**しようとする。このホストは **egress allowlist
+  で `cdn.playwright.dev` を遮断**しているため**ダウンロードに失敗**する
+  （「Playwright was just installed or updated. Please run npx playwright install」で停止）。
+
+### ラッパーが何をするか
+
+`tools/mcp/playwright-mcp.mjs` は、**リポジトリの `playwright`（root `node_modules`）が
+イメージビルド時（firewall 適用前）に既に導入済みの chromium** の実行ファイルパスを
+`require('playwright').chromium.executablePath()` で解決し、それを
+`@playwright/mcp` に `--executable-path <path> --headless` で渡す。
+
+- **devpod 内**: ビルド時導入済み chromium を使うので**追加ダウンロード不要**→ 動く。
+- **ホスト**: 同じ解決でホストの chromium を使う（未導入でもホストは egress 制限が
+  無いので通常どおり取得される）→ 動く。
+- 解決できない場合は `--executable-path` を付けず、MCP 既定挙動へフォールバックする。
+
+疎通確認（コンテナ内、root）:
+
+```bash
+node --test tools/mcp/playwright-mcp.test.mjs          # ラッパーの単体テスト
+claude mcp list                                         # playwright が ✓ connected
+```
+
+### ホストで headful に見たい場合 (opt-in・committed 設定は変えない)
+
+headful はホスト固有なので committed `.mcp.json` には入れない。ホストで
+**HTTP server mode の Playwright MCP** を起動し、コンテナ側は **local scope** で
+上書きする（local が project scope より優先されるので `.mcp.json` は変更不要）:
+
+```bash
+# ホスト側 (iTerm2)。ヘルパースクリプトが用意してある:
+tools/host-playwright-mcp.sh
+# コンテナ側で一度だけ local scope を張る:
+claude mcp add --scope local --transport http playwright http://host.docker.internal:8931/mcp
+# /mcp で Reconnect
+```
+
+`--host 0.0.0.0` 必須・`--allowed-hosts` はポート込みカンマ区切り 1 引数など、
+ハマりどころは `tools/host-playwright-mcp.sh` の先頭コメントに集約してある。
+ホスト Chrome を直接操作する一般的な背景は `.claude/rules/scratch-gui/e2e-test.md`
+（→ memory `reference_host_playwright_mcp.md`）も参照。
+
 ## tmux
 
 ### 設定の構成
@@ -238,6 +301,7 @@ tmux source-file ~/.tmux.conf   # または prefix r
 | ホスト側 | コンテナ内 | 用途 |
 |---|---|---|
 | `~/ghq` | `/ghq` | 関連 OSS の参照・push |
+| `~/.config/smalruby-bot` | 同上 (ro) | GitHub App bot 設定 (非秘密)。rebuild/delete を跨いで永続させる。詳細は下記 |
 | `~/.claude/settings.json` | 同上 (ro) | Claude Code グローバル設定 (host で編集、container は読むだけ) |
 | `~/.claude/skills` | 同上 (ro) | 自作 skills |
 | `~/.claude/plugins` | 同上 (ro) | プラグイン |
@@ -279,6 +343,31 @@ Claude は自動アップデートしない。version 固定は IDE 側で featu
 - 本 devcontainer はこの原則に沿っている: Claude 認証は in-container ログイン、AWS は
   in-container SSO ログイン、`~/.gitconfig` は **read-only**、gh は `GH_TOKEN` env のみ
   (`~/.config/gh` には PAT 本体を含めない)。
+
+### GitHub App bot 設定を rebuild を跨いで永続させる
+
+autopilot や bot 名義コミット (`bin/bot-git` / `bin/bot-token`) が使う
+`~/.config/smalruby-bot/` は、何もしないと **コンテナ fs 上** に置かれ、
+devcontainer rebuild / `devpod delete` で消える (毎回作り直しになる)。
+
+永続させたい場合は、**秘密鍵を AWS Secrets Manager に逃がした上で**、非秘密の
+`config` だけを host から **read-only** bind マウントする (上記「個人マウント」)。
+
+1. **秘密鍵を Secrets Manager 化する**: `~/.config/smalruby-bot/config` に
+   `PRIVATE_KEY_SECRET_ID=<secret-id>` (+ 必要なら `AWS_PROFILE` / `AWS_REGION`) を
+   設定する。`bin/bot-token` はこれがあれば AWS から鍵を取得し、ローカル
+   `private-key.pem` は不要になる (手順は `.claude/rules/github-app-bot.md` /
+   `docs/github-app-bot/README.md`)。
+2. **config を host に置く**: `~/.config/smalruby-bot/config` を **host 側** に用意する
+   (中身は APP_ID / INSTALLATION_ID / APP_SLUG / PRIVATE_KEY_SECRET_ID 等の非秘密設定)。
+3. **ro マウントをアンコメント**: `devcontainer.json` の `~/.config/smalruby-bot` 行を
+   有効化して rebuild する。
+
+なぜ **read-only** か: `bin/bot-token` はこのディレクトリを **読むだけ**
+(発行済み token のキャッシュは `~/.cache/smalruby-bot/` = 別の named volume 側で、
+これは rebuild を跨いで残る)。ro にすることで、コンテナ側の誤動作で host の設定を
+消す事故を防ぐ (上記「rw でマウントしない」原則の適用)。生の `.pem` は host にも
+マウントにも載せないので、共有されるのは非秘密の識別子だけになる。
 
 ### Claude Code memory の共有メカニズム
 

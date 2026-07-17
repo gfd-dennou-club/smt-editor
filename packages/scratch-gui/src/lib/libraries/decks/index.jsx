@@ -3,8 +3,6 @@ import {FormattedMessage} from 'react-intl';
 
 // Tutorial thumbnails: Avoid using any text that would need to be
 // translated in thumbnails.
-// Intro
-import libraryIntro from './thumbnails/getting-started.jpg';
 // Chat App tutorials
 import libraryChat1Basic1 from './thumbnails/chat-1-basic-1.jpg';
 import libraryChat1Basic2 from './thumbnails/chat-1-basic-2.jpg';
@@ -17,93 +15,22 @@ import libraryChat3Mesh1 from './thumbnails/chat-3-mesh-1.jpg';
 import libraryChat3Mesh2 from './thumbnails/chat-3-mesh-2.jpg';
 import libraryChat3Mesh3 from './thumbnails/chat-3-mesh-3.jpg';
 import libraryChat3Mesh1ExternalKairyudo from './thumbnails/chat3-mesh1-external-kairyudo.png';
-// Ruby Basics 1: 計算してみよう
-import libraryRubyBasics1Numbers from './thumbnails/ruby-basics-1-numbers.jpg';
-import libraryRubyBasics1TryRuby from './thumbnails/ruby-basics-1-tryruby.png';
 import {CATEGORIES} from '../tutorial-tags';
 
-// Green flag icon for inline use in tutorial step titles
-import greenFlagIcon from '../../../components/green-flag/icon--green-flag.svg';
+import GreenFlagIcon from './green-flag-icon.jsx';
 
-const GreenFlagIcon = () => (
-    <img
-        src={greenFlagIcon}
-        style={{
-            display: 'inline-block',
-            height: '1.2em',
-            verticalAlign: 'middle',
-            margin: '0 0.1em'
-        }}
-    />
-);
+// Deck definitions are split into per-category modules so that
+// concurrent tutorial work doesn't collide on this file (issue #932).
+// block-series.jsx / dncl.jsx are empty stubs for Phase 3 (#680) / Phase 4
+// (#681) — they're wired in ahead of time so those phases only need to
+// edit their own category file.
+import gettingStarted from './categories/getting-started.jsx';
+import rubyBasics from './categories/ruby-basics.jsx';
+import blockSeries from './categories/block-series.jsx';
+import dncl from './categories/dncl.jsx';
 
 const decks = {
-    'intro-getting-started': {
-        name: (
-            <FormattedMessage
-                defaultMessage="さあ、始めましょう"
-                description="Name for the 'Getting Started' tutorial"
-                id="gui.howtos.getting-started.name"
-            />
-        ),
-        tags: ['ruby', 'はじめて'],
-        category: CATEGORIES.gettingStarted,
-        img: libraryIntro,
-        nameMessageId: 'gui.howtos.getting-started.name',
-        steps: [
-            {
-                title: (
-                    <FormattedMessage
-                        defaultMessage="ブロックの次はルビー(Ruby)にチャレンジしてみよう！"
-                        description="Step 1: Introduce Ruby tab"
-                        id="gui.howtos.getting-started.step.rubyTab"
-                    />
-                ),
-                image: 'introRubyTab',
-                startTutorial: true,
-                animationTarget: 'startTutorialButton'
-            },
-            {
-                title: (
-                    <FormattedMessage
-                        defaultMessage="ルビーを表示してプログラムを入力してみよう"
-                        description="Step 2: Create bounce program"
-                        id="gui.howtos.getting-started.step.bounceCode"
-                    />
-                ),
-                image: 'introBounceCode',
-                code: `when_flag_clicked do
-  loop do
-    move(10)
-    bounce_if_on_edge
-  end
-end`,
-                animationTarget: 'insertCodeButton'
-            },
-            {
-                title: (
-                    <FormattedMessage
-                        defaultMessage="実行ボタンを押してプログラムを実行しよう"
-                        description="Step 3: Run the program"
-                        id="gui.howtos.getting-started.step.runRuby"
-                    />
-                ),
-                image: 'introRunRuby',
-                animationTarget: 'nextButton'
-            },
-            {
-                title: (
-                    <FormattedMessage
-                        defaultMessage="ネコが行ったり来たりするプログラムができました🎉"
-                        description="Step 4: Celebrate first program"
-                        id="gui.howtos.getting-started.step.firstProgram"
-                    />
-                ),
-                image: 'introFirstProgram'
-            }
-        ],
-        urlId: 'getStarted'
-    },
+    ...gettingStarted,
 
     // ─── Chat App Tutorial 1-Basic-1: メッセージを送ってみよう（コード入力版） ──
     'chat-1-basic-1': {
@@ -1277,119 +1204,9 @@ end`,
         urlId: 'chat3Mesh3'
     },
 
-    // ─── Ruby Basics 1: Rubyで計算してみよう ──────────────────────────────────
-    'ruby-basics-1-numbers': {
-        name: (
-            <FormattedMessage
-                defaultMessage="Rubyで計算してみよう"
-                description="Name for Ruby Basics 1: do arithmetic with puts"
-                id="gui.howtos.ruby-basics-1-numbers.name"
-            />
-        ),
-        tags: ['ruby'],
-        category: CATEGORIES.rubyBasics,
-        img: libraryRubyBasics1Numbers,
-        nameMessageId: 'gui.howtos.ruby-basics-1-numbers.name',
-        // Auto-switch to the Ruby tab in Ruby (not DNCL/furigana) mode when
-        // the user opens this tutorial — see docs/tutorial/improvement-plan.md
-        // "チュートリアル起動時の環境セットアップ".
-        setup: {
-            tab: 'ruby',
-            rubyMode: 'ruby'
-        },
-        allowedBlocks: {
-            motion: [],
-            looks: ['looks_sayforsecs', 'looks_say'],
-            sound: [],
-            event: ['event_whenflagclicked'],
-            control: [],
-            sensing: [],
-            operators: []
-        },
-        steps: [
-            {
-                title: (
-                    <FormattedMessage
-                        defaultMessage="Rubyで計算してみよう！"
-                        description="Ruby Basics 1 Step 1: Intro to arithmetic with puts"
-                        id="gui.howtos.ruby-basics-1-numbers.step1.title"
-                    />
-                ),
-                image: 'rubyBasics1Step1',
-                startTutorial: true,
-                animationTarget: 'startTutorialButton'
-            },
-            {
-                title: (
-                    <FormattedMessage
-                        defaultMessage="まずは「puts 2 + 6」を実行してみよう"
-                        description="Ruby Basics 1 Step 2: Insert first puts code"
-                        id="gui.howtos.ruby-basics-1-numbers.step2.title"
-                    />
-                ),
-                image: 'rubyBasics1Step2',
-                code: `when_flag_clicked do
-  puts 2 + 6
-end`,
-                animationTarget: 'insertCodeButton'
-            },
-            {
-                title: (
-                    <FormattedMessage
-                        defaultMessage="{greenFlag}を押すと、ネコが「8」としゃべるよ"
-                        description="Ruby Basics 1 Step 3: Run the program"
-                        id="gui.howtos.ruby-basics-1-numbers.step3.title"
-                        values={{greenFlag: <GreenFlagIcon />}}
-                    />
-                ),
-                image: 'rubyBasics1Step3',
-                animationTarget: 'nextButton'
-            },
-            {
-                title: (
-                    <FormattedMessage
-                        defaultMessage="他の計算も試してみよう（かけ算・わり算・ひき算）"
-                        description="Ruby Basics 1 Step 4: More arithmetic operations"
-                        id="gui.howtos.ruby-basics-1-numbers.step4.title"
-                    />
-                ),
-                image: 'rubyBasics1Step4',
-                code: `when_flag_clicked do
-  puts 4 * 10
-  puts 30 / 4
-  puts 5 - 12
-end`,
-                animationTarget: 'insertCodeButton'
-            },
-            {
-                title: (
-                    <FormattedMessage
-                        defaultMessage="数字を好きなものに変えて、自分だけの計算をしてみよう"
-                        description="Ruby Basics 1 Step 5: Modify the numbers"
-                        id="gui.howtos.ruby-basics-1-numbers.step5.title"
-                    />
-                ),
-                image: 'rubyBasics1Step5',
-                animationTarget: 'nextButton'
-            },
-            {
-                externalResources: {
-                    tryruby: {
-                        url: 'https://try.ruby-lang.org/',
-                        img: libraryRubyBasics1TryRuby,
-                        name: (
-                            <FormattedMessage
-                                defaultMessage="外部サイト「try ruby」で詳しくRubyを学ぶ"
-                                description="External resource: TryRuby online playground"
-                                id="gui.howtos.ruby-basics-1-numbers.external.tryruby.name"
-                            />
-                        )
-                    }
-                }
-            }
-        ],
-        urlId: 'rubyBasics1Numbers'
-    }
+    ...rubyBasics,
+    ...blockSeries,
+    ...dncl
 };
 
 export default decks;

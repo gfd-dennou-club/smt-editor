@@ -58,6 +58,8 @@ import WelcomeModalHOC from '../../containers/welcome-modal-hoc.jsx';
 // === Smalruby: End of welcome modal ===
 import URLLoaderModal from '../url-loader-modal/url-loader-modal.jsx';
 import KoshienTestModal from '../koshien-test-modal/koshien-test-modal.jsx';
+import KoshienSettingsModal from '../koshien-settings-modal/koshien-settings-modal.jsx';
+import KoshienMockPanel from '../../containers/koshien-mock-panel.jsx';
 import RubyTab from '../../containers/ruby-tab.jsx';
 
 import layout, {STAGE_DISPLAY_SIZES, STAGE_SIZE_MODES} from '../../lib/layout-constants';
@@ -211,6 +213,7 @@ const GUIComponent = props => {
         isTelemetryEnabled,
         isTotallyNormal,
         koshienTestModalVisible,
+        koshienSettingsModalVisible,
         loading,
         logo,
         manuallySaveThumbnails,
@@ -242,6 +245,7 @@ const GUIComponent = props => {
         onRequestCloseCostumeLibrary,
         onRequestCloseDebugModal,
         onRequestCloseKoshienTestModal,
+        onRequestCloseKoshienSettingsModal,
         onRequestCloseTelemetryModal,
         onRequestCloseTipsLibrary,
         onRequestCloseUrlLoaderModal,
@@ -255,6 +259,7 @@ const GUIComponent = props => {
         onTelemetryModalOptOut,
         onUpdateProjectThumbnail,
         onUrlLoaderSubmit,
+        urlLoaderLoading, // === Smalruby: url loader loading state (#972) ===
         // === Smalruby: Start of Redux action props prevention ===
         // When adding new Redux actions in mapDispatchToProps that start with "on",
         // add them here to prevent React warnings about unknown event handler props
@@ -375,6 +380,7 @@ const GUIComponent = props => {
                 ) : null}
                 {urlLoaderModalVisible ? (
                     <URLLoaderModal
+                        loading={urlLoaderLoading} // === Smalruby: url loader loading state (#972) ===
                         onRequestClose={onRequestCloseUrlLoaderModal}
                         onLoadUrl={onUrlLoaderSubmit}
                     />
@@ -382,6 +388,12 @@ const GUIComponent = props => {
                 {koshienTestModalVisible ? (
                     <KoshienTestModal
                         onRequestClose={onRequestCloseKoshienTestModal}
+                    />
+                ) : null}
+                {koshienSettingsModalVisible ? (
+                    <KoshienSettingsModal
+                        vm={vm}
+                        onRequestClose={onRequestCloseKoshienSettingsModal}
                     />
                 ) : null}
             </StageWrapper>
@@ -405,6 +417,7 @@ const GUIComponent = props => {
                     ) : null}
                     {urlLoaderModalVisible ? (
                         <URLLoaderModal
+                            loading={urlLoaderLoading} // === Smalruby: url loader loading state (#972) ===
                             onRequestClose={onRequestCloseUrlLoaderModal}
                             onLoadUrl={onUrlLoaderSubmit}
                         />
@@ -414,6 +427,13 @@ const GUIComponent = props => {
                             onRequestClose={onRequestCloseKoshienTestModal}
                         />
                     ) : null}
+                    {koshienSettingsModalVisible ? (
+                        <KoshienSettingsModal
+                            vm={vm}
+                            onRequestClose={onRequestCloseKoshienSettingsModal}
+                        />
+                    ) : null}
+                    <KoshienMockPanel vm={vm} />
                     {loading ? (
                         <Loader />
                     ) : null}
@@ -876,6 +896,7 @@ GUIComponent.propTypes = {
     isShared: PropTypes.bool,
     isTotallyNormal: PropTypes.bool,
     koshienTestModalVisible: PropTypes.bool,
+    koshienSettingsModalVisible: PropTypes.bool,
     loading: PropTypes.bool,
     logo: PropTypes.string,
     manuallySaveThumbnails: PropTypes.bool,
@@ -900,6 +921,7 @@ GUIComponent.propTypes = {
     onRequestCloseCostumeLibrary: PropTypes.func,
     onRequestCloseDebugModal: PropTypes.func,
     onRequestCloseKoshienTestModal: PropTypes.func,
+    onRequestCloseKoshienSettingsModal: PropTypes.func,
     onRequestCloseTelemetryModal: PropTypes.func,
     onRequestCloseTipsLibrary: PropTypes.func,
     onRequestCloseUrlLoaderModal: PropTypes.func,
@@ -918,6 +940,7 @@ GUIComponent.propTypes = {
     onToggleLoginOpen: PropTypes.func,
     onUpdateProjectThumbnail: PropTypes.func,
     onUrlLoaderSubmit: PropTypes.func,
+    urlLoaderLoading: PropTypes.bool, // === Smalruby: url loader loading state (#972) ===
     platform: PropTypes.oneOf(Object.keys(PLATFORM)),
     renderLogin: PropTypes.func,
     rubyTabVisible: PropTypes.bool,

@@ -10,7 +10,9 @@ autopilot は、複数の GitHub Issue を Claude が**並行**して
 専用 **GitHub Projects v2「Autopilot」** のフィールドで一元管理する。
 
 設計の出発点となった課題と意思決定の経緯は Issue #760（EPIC）に集約されている。
-スキル/Runner が従う詳細な契約は [`autonomous-contract.md`](./autonomous-contract.md) を参照。
+プロンプト/Runner が従う詳細な契約は [`autonomous-contract.md`](./autonomous-contract.md)、
+**状態遷移とそのトリガーの正準表**は [`state-machine.md`](./state-machine.md) を参照
+（全状態の「出口」= 固着が無いことは `tools/autopilot/test/state-machine.test.js` が機械的に担保する）。
 
 ---
 
@@ -41,8 +43,9 @@ autopilot は、複数の GitHub Issue を Claude が**並行**して
 | **Claude runner** | 対話 Claude Code を tmux で起動し send-keys で駆動、watchdog で監視 | `tools/autopilot/src/runner.js` |
 | **Web モニタ** | item 一覧・状態・ログ閲覧・手動操作（daemon が `GET /` で配信） | `tools/autopilot/src/monitor.js` |
 | **CLI** | 単一フェーズを単一 Issue で実行（動作確認・ドライラン） | `tools/autopilot/bin/autopilot` |
-| **フェーズ・スキル** | 各フェーズの「頭脳」。非対話で1フェーズを遂行 | `.claude/skills/autopilot-*` |
+| **フェーズ・プロンプト** | 各フェーズの「頭脳」。非対話で1フェーズを遂行 | `tools/autopilot/prompts/autopilot-*` |
 | **worktree** | Issue ごとの隔離作業場（軽量・即作成） | `bin/autopilot-worktree` |
+| **UI 確認ヘルパー** | worker が headless bundled chromium で UI を確認（スクショ `tmp/`・Playwright MCP は使わない・#891） | `tools/autopilot/bin/pw-check` |
 
 > daemon は常駐の単独プロセスとして起動する。並行数は設定可能（既定 2、必要に応じて増やす）。
 
@@ -67,34 +70,100 @@ No Status(未設定) → Backlog / Icebox → Sprint Backlog(autopilot キュー
 | Sprint Backlog | autopilot のキュー（着手対象） |
 | In Progress | 実装〜PR〜敵対的レビュー |
 | Review | 人間レビュー待ち |
-| DoD | approve 後の headful 検証（daemon が引き継ぎ生成 → ホスト Claude が検証・#821） |
+| DoD | approve 後の DoD 検証（一般 UI は verify が headless で自己完結・#891 / 音・autoplay 等の実 Chrome 必須ケースのみ daemon がホスト引き継ぎ生成・#821） |
 | Close | 完了（merge 後） |
 
 > 実装メモ: Status 未設定（UI の「No Status」列）は内部的に `'New Item'` という sentinel で
 > 正規化して扱う（`tools/autopilot/src/phases.js` の `status || 'New Item'`）。本ドキュメントの
 > 表記は UI に合わせて「No Status」で統一する。
 
-### AI Status — AI 専用の細フェーズ（各値 ≈ 1 スキル）
+### AI Status — AI 専用の細フェーズ（各値 ≈ 1 プロンプト）
 
-人間は Status を見れば十分。AI Status は daemon が「次に呼ぶスキル」を引くための内部状態で、
+人間は Status を見れば十分。AI Status は daemon が「次に呼ぶプロンプト」を引くための内部状態で、
 Issue を状態の正とすることで daemon が落ちても現在地が分かる。
 
-| AI Status | 対応スキル | 主な Status |
+| AI Status | 対応プロンプト | 主な Status |
 |---|---|---|
 | Triaging | autopilot-triage | No Status |
+| Discussing | autopilot-discuss（実装前ディスカッション） | No Status / Backlog |
 | Understanding | autopilot-understand | No Status / Backlog（EPIC） |
 | Decomposing | autopilot-decompose | Backlog（EPIC→sub-issue） |
 | EPIC Decomposed | —（親トラッカー化） | In Progress（EPIC） |
 | Implementing / Creating PR | autopilot-implement | In Progress |
 | Self-Reviewing | autopilot-review | In Progress |
 | Addressing Comments | autopilot-address-review | Review / DoD（NG 差し戻し） |
-| Running DoD | daemon `applyDodHandoffs`（引き継ぎ生成。autopilot-verify は手動 inject 用に残置） | DoD |
+| Running DoD | autopilot-verify（一般 UI は headless Playwright で自己完結・#891）／ 音・autoplay 等は daemon `applyDodHandoffs`（ホスト引き継ぎ生成） | DoD |
+| Awaiting Continuation | 元フェーズ（例 implement）を再 dispatch（協調的チェックポイント・EPIC #906。soft-limit で worker が安全に中断し、常に HITL で継続確認してから再開） | In Progress |
 
 ### その他フィールド
 
 - **Size**（small / middle / large）— leaf Issue の重み付け（EPIC は付けない）
 - **Kind**（EPIC / Issue）
 - **Current Step / Worktree / Tmux Window**（text, observability）
+
+---
+
+## enroll モデル — 開発者個人ごとの daemon と担当者ベースの取り分け
+
+プロジェクトに携わる**開発者個人個人が自分の autopilot（daemon）を起動する**運用を想定する。
+daemon に `--assignee <GitHub login>`（または env `AUTOPILOT_ASSIGNEE`）を渡すと:
+
+- **自分がオーナーの item だけ**を処理する。オーナー = **assignee の辞書順先頭**
+  （複数 assignee の Issue を複数開発者の daemon が同時に拾わない決定的タイブレーク）。
+  本文に `autopilot-assignee: <login>` ディレクティブがあり、それが Assignees に含まれて
+  いれば辞書順先頭より優先してオーナーになる（下記ディレクティブ表・#938）。
+- **未 assign の item は誰も拾わない**。Issue を autopilot に処理させる enroll 手順は
+  「① Project に追加 → ② 担当者を assign → ③ Status を設定（例 Sprint Backlog）」。
+- `--assignee` 未指定は従来どおり全件処理（単一 daemon 運用）。
+- **共同担当（オーナーでない Assignees）は自分の monitor で観察できる**（dispatch はしない）。
+  Web モニタの俯瞰ボードは「自分がオーナー」ではなく「**自分が Assignees のいずれか**」の
+  item を表示する（下記「俯瞰ボード」参照）。ある機能に詳しくない担当が別の担当に駆動を
+  引き継ぎつつ、進捗だけ自分の monitor で見続けたいケースを想定する。
+
+### 投入順は Project Board view の見た目
+
+着手候補は **Board view の見た目**（Status 列順 = Status フィールドの option 定義順、
+列内は Project の手動並び順）で評価する。Project 上で上に置いた item から処理される。
+
+### 本文ディレクティブ（行頭のみ反応）
+
+Issue 本文の**行頭**に書くディレクティブで挙動を制御できる（本文中の言及では発火しない。
+行頭からの HTML コメント `<!-- ... -->` 内でも可）:
+
+| ディレクティブ | 意味 |
+|---|---|
+| `autopilot-base: <branch>` | PR 先・worktree 分岐元のベースブランチ（EPIC サブ Issue を親 epic ブランチに積む等） |
+| `autopilot-after: #N [#M ...]` | 依存宣言。N（と M …）が完了（GitHub closed / Project Close・Done）するまで着手しない。ブロック中は次点候補が繰り上がる。**待ち Issue は Sprint Backlog に置く**（Backlog はそもそも着手候補にならないので先行 Close で自動着手しない）。ゲート中は daemon が `⏳ waiting` ラベルを付け、先行 Close で自動除去 → 次 tick で着手 |
+| `autopilot-assignee: <login>`（`@login` も可） | 複数 assignee の Issue でオーナー（駆動する担当）を明示指定する（#938）。指定 login が Assignees に含まれていなければ無視して従来どおり辞書順先頭。指定した担当の daemon（`--assignee <login>`）だけが駆動し、他の担当の daemon は駆動しない。共同担当（非オーナー）は自分の monitor で Issue を観察できる（下記「俯瞰ボード」参照） |
+
+### 🧭 tracking ラベル（分解済み親のトラッカー化）
+
+sub-issue に分解済みの親（Kind=EPIC）には daemon が **`🧭 tracking` ラベル**を付与する。
+以後の tick はラベルだけで「作業 item ではない」と判定でき、merge 検知・PR 投影・
+フェーズ選択から低コストに除外される（完了は closed-reconcile が拾う）。人間が任意の
+Issue に手動で付けてトラッカー化してもよい（autopilot は外さない。外せば作業 item に戻る）。
+
+### ⏳ waiting ラベル（先行 Issue 待ちの可視化）
+
+`autopilot-after:` の先行 Issue がまだ完了しておらず、ゲートで着手を待たされている leaf には
+daemon が **`⏳ waiting` ラベル**を付ける。GitHub Projects の view や Web モニタで「他 Issue 待ち」
+を一目で判別できる。🧭 tracking と同じく **状態から毎 tick 動的に導出**し（静的な一度付けでは
+なく）、先行 Issue が Close された瞬間に自動で外す → 次 tick で着手する。順序付きで分解した
+EPIC の leaf は **全部 Sprint Backlog に入れておけば**、依存順に自動で 1 つずつ流れる（並列
+衝突はゲーティングが防ぐ）。
+
+---
+
+## 実装前ディスカッション（discuss フェーズ）
+
+triage が「実装方針の合意が必要」（Size=large・設計分岐・要件曖昧）と判断した leaf は、
+方針提案コメントを投稿して **Backlog + AI Status=Discussing + `🙋 HITL`** で人間に渡す。
+
+- 人間が**返信する**（コメントするだけでよい。`🙋` を外しても同じ）と daemon が
+  `autopilot-discuss` を起動し、承認なら **Sprint Backlog を返して implement へ直接ハンドオフ**、
+  継続なら改訂提案を同じスレッドに積んで再び人間へ。
+- **議論の往復中 Status は Backlog に固定**され、triage との再提案ループでステータスが
+  固着・振動しない。見送り（Icebox）への遷移は人間の確定操作のみ（提案では動かさない）。
 
 ---
 
@@ -106,11 +175,15 @@ HITL は「人間の番」を表す。状態は **`🙋 HITL` ラベル**が唯�
 非対称のルールを持つ。
 
 - **set（人間に渡す）**: daemon が **Issue/PR の両面に一括で `🙋 HITL` ラベルを付与**して整合を保つ。
-- **release（AI に戻す）**: 適用される signal の **いずれか1つでも除去**されたら autopilot は
-  処理を進める（OR 解除。signal は Issue ラベル / PR ラベルの 2 面）。人間はレビュー中、目の前の
-  PR ラベルを外すだけでよい。実装は `tools/autopilot/src/phases.js` の `isHitlReleased`。
+- **release（AI に戻す）**: 次の **どちらでも**解除される（固着防止・詳細は
+  [`state-machine.md`](./state-machine.md)）:
+  1. **ラベル解除**: Issue / PR いずれかの `🙋 HITL` ラベルを外す（OR 解除・`isHitlReleased`）
+  2. **発言解除**: ゲート開放中に**人間が最後に発言**した（Issue コメント / PR コメント /
+     レビュー送信。`humanSpokeLast`）。ラベルを触らずレビューコメントだけ出しても止まらない。
+     bot の応答・daemon の処理済み watermark より後の発言にのみ反応するので空回りしない
 
-人間が判断/レビューに使う HITL ゲート: EPIC 理解・分解承認・人間レビュー（approve）・merge。
+人間が判断/レビューに使う HITL ゲート: 実装前ディスカッション・EPIC 理解・分解承認・
+人間レビュー（approve）・DoD・Blocked の対処・merge。
 
 > **移行注意（#813）**: 走行中 daemon は再起動するまで旧コード（HITL フィールド読み）。この変更を
 > merge + daemon 再起動して初めてラベル主体に切り替わる。既存の HITL フィールド値が残っていても
@@ -129,10 +202,27 @@ PR が merge されたら、`🙋 HITL` ラベルが残っていても autopilot
 autopilot は **自動 merge しない**。daemon はポーリングのたびに「PR が出た後〜Close 前」の leaf
 （Status が In Progress / Review / DoD）について、`Closes #<issue>` などで紐付く PR が **人間に
 merge 済みか**を GitHub に問い合わせ（`closedByPullRequestsReferences`）、merge 済みなら Status を
-**Close**・AI Status をクリアし、両面の `🙋 HITL` ラベルを除去する。判定は `phases.js` の
+**Close**・AI Status をクリアし、両面の `🙋 HITL` ラベルを除去する。close リンクは PR が
+**非デフォルト base 宛て**（EPIC サブ Issue を親 epic ブランチに積む等）だと登録されないため、
+close リンクで見つからなければ head ブランチ `topic/autopilot-<N>` の merged PR も見て base 非依存に
+検知する（#831）。判定は `phases.js` の
 `selectMergeCandidates` / `mergeProgressionIntents`（純粋関数）、問い合わせと書き込みは
 `project.hasMergedPullRequest` と daemon の `applyMergeProgression`（ラベル除去は force 同期）。
 実行中（run が所有する）item は触らない。
+
+非デフォルト base 宛て PR では GitHub の `Closes #N` 自動 close が効かないため、Status を **Close**
+へ進めた leaf は `project.closeIssue`（`gh issue close`・冪等）で **GitHub issue も明示的に閉じる**
+（#843 Fix A）。
+
+### closed-issue → Project Close 整合（#843 Fix B）
+
+merge-progression は leaf の連携 PR merge しか見ないため、(A) 非デフォルト base 宛て PR で手動
+close した leaf、(B) 統合 PR の `Closes #<epic>` で閉じた EPIC、(C) 人手で閉じた issue が Project に
+取り残される。daemon はポーリングのたびに `applyClosedReconcile` で **GitHub 上で closed な issue**
+（`project.listClosedIssueNumbers`）のうち Project Status が終端（Close / Done）でないものを
+**Status=Close + AI Status クリア**へ整合する。closed という事実だけを根拠にするので **EPIC も対象**。
+判定は `phases.js` の `selectClosedToReconcile`（純粋関数・終端は `TERMINAL_STATUSES`）。実行中
+（run が所有する）item は触らない。冪等。
 
 ---
 
@@ -148,6 +238,32 @@ merge 済みか**を GitHub に問い合わせ（`closedByPullRequestsReferences
 - 二重起動は daemon の running セットで防止（review 実行中も In Progress / Self-Reviewing のままだが
   `selectActionable` が running の item を除外する）。
 
+### レビューは `.claude/rules` 準拠 + Must/Question/FYI 分類（#921）
+
+`/code-review` 等の動的マルチエージェント Workflow は使わない（#893・トークン浪費）ため、
+レビューの深さと視認性を **`.claude/rules` 準拠のインラインレビュー + 指摘の 3 分類**で確保する。
+
+1. 差分の変更ファイルから `touchedRuleAreas`（`phases.js` の純粋関数）で touch する
+   `.claude/rules/<area>/` を機械的に導き、それを読んでからレビューする（プロジェクト固有の
+   実装規約・マーカー・不変条件の逸脱を見落とさない）。
+2. 各指摘を **Must / Question / FYI** に分類し、PR コメント本文の先頭に `**[Must]**` 等の
+   マーカーを付ける（`REVIEW_FINDING_MARKER_RE` が検出する形式）:
+
+   | 分類 | 定義 | autopilot の対応 |
+   |---|---|---|
+   | **Must** | セキュリティ問題・考慮漏れ（明確なバグ/退行） | **必ず修正する** |
+   | **Question** | 直した方がいいが動作する。稀なコーナーケース | 対応コストが小さければ修正、大きければ人間へ（`🙋 HITL` は Review 遷移で既に立つので追加分岐は無い） |
+   | **FYI** | 気になるが直すほどではない | 対応しない（コメントのみ） |
+
+3. 件数サマリ（`countReviewFindings` / `renderReviewFindingsSummary`）を PR コメントに残す
+   （「指摘 N 件（Must a / Question b / FYI c）」形式）。#893 で失われた「敵対的レビューの
+   深さの可視性」をこのサマリで回復する。
+
+分類・件数集計・対応方針テーブルは `phases.js` の純粋関数（`parseReviewFindingCategory` /
+`countReviewFindings` / `renderReviewFindingsSummary` / `addressReviewPolicyFor`）でテスト済み。
+分類の実行（何が Must/Question/FYI か）自体は LLM の判断で、機械的に検証できるのは
+マーカー形式・集計・対応表の整合性のみ。
+
 ---
 
 ## Review 解除後の自動遷移（address-review に一本化・#815）
@@ -157,34 +273,48 @@ daemon は **構造化シグナル（approve/changes-requested）で機械的に
 `autopilot-address-review` を起動する**（`phaseForItem` が Review 解除 → `address-review`）。
 
 approve でも本文に改善依頼が書かれていたり、"changes requested" でも実質 LGTM だったりと、
-自由文の意図は構造化シグナルでは判定できない。そこで**判断はスキル側に置く**: address-review が
+自由文の意図は構造化シグナルでは判定できない。そこで**判断はプロンプト側に置く**: address-review が
 PR の **diff と全コメント（Issue/レビュー本文/インライン）**を読んで分類する。
 
-| スキルの分類（HITL 解除後） | 対応 |
+分類対象は 2 系統（#921）: (A) review フェーズが残した `Must`/`Question`/`FYI` マーカー付き
+コメントのうち未対応のもの、(B) 人間の自由文コメント・レビュー。(A) は review フェーズと同じ対応表
+（Must=修正 / Question=対応可なら修正・困難なら HITL / FYI=無視）に従う。(B) は次の表:
+
+| プロンプトの分類（HITL 解除後・人間コメント） | 対応 |
 |---|---|
 | 質問 | bot で返信（必要ならコード修正）→ 再レビューへ |
 | 改善依頼 / 変更要求 | worktree で修正・push → 再レビューへ |
 | LGTM / 対応不要 | 何もしない → 人間のマージ待ち |
 | 判断がつかない | 論点を整理してコメント + `AUTOPILOT_HITL`（人間に質問） |
 
-- 解除シグナルは **OR セマンティクス**: Issue の `🙋 HITL` ラベル / PR の `🙋 HITL` ラベルの
-  **いずれか1つでも除去**なら解除（`getReviewContext` が2面を集め、`phaseForItem` が `isHitlReleased`
-  で判定）。daemon が両面を atomic に同期する（後述「PR 側の状態可視化」）ので、人間は目の前の
-  PR ラベルを外すだけで差し戻せる。
+- 解除は **2 系統の OR**: (a) Issue / PR いずれかの `🙋 HITL` ラベル除去、(b) ゲート開放中の
+  **人間の発言**（レビュー送信・コメント。ラベルを触らなくてよい）。`getGateContext` が
+  ラベル 2 面 + 発言アクティビティを集め、`phaseForItem` が `isGateReleased` で判定する。
+  daemon が両面を atomic に同期する（後述「PR 側の状態可視化」）ので、人間は目の前の
+  PR ラベルを外すだけでも、コメントを返すだけでも差し戻せる。
 - address-review は **既存 PR ブランチ**で作業する（daemon が worktree を `--pr` で用意）。
-- **コンフリクトは autopilot で解消しない**（rebase/merge コンフリクトは人間の役割）。スキルは
+- **コンフリクトは autopilot で解消しない**（rebase/merge コンフリクトは人間の役割）。プロンプトは
   解消を試みず HITL で人間に渡す。
 
 ---
 
-## DoD — headful 検証の引き継ぎ生成（#821）
+## DoD — headless 確認と headful 引き継ぎ（#891 / #821）
 
-DoD（Definition of Done）は実機ブラウザでの確認が要る最終ゲート。**コンテナ内の daemon は
-headless なので実ブラウザを動かせない**。そこで daemon は DoD を「自分で検証するフェーズ」では
-なく「**ホスト側 Claude（headful Playwright）に渡す引き継ぎを生成するフェーズ**」として扱う。
-LLM は in-container で回さず、**純粋な I/O + 文字列テンプレート**で完結する（child Claude 不要）。
+DoD（Definition of Done）は最終ゲート。確認手段は **UI 種別で分かれる**。
 
-### トリガと生成（daemon の tick ステップ）
+**worker は bundled chromium を headless で動かせる**（#891 で実証）。したがって **一般的な UI 確認は
+verify フェーズ（`autopilot-verify`）が headless Playwright で自己完結**する（`tools/autopilot/bin/pw-check`
+ヘルパー。Playwright MCP は host Chrome 依存で使わない）:
+
+- **自己完結ページ（autopilot monitor 等）**: dev server 不要。daemon の `http://localhost:8787/` を開くか、
+  `MONITOR_HTML` を静的 serve して確認。
+- **scratch-gui の UI**: dev server（`localhost:8601`）が必要。プレビュー URL があれば優先、無ければ起動して待機。
+
+**音・autoplay など実 Chrome が必須のケースだけ**、従来どおり daemon が「**ホスト側 Claude（headful
+Playwright / 実 Chrome）に渡す引き継ぎを生成する**」。LLM は in-container で回さず、**純粋な I/O + 文字列
+テンプレート**で完結する（child Claude 不要）。
+
+### 引き継ぎのトリガと生成（daemon の tick ステップ・限定ケース）
 
 人間がコードレビューを終え「次は DoD 検証」と判断して Status を **Review → DoD** にすると、daemon は
 ポーリングのたびに `Status=DoD` の leaf について次を行う（`applyDodHandoffs`、`🙋 HITL` は維持）:
@@ -210,9 +340,30 @@ LLM は in-container で回さず、**純粋な I/O + 文字列テンプレー�
 - **NG**: ホスト/人間が PR に NG をコメントし `🙋 HITL` を外す → daemon が **DoD 解除 → address-review**
   を起動（Review と対称。`phaseForItem` が DoD 解除 → `address-review`、OR セマンティクスも同じ）。
 
-> 既存の `autopilot-verify` スキル（`.claude/skills/`）は手動 inject 用に残してよいが、自動経路は
-> この daemon 生成を使う（スキル本体は `.claude/` にあり、書き換えると autopilot 自身の implement が
-> 確認プロンプトで止まるため・#820/#821）。
+> 一般 UI の DoD は `autopilot-verify` プロンプト（`tools/autopilot/prompts/`）が headless Playwright で
+> 確認する（#891）。この daemon 生成（`applyDodHandoffs`）の引き継ぎは **音・autoplay 等の実 Chrome 必須
+> ケース**向けに限定される（#821）。
+
+---
+
+## decompose の分割戦略（PR 数最小化）
+
+decompose は EPIC を leaf に分割する前に、**「① 1 PR で完結 / ② 数個にまとめる /
+③ 細かく分割」の 3 案を明示的に比較**して選ぶ（素直に最大分割しない）。基準は
+**各 leaf が 1 実装バジェット（1 run のタイムアウト。checkpoint 導入後は複数ラン跨ぎ可）
+に収まる範囲で、「最少かつレビュー単位として一貫した」leaf 群**になること。
+
+分割するのは次のいずれかの理由があるときのみ:
+
+1. 独立して価値がある / 独立してレビューしたい
+2. 共有ファイルの衝突を避けたい（並列着手での衝突防止）
+3. 1 実装バジェットに収まらない（重い実装・Playwright スクショ多数等）
+4. レビュースコープを分けたい
+
+当たらない関連コンポーネントは、別ファイルで衝突しない限り 1 leaf に束ねてよい。
+直列依存が残る場合は `autopilot-after`（前述）で順序付ける。分解案コメントには
+**なぜこの粒度か（PR 数の根拠）を 1 行**添える。詳細な判断手順は
+[`tools/autopilot/prompts/autopilot-decompose.md`](../../tools/autopilot/prompts/autopilot-decompose.md) の A-1 を参照。
 
 ---
 
@@ -227,6 +378,16 @@ EPIC は「作業項目」ではなく「**トラッカー**」。
 3. 「もう十分」のときは **納品スライスを Done + 残りをフォローアップ EPIC** に切り出す
    （半分終わった EPIC を滞留させない）。
 4. EPIC を Done にする遷移は **HITL**（未クローズの子がある EPIC を勝手に閉じない）。
+5. **分解済み EPIC の Issue 本体には、daemon が sub-issue 進捗 + 人間アクションの sticky
+   コメント（`<!-- autopilot-tracker-status -->`）を維持する**（#934）。トラッカー
+   （Kind=EPIC または `🧭 tracking`）で非終端・sub-issue が 1 件以上のときだけ出る:
+   - 未完了時: 完了数/全体数と割合、「すべて閉じたらこの EPIC を Close してください」を表示。
+   - 全 sub-issue 完了時: 「この EPIC を Close してください」に文言を切り替える
+     （**autopilot は EPIC を自動 Close しない**ので、人間が Close するか Project の
+     Status を Close/Done に変更する必要がある。closed にすれば closed-reconcile が
+     Project を整合する）。
+   sub-issue 進捗は俯瞰ボードの enrichment（`refreshBoard` が既に取得済みの board キャッシュ）を
+   再利用するため追加の GraphQL は発生しない。書き込みは本文が変わった tick だけ（冪等 upsert）。
 
 ---
 
@@ -255,6 +416,207 @@ PR 側は読み取り投影）。実装は daemon の `applyPrProjection`（ポ�
 
 ---
 
+## worker 設定（フェーズ別 model / effort・追加ディレクトリ）と起動時スナップショット
+
+worker（子 claude）の起動構成は `tools/autopilot/src/settings.js` の
+**DEFAULT_SETTINGS（推奨構成: 実装・レビュー系 = opus、分類・対話系 = sonnet）** を基底に、
+
+1. リポジトリ共通の `tools/autopilot/settings.json`（任意・コミット可）
+2. 開発者ごとの `~/.config/autopilot/settings.json`（または env `AUTOPILOT_SETTINGS` のパス）
+
+の順で deep merge して決まる。設定例:
+
+```json
+{
+  "addDirs": ["~/ghq"],
+  "phases": {
+    "default": { "effort": "medium" },
+    "implement": { "model": "opus", "effort": "high" }
+  }
+}
+```
+
+- `addDirs` は worker に読み書きを許可する追加ディレクトリ（`--add-dir`）。参照リポジトリ群
+  （ghq 等）を許可する用途。
+- `phases.<phase>.model` / `.effort` / `.args` でフェーズ単位に上書き。`effort` は
+  `--effort` フラグになるため、対応していない Claude Code では指定しない（既定は未指定）。
+- env `AUTOPILOT_CLAUDE_CMD` は従来どおり**最優先**（settings を使わず固定コマンドで起動）。
+
+daemon は**起動時にプロンプト一式 + 解決済み settings を tmpdir へスナップショット**し、
+run 中に checkout のブランチが切り替わってもプロンプト/設定が変わらない（worker は
+スナップショットの絶対パスを Read する。`--add-dir` は daemon が自動で付与）。
+
+### 許可プロンプトで停止しない — `auto` モード + プロンプト検知→即 HITL
+
+worker は**非対話**で動くので、許可プロンプトで止まると運用が止まる。worker は
+**コンテナ内 root** で動くため、`bypassPermissions`（= `--dangerously-skip-permissions`）は
+使えない（root で拒否 + 社内規定でも禁止）。そこで **`--permission-mode auto`** を採用する:
+
+- **`auto` モード**は AI classifier（`claude auto-mode defaults` の allow / soft_deny / hard_deny
+  ルール）が **通常の開発操作を自動許可・危険操作を自動拒否**し、**対話プロンプトを基本出さない**。
+  `bypassPermissions` の「全バイパス」とは異なり危険操作は自動拒否するので、規定に抵触しにくい。
+  root でも起動できる。
+- **`auto` モードでは allowlist（`--allowedTools` / `permissions.allow`）は機能しない**（classifier が
+  判定を握る）。そのため `buildClaudeCommand` は `auto` のときこれらを**出力しない**
+  （`acceptEdits` 等にフォールバックしたときの保険として定義だけ残す）。
+- **それでも判断を要して稀に対話プロンプトが出た場合は、待たせず即 HITL に落とす**:
+  `runner.js` の `PROMPT_RE`（`❯ 1.` 選択肢 / `Esc to cancel` フッター等）で人間入力待ちを検知し、
+  watchdog `tPromptMs`（既定 6 秒）超で `evaluate` が `hitl` を返す → daemon が Blocked/🙋 にして
+  人間へ渡す（restart しない＝同じプロンプトの再発を避ける）。プロンプトは**出したまま待たせない**。
+- review/verify フェーズは、トークンを大量消費する `/code-review` などの **動的 Workflow を起動しない**
+  （プロンプト内で軽量なインライン敵対的レビューを行う。`autopilot-review.md`）。
+- セキュリティ上の位置づけ: `auto` は「全許可(bypass)」ではなく **classifier による限定自動許可**。
+  devpod はディスク隔離 + egress allowlist 前提（`.claude/rules/devpod-workflow.md`）。
+
+---
+
+## 認証の無人運用（Secrets Manager / SSO auto-pause）
+
+- **GitHub App 秘密鍵**: `~/.config/smalruby-bot/config` に `PRIVATE_KEY_SECRET_ID`
+  （+ 必要なら `AWS_PROFILE` / `AWS_REGION`）を設定すると、`bin/bot-token` が
+  **AWS Secrets Manager から秘密鍵を取得**する（生 `.pem` の各自配付を廃止。ローカル
+  `.pem` はフォールバック）。
+- **SSO 失効の検知と auto-pause**: daemon は interval ごとに認証ヘルスチェックを行い、
+  bot トークンが取得できなくなると **auto-pause**（`pausedBy: "auth"`）して Web モニタに
+  再認証手順（`aws sso login --sso-session smalruby --use-device-code`）を表示する。
+  再認証して回復すると**自動で resume** する（人間が押した pause は上書きしない）。
+- **モニタからワンクリック再認証（device code）**: ブラウザの無い devpod 向けに、認証エラー
+  バナーの **「🔐 再接続（SSO ログイン）」** ボタン（`POST /reauth`）が daemon 側で
+  `aws sso login --use-device-code` を起動し、出力から**認証 URL と user code** を抽出して
+  モニタに表示する。ボタンは**認証ページを別タブで自動オープン**し、**コードはコピー
+  ボタン**付きで出す。ホストのブラウザでコードを承認すれば `aws sso login` が完了し、
+  次の認証ヘルスチェックで **auto-resume** する（`onSuccess` で即時再チェック）。
+
+---
+
+## Bot 権限外パス（workflows 等）は個人トークンで push / PR
+
+GitHub App bot は `workflows` 権限を持たないため、`.github/workflows/**` /
+`.github/actions/**` を含む push は拒否される。push には **`bin/autopilot-push`** を使う:
+
+- 変更にこれらのパスが**含まれない** → `bin/bot-git push`（Bot 名義・通常経路）
+- **含まれる** → 個人クレデンシャルの plain `git push` に自動で切り替わる
+  （`route=personal` を出力）。この場合プロンプトは PR も plain `gh`（個人トークン）で作成し、
+  **`👥 human-review-required` ラベル**を付けて**作成者本人以外のレビューを必須**にする
+  （autopilot の想定外領域の変更には他人の目を通す）。
+
+---
+
+## Web モニタ（俯瞰ボード）
+
+daemon の `GET /`（既定 `http://localhost:8787/`）は **enroll 済み Issue の俯瞰ボード**
+（読み取り専用・縦並び）を first view に表示する。操作（Status 変更・並び替え）は
+GitHub Projects で行い、モニタは俯瞰・log 閲覧・pause/resume/即時 tick に徹する。
+
+- **1 行のコンパクトヘッダー（3 セクション）**: **左**にタイトル + 状態 pill（RUNNING/PAUSED/AUTH ⚠）
+  + 操作群（⏸/▶/⚡tick/**🔄 更新**）、**中央**に Claude 使用量、**右**にメタ情報（assignee・並行数・
+  実行中・API 残・更新時刻）。右メタは固定幅 + 右寄せ + `tabular-nums` にして、`更新 Xs前` の桁変化や
+  `API残`/`実行中` の増減で内容幅が変わってもヘッダーのどの要素も水平位置が動かない。中央 usage も
+  内部の可変要素を `min-width` で予約して幅を一定に保つ。狭い幅（≤ 960px）では中央 usage を隠して
+  右メタと重ならないようにする
+- **スティッキーフッター**: **稼働バージョン（`branch @ shortCommit`）** + **⬆️ 更新ありバッジ**。
+  常時見えるフッターに置き、押すと更新手順モーダルを表示する（#885）
+- **Claude 使用量（ヘッダー中央）**: Claude アイコン + **セッション使用率**（rolling 5 時間制限）と
+  **週間使用率**（全モデルの 7 日制限）を、それぞれ短いバー + `NN%` で表示する。使用量が上限に
+  達すると autopilot だけでなく人間の開発も止まるため、早めに気づけるよう常時可視化する。
+  **Claude アイコンをクリック**（またはキーボードで Enter/Space）すると、セッション / 週間それぞれの
+  **使用率とリセット日時（JST）**を明示したポップオーバーを表示する（もう一度クリック / 外側クリック /
+  Esc で閉じる）。ヘッダーは `overflow:hidden` なのでポップオーバーは `position:fixed` でアイコン直下に
+  出し、使用量バーの中央位置を揺らさない（#996）。使用率が未取得のウィンドウは「—（未取得）」と表示する。
+  usage ファイルはローカルの小さな JSON（API 予算を消費しない）なので、daemon は **毎 tick・
+  `GET /board`・`POST /refresh`（🔄 更新ボタン）で高頻度に読み直す**（#1027）。これにより
+  worker 稼働中でも完了を待たず、モニタの 5 秒 poll でほぼライブ追従する。最終更新からの経過
+  （age）を薄字で併記し、**90 秒以上更新が無ければ黄色（stale）表示**にして worker 非稼働中の
+  据え置きが分かるようにする。age の基準 `updatedAt` は **usage ファイルの mtime**（＝ worker が
+  最後に statusline を書いた時刻）で、読取時刻ではない（#1027）。高頻度に読み直しても、古い
+  ファイルなら age が正しく増え（stale を隠さない）、逆に読み直しで age が誤って 0 にならない。
+  値の取得: `rate_limits`（`five_hour` / `seven_day` の `used_percentage`）は **Claude Code の
+  status line の stdin JSON にのみ**含まれる（transcript JSONL・CLI・キャッシュには出力されない）。
+  worker は対話 TUI（tmux）で動くので status line が描画される点を利用し、worker 起動時に
+  `--settings` で **`tools/autopilot/bin/usage-statusline.sh`** を status line に仕込み、
+  `rate_limits` を usage ファイル（`os.tmpdir()/autopilot-claude-usage.json`）へ書き出させる。
+  daemon はそのファイルを読み（`tools/autopilot/src/usage.js`）`state.claudeUsage` に反映し、
+  `GET /board`・`GET /status` にも `claudeUsage` として載る。
+  **used ≥ 80% は警告色**。Pro/Max サブスク以外や初回 API 応答前は `rate_limits` が無いため
+  **「—」表示**にしてレイアウトを崩さない。
+- **アラート帯**: 認証失効（auto-pause 中・再認証手順つき + **「🔐 再接続（SSO ログイン）」
+  ボタン**で device code の URL 自動オープン & コードのコピー）/ Blocked 一覧。
+  各アラートに **`check autopilot (#N)` のコピー用ショートカット**があり、Claude に
+  貼ると `.claude/skills/check-autopilot` スキルが診断・復旧支援する
+- **ボード行**: Issue（リンク + タイトル）/ Status pill / AI Status（live）/ 担当 /
+  **複数 PR チップ**（📝 draft / ✅ ready / 🟣 merged / ❌ closed の色・絵文字）/
+  **sub-issue 進捗**（N/M・%・バー）/ Now（実行中フェーズ + 経過分 + **log ボタン → モーダル**）
+  - **担当列はオーナー（駆動者）を太字で明示**する（`autopilot-assignee:` ディレクティブが
+    あれば反映）。**自分がオーナーでない**共同担当の行には **👁 + オーナー login** の
+    「観察中」マーカーを付ける（#938）。観察対象（他人が駆動する item）はこの daemon の
+    dispatch では更新されないため、live 反映（`patchBoardCache`）は効かず、
+    **`refreshBoard` の周期実行（既定 5 分）または「🔄 更新」ボタン（`POST /refresh`）**
+    でのみ最新化される点に注意（観察＝状態閲覧なので許容範囲）
+  - **Awaiting Continuation（協調的チェックポイント・EPIC #906）は専用バッジ**（`⏸️ Awaiting
+    Continuation`・紫系配色）で表示し、他の AI Status（Implementing 等）と一目で区別できる（#913）。
+    バッジの右に continuation ファイル（`tmp/autopilot-continuation-<issue>.md`）の
+    **残タスク数**（`## 残タスク` の箇条書き件数）を「残 N」で併記する。件数は `refreshBoard` が
+    worktree からローカルファイルとして読む（GraphQL は消費しない）。worktree/ファイルが無い・
+    解析できない場合は件数を省略する（バッジ自体は表示する）
+- **除外**: Close / Done / Icebox はボードに出さない（溜まると重くなるため）。さらに
+  `--assignee` 起動時は **自分が Assignees のいずれかである item に限定**する
+  （`isAssignee`。未指定は全件）。dispatch 対象（`ownsItem` = 単一オーナーのみ）より
+  **広い**集合になる点に注意 — 共同担当（非オーナー）も観察のため表示される（#938。
+  上記「担当列」参照）
+- **稼働バージョン + 更新検知**（#885）: 下の「稼働バージョン表示と更新検知」を参照
+- **実行履歴**は最下部（最新 100 件・ログ用途のみ）
+- データは `GET /board`（**poll/tick 後に再構築されるキャッシュ** + live running）。
+  board の再取得（`listItems`）は 1 回 ~100 GraphQL ポイントと重いため、**専用の短周期
+  タイマーは持たない**（旧: 60 秒ごと → read トークンの GraphQL 予算 5000/h を単独超過し
+  枯渇していた）。すぐ最新化したいときはヘッダーの **「🔄 更新」ボタン（`POST /refresh`）**
+  でオンデマンド取得する（見たいときだけ消費）。ブラウザ側は 5 秒ごとに `/board`（キャッシュ）を
+  ポーリングして描画するだけなので GraphQL は消費しない
+
+### 稼働バージョン表示と更新検知（#885）
+
+daemon はモジュールを**起動時にロード**するので「動いているコード = 起動時のコミット」。
+以降 working tree が進んでも稼働中コードは起動時コミットのままなので、**今どのブランチ・
+どのコミットで動いているか**を常時可視化し、さらに `tools/autopilot/` に更新があるかを
+定期チェックして「再起動が必要か」を判断しやすくする。
+
+- **稼働バージョン**: daemon は起動時に動作中 checkout（`project.REPO_ROOT`）の
+  `git rev-parse --abbrev-ref HEAD`（ブランチ）と `HEAD`（コミット・`--short` も）を取得して
+  `state.version = {branch, commit, shortCommit}` に保持し、`GET /board`・`GET /status` に載せる。
+  モニタのフッターに `develop @ 9380da0` のように**常時表示**する（取得できなければ「version —」）。
+- **更新検知（~15 分ごと）**: 起動直後に 1 回 + 以降 15 分間隔（`unref` タイマー）で
+  既定ブランチ（`origin/develop`）を `git fetch`（remote-tracking ref のみ更新・working tree は
+  触らない）し、`git log <起動時コミット>..origin/develop -- tools/autopilot` の件数で
+  **更新あり**を判定する。結果は `state.autopilotUpdate = {available, behind, commits, checkedAt, error}`
+  として `/board`・`/status` に載る。private repo なので fetch の認証は既存の gh credential
+  helper に委ねる。**失敗（ネットワーク/認証）時は前回値（available/behind/commits）を保持**し、
+  `error` だけを控えめに surface して表示を崩さない。頻度は `UPDATE_CHECK_INTERVAL_MS` 定数で調整可能。
+- **更新ありの表示 + 更新手順**: 更新ありのときフッターに **`⬆️ 更新あり（N 件）`** バッジを表示。
+  押すと**更新手順モーダル**（テキスト表示のみ・実行はしない）を出す:
+  - 主導線: Claude の autopilot セッションで **`update autopilot`** と指示（コピー用ボタンつき）
+  - 手動手順: `curl -X POST localhost:8787/shutdown` → `/app` で `git pull` →
+    `bash tmp/autopilot_up.sh` で再起動
+  - `tools/autopilot` の差分コミット一覧（短 SHA + 件名）も表示
+- 実装: 判定は `tools/autopilot/src/version.js`（`readVersion` / `checkAutopilotUpdate` —
+  git は `execFile` で実行し `deps.execFileP` で差し替え可能）、daemon 連携は
+  `checkForUpdate` / `startUpdateChecks`（`tools/autopilot/src/daemon.js`）。
+
+---
+
+## GitHub API レート制限対策
+
+Bot 単独・GraphQL 偏重だとレート制限に当たる（実測: Bot の GraphQL 残 0 / REST 残 4987）。
+次の分散・削減を行う:
+
+| 対策 | 内容 |
+|---|---|
+| **トークン分散** | **書き込み**（コメント・ラベル・Draft/Ready・Project 編集・close）= Bot（名義が見える操作）。**読み取り**（一覧・PR/Issue 情報・レビュー状態・アクティビティ）= 個人トークン（`AUTOPILOT_READ_TOKEN` → env `GH_TOKEN` → `gh auth token` → Bot フォールバック）。`AUTOPILOT_READS=bot` で従来動作 |
+| **GraphQL / REST の使い分け** | バッチ読み（ボード enrichment・closed 状態一括確認・レビュー状態）= GraphQL（alias 50〜100 件/回）。単発読み（PR 情報 `/pulls/N`・Issue メタ `/issues/N`・コメント一覧）= REST。別枠の予算を並行活用する |
+| **問い合わせ対象の限定** | Issue/PR の広い問い合わせは **`🤖 autopilot` ラベル付き限定**（label healing が非終端 item に毎 tick 担保）。**ステータス限定**: 終端（Close/Done）は定常問い合わせから除外。旧「リポジトリ全体の closed 一覧（最大 1000 件 × 毎 tick）」は廃止し、**非終端 item + `autopilot-after` 依存先だけ**の state をバッチ確認（`getIssueStates`） |
+| **書き込み削減** | sticky コメントは**内容が変わったときだけ** PATCH（`stickyUpsertPlan`）。Issue ラベルは item-list の値を再利用して面同期の再取得を廃止 |
+| **残量監視・自動退避** | `rate_limit`（レート消費なし）を tick ごとに Bot / 個人の両方で確認し、最小残量をモニタに表示。**残量 < 200 で低優先処理（PR 面投影・ボード更新）を自動スキップ**（warn は < 500）。dispatch・merge 検知は継続し、回復で自動復帰 |
+
+---
+
 ## Claude runner の堅牢性
 
 対話 Claude Code を tmux で起動し send-keys で駆動する。完了検出の権威は
@@ -275,7 +637,7 @@ watchdog が次を処理する:
 
 ## 自律コントラクト
 
-すべての `autopilot-*` スキルは [`autonomous-contract.md`](./autonomous-contract.md) に従う。要点:
+すべての `autopilot-*` プロンプトは [`autonomous-contract.md`](./autonomous-contract.md) に従う。要点:
 
 - **対話的に人間へ質問しない**。判断が要れば bot で Issue/PR にコメントし `AUTOPILOT_HITL` で終了。
 - 終了直前に `AUTOPILOT_RESULT_FILE` へ JSON を書き、pane に signal トークン（`AUTOPILOT_DONE` /
@@ -302,6 +664,16 @@ bin/autopilot-worktree list
 `npm install` / `build:dev` 無しで即作業できる（`@smalruby/*` は main の dist に解決される）。
 単一パッケージのソース編集を想定。クロスパッケージのソース編集は `--full`。
 
+**base 追従（stale 起点の衝突防止・#950/#953）**: 新ブランチ作業フェーズ（implement 等）**と**
+PR ブランチ作業フェーズ（review / address-review）の**両方**で、着手時に daemon が作業ブランチを
+最新の base（`autopilot-base:` 指定 or develop）へ **merge** して自動追従する（rebase ではなく
+merge = 既に push 済みの Draft PR ブランチでも force push 不要）。長時間・複数日にまたがる作業や、
+PR 作成後に develop が進んで PR が CONFLICTING になる問題を防ぐ。PR フェーズでは worker が必ずしも
+push しないため、clean に追従できたら daemon がその merge を **push** してリモートの PR を mergeable
+に保つ（implement は後で worker が自分の commit ごと push するので push 不要）。コンフリクトは両者とも
+**自動解決せず** `git merge --abort` で元に戻し、Blocked + `🙋 HITL` にサニタイズ理由を出して
+人間へエスカレーションする（勝手に壊さない）。
+
 ### daemon（常駐・本番運用）
 
 実ワークロードは **常駐 daemon** が回す。Project をポーリングし、着手可能な item を並行上限内で
@@ -322,22 +694,70 @@ node tools/autopilot/bin/autopilot daemon --once
 ```
 
 daemon オプション: `--owner` / `--project` / `--repo` / `--concurrency` / `--interval`（秒）/
-`--port` / `--once`。起動すると PID ファイル（`$TMPDIR/autopilot-daemon.pid`、通常
+`--port` / `--once` / **`--assignee <login>`**（enroll モデル: 自分がオーナーの item だけ処理。
+env `AUTOPILOT_ASSIGNEE` でも可）。起動すると PID ファイル（`$TMPDIR/autopilot-daemon.pid`、通常
 `/tmp/autopilot-daemon.pid`）を書き、ログを stderr に出す。バックグラウンド常駐は tmux か
 `nohup ... &` で。
 
 ```bash
-# tmux で常駐させる例
-tmux new -d -s autopilot 'node tools/autopilot/bin/autopilot daemon 2>&1 | tee /tmp/autopilot-daemon.log'
+# tmux で常駐させる例（クラッシュ耐性を持たせるため supervisor 経由で起動する・#953）
+tmux new -d -s autopilot 'tools/autopilot/bin/autopilot-supervise --port 8787'
 ```
+
+> **起動 / 再起動 / 更新反映（update autopilot）は Claude（autopilot スキル）が実行してよい。**
+> autopilot スキルが生成する tmux 起動ラッパ `tmp/autopilot_up.sh` があれば、Claude が
+> `bash tmp/autopilot_up.sh` で起動・再起動できる（従来「人間のみ」だったが解禁）。
+> **前提: 起動前に `bin/bot-token` が成功すること** — bot トークンを取得できないと daemon は
+> 未捕捉例外でクラッシュする（実際に SSO 失効でプロセスごと落ちた事例あり）。
+> **AWS SSO 再認証だけは人間**（device code + ブラウザ承認は代行不可）: 失効時は
+> `aws sso login --sso-session smalruby --use-device-code` を人間が実行し、`bin/bot-token --whoami`
+> で回復を確認してから Claude が起動する。再起動は `POST /shutdown` →（必要なら `git pull`）→
+> `bash tmp/autopilot_up.sh`。詳細は `.claude/skills/autopilot/SKILL.md`。
+
+##### クラッシュ耐性（外部 supervisor・#953）
+
+daemon の**未知の非認証エラー**は、Node 公式の指針（`uncaughtException` 後のプロセスは
+「未定義の状態」で継続は非推奨）に従い **`process.exit(1)` でいったん終了**する（「log して
+継続」はしない）。落ちた daemon を無人で立て直すために **`tools/autopilot/bin/autopilot-supervise`**
+（bash 監視ループ・MIT）経由で起動する。`tmp/autopilot_up.sh`（autopilot スキルが生成）も
+これを使う。
+
+- **非ゼロ終了（クラッシュ）のみ再起動**する。**exit 0（`POST /shutdown` / SIGTERM / SIGINT に
+  よる意図的停止）ではループを抜けて停止のまま**にする（正常に止めたものを再起動し続けない）。
+- **クラッシュループ防止**: 60 秒以内に 5 回落ちたら再起動を諦め、人間向けの明示メッセージを
+  ログに残して終了する（閾値は `AUTOPILOT_MAX_RESTARTS` / `AUTOPILOT_RESTART_WINDOW`）。
+- 各 (再)起動を **時刻 + 前回 exit code** 付きで `tmp/autopilot-daemon.log` に記録する。
+- **認証エラーは exit しない**: SSO 失効等は従来どおりプロセス内で **auto-pause**
+  （`pausedBy:"auth"`・#949）して耐え、再認証で auto-resume する（下の認証の無人運用を参照）。
+
+##### stalled / 孤児 worker の自動復帰（#953 起動時 → #995 定常 tick）
+
+crash → supervisor 再起動では daemon の in-memory 状態（`state.running`）を失うが、worker は
+tmux の別プロセスなので**生き残りうる**。また worker が異常終了・**Blocked マーキングの一時失敗**
+（#972: address-review の tMax 失敗 → Blocked にする `gh` が SSO 失効で失敗 → Status=In Progress /
+🙋 HITL のまま残留）でも in-flight AI Status のまま worker が消える。
+
+daemon は **起動時に 1 度**（`recoverOrphanedWorkers`）と **毎 tick 冒頭**（`recoverStalledInFlightWorkers`）
+の両方で、**実作業系 AI Status（Understanding / Implementing / Creating PR / Self-Reviewing /
+Addressing Comments / Running DoD）なのに worker が生存していない item を対応フェーズへ自動で
+再ディスパッチ**する（`selectStalledInFlightItems` 純粋関数）。生存判定は
+**in-memory running ∪ `tmux list-sessions`** のユニオン。これで手動 inject なしに復帰する。
+
+- 実作業系 AI Status は dispatch のみが設定するため、**🙋 HITL が付いていても**「人間の番」では
+  なく異常終了の残渣とみなし再開する（#972 の固着解消）。人間の判断待ち HITL（Triaging /
+  Decomposing / Discussing / Awaiting Continuation / EPIC Decomposed）はこの集合に入らないので
+  誤って再開されない。
+- 生存中 worker を持つ item・この daemon が所有中の item は触らず完走させる。
+- 毎 tick 走るため Self-Reviewing の happy-path も対象に入るが、**空き容量（`cfg.concurrency -
+  running`）の分だけ再開**し溢れは次 tick へ回すので並行上限を跨がない。recovery が tick 冒頭で
+  running を埋めるので selectActionable / stuck 検知と二重ディスパッチせず、Blocked より再開を優先する。
 
 #### 監視（Web モニタ）
 
-ブラウザで **`http://localhost:8787/`** を開くと自己完結 HTML のモニタが表示される
-（2 秒ごとに `/status` をポーリング）。実行中 item の一覧・phase・pause/resume・**今すぐ確認
-（即時 tick）**・各 item の force-stop・pane ログ閲覧ができる。
+ブラウザで **`http://localhost:8787/`** を開くと**俯瞰ボード**が表示される
+（5 秒ごとに `/board` をポーリング。詳細は上の「Web モニタ（俯瞰ボード）」）。
 
-「⚡ 今すぐ確認」ボタンは interval（既定 5 分）を待たず `POST /tick` を叩いて 1 サイクルだけ
+「⚡ tick」ボタンは interval（既定 5 分）を待たず `POST /tick` を叩いて 1 サイクルだけ
 即実行する（レビュー直後など「今すぐ次を処理させたい」とき用）。実行中は再入防止で `409 busy`、
 pause 中は no-op（`paused:true` で返る）。
 
@@ -345,12 +765,15 @@ HTTP API（curl からも操作可能）:
 
 | メソッド・パス | 用途 |
 |---|---|
-| `GET /` | Web モニタ（HTML） |
-| `GET /status` | `{paused, concurrency, running:[{issue,phase}]}` を JSON で返す |
+| `GET /` | Web モニタ（俯瞰ボード HTML） |
+| `GET /board` | 俯瞰ボードデータ（items + running + history + auth 状態 + `claudeUsage` + `version` + `autopilotUpdate`）を JSON で返す |
+| `GET /status` | `{paused, pausedBy, authError, reauthHint, reauth, assignee, concurrency, claudeUsage, version, autopilotUpdate, running:[{issue,phase}]}` |
 | `GET /log?issue=<n>` | 実行中 item の tmux pane キャプチャ（人間観測用） |
 | `POST /tick` | interval を待たず 1 サイクル即実行。`{ran, paused, picked:[...], running:[...]}` を返す。実行中は `409 {busy:true}`、pause 中は `{ran:true, paused:true, picked:[]}` の no-op |
 | `POST /pause` | 新規ディスパッチを止める（実行中はそのまま） |
 | `POST /resume` | ポーリング再開 |
+| `POST /reauth` | SSO 再認証（device code）を daemon 側で起動し、認証 URL と user code を抽出して返す（`{status, url, code, completeUrl}`）。成功で auto-resume |
+| `POST /refresh` | 俯瞰ボードを即時再取得（`listItems`）。モニタの「🔄 更新」ボタン。レート僅少時は `{refreshed:false, skipped:'rate-limited'}` で no-op |
 | `POST /stop?issue=<n>` | その item の tmux セッションを kill して force-stop |
 | `POST /inject?issue=<n>&phase=<p>` | 並行上限を超えて 1 フェーズを割り込み投入 |
 | `POST /shutdown` | daemon プロセスを安全停止 |
@@ -391,8 +814,8 @@ node tools/autopilot/bin/autopilot triage 123
 主なオプション: `--owner` / `--project` / `--repo` / `--command`（claude 起動コマンド差し替え）/
 `--worktree <path>` / `--no-worktree` / `--dry-run` / `--no-apply`。
 
-`phase` は `triage` / `understand` / `decompose` / `implement` / `review` / `address-review` /
-`verify`（`tools/autopilot/src/phases.js` の `PHASE_BY_COMMAND`）。
+`phase` は `triage` / `discuss` / `understand` / `decompose` / `implement` / `review` /
+`address-review` / `verify`（`tools/autopilot/src/phases.js` の `PHASE_BY_COMMAND`）。
 
 ### テスト
 
@@ -407,17 +830,24 @@ cd tools/autopilot && node --test    # 純粋ロジックの unit テスト（�
 | パス | 内容 |
 |---|---|
 | `docs/autopilot/README.md` | 本ドキュメント（機能全体の入口） |
-| `docs/autopilot/autonomous-contract.md` | スキル/Runner の契約 |
-| `.claude/skills/autopilot-*/` | 各フェーズのスキル |
+| `docs/autopilot/autonomous-contract.md` | プロンプト/Runner の契約 |
+| `docs/autopilot/state-machine.md` | 状態遷移とトリガーの正準表（固着防止の不変条件） |
+| `tools/autopilot/prompts/autopilot-*/` | 各フェーズのプロンプト |
 | `bin/autopilot-worktree` | 軽量 worktree スクリプト |
+| `bin/autopilot-push` | push 経路の自動判定（Bot / 個人トークン。権限外パス対応） |
 | `tools/autopilot/src/contract.js` | 番兵/結果ファイルの検証（純粋） |
-| `tools/autopilot/src/phases.js` | フェーズ↔スキル、結果→フィールド意図、watchdog 判断、HITL 解除、merge-progression、PR 投影（純粋） |
-| `tools/autopilot/src/project.js` | GitHub Projects v2 + Issue/PR ラベル・Draft・sticky への gh ラッパ |
+| `tools/autopilot/src/phases.js` | フェーズ↔プロンプト、結果→フィールド意図、watchdog 判断、ゲート解除、merge-progression、PR 投影、enroll/並び順、ディレクティブ、サニタイズ（純粋） |
+| `tools/autopilot/src/settings.js` | worker 設定（フェーズ別 model/effort・addDirs）+ スナップショット |
+| `tools/autopilot/src/project.js` | GitHub Projects v2 + Issue/PR ラベル・Draft・sticky への gh ラッパ（非同期） |
 | `tools/autopilot/src/runner.js` | tmux runner + watchdog |
-| `tools/autopilot/src/daemon.js` | 常駐 daemon（ポーリング・ディスパッチ・HTTP 制御・merge-progression） |
-| `tools/autopilot/src/monitor.js` | Web ステータスモニタ（自己完結 HTML） |
+| `tools/autopilot/src/daemon.js` | 常駐 daemon（ポーリング・ディスパッチ・HTTP 制御・認証ヘルスチェック・俯瞰ボード） |
+| `tools/autopilot/src/monitor.js` | Web モニタ（俯瞰ボード・自己完結 HTML） |
+| `tools/autopilot/src/usage.js` | usage ファイルから Claude 使用率（session/weekly）を読む純粋関数 |
+| `tools/autopilot/bin/usage-statusline.sh` | worker の status line。stdin JSON の `rate_limits` を usage ファイルへ書き出す |
 | `tools/autopilot/src/cli.js`, `bin/autopilot` | CLI（単発フェーズ + `daemon` サブコマンド） |
-| `tools/autopilot/test/` | unit テスト |
+| `tools/autopilot/test/` | unit テスト（状態遷移網羅 `state-machine.test.js` を含む） |
+| `.claude/skills/autopilot/` | 総合サポートスキル（初期化インタビュー→`tmp/autopilot_up.sh` 生成・enroll ショートカット・運用支援。`init autopilot` / `autopilot開始` / `go autopilot` 等で起動） |
+| `.claude/skills/check-autopilot/` | モニタのショートカットに対応する診断・復旧支援スキル |
 
 ---
 
@@ -431,6 +861,13 @@ cd tools/autopilot && node --test    # 純粋ロジックの unit テスト（�
 
 ## 運用上の注意（実地で得た知見）
 
-- **worktree のスキル可用性**: `autopilot-*` スキルが対象ブランチに存在する必要がある（develop に
+- **worktree のプロンプト可用性**: `autopilot-*` プロンプトが対象ブランチに存在する必要がある（develop に
   マージ済みなら worktree でも解決可能）。
 - **非対話権限**: runner は権限プロンプトで止まらない設定（許可ツール指定など）で claude を起動する。
+
+---
+
+## ライセンス
+
+autopilot のツール群（`tools/autopilot/**`）と autopilot プロンプト（`tools/autopilot/prompts/autopilot-*/**`）は、
+リポジトリ全体の AGPL-3.0 ではなく **MIT ライセンス**とする。詳細は `tools/autopilot/LICENSE` を参照。

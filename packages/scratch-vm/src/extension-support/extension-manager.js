@@ -26,6 +26,7 @@ const builtinExtensions = {
     boost: () => require('../extensions/scratch3_boost'),
     gdxfor: () => require('../extensions/scratch3_gdx_for'),
     faceSensing: () => require('../extensions/scratch3_face_sensing'),
+    // === Smalruby: Start of builtin extension entries ===
     mesh: () => require('../extensions/scratch3_mesh'),
     meshV2: () => require('../extensions/scratch3_mesh_v2'),
     smalrubotS1: () => require('../extensions/scratch3_smalrubot_s1')
@@ -37,6 +38,7 @@ const builtinExtensions = {
     mctboard:   () => require('../extensions/smt_mctboard'),
     rboard:     () => require('../extensions/smt_rboard'),
     peripherals:() => require('../extensions/smt_peripherals'),    
+    // === Smalruby: End of builtin extension entries ===
 };
 
 /**

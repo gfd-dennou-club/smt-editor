@@ -3,24 +3,54 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const {
     PHASE_BY_COMMAND,
+    phasePromptCommand,
     parseBaseBranch,
+    resolveBaseRef,
+    baseFollowConflictBody,
+    shouldPushAfterFollow,
+    parseAfterIssues,
+    unresolvedAfterIssues,
+    parseAssigneeDirective,
+    resolveOwner,
     DEFAULT_CLAUDE_COMMAND,
     applyResult,
+    subIssueSetupIntents,
     hitlDesireFromResult,
     isHitlReleased,
+    isGateReleased,
+    hasUnhandledChangesRequest,
     progressOnMerge,
     computeReviewApproval,
     mergeProgressionIntents,
     selectMergeCandidates,
+    selectClosedToReconcile,
+    TERMINAL_STATUSES,
     phaseForItem,
     isActionable,
     isStuckCandidate,
+    liveWorkerIssuesFromSessions,
+    selectStalledInFlightItems,
+    IN_FLIGHT_WORK_PHASE_BY_AI_STATUS,
+    PHASE_BY_AI_STATUS,
+    itemOwner,
+    ownsItem,
+    isAssignee,
+    statusRank,
+    orderItemsLikeBoard,
     selectActionable,
     shouldResend,
     evaluate,
+    sanitizeForSurface,
+    isAuthError,
     DEFAULT_WATCHDOG,
     HITL_LABEL,
     AUTOPILOT_LABEL,
+    TRACKING_LABEL,
+    isTrackerItem,
+    hasTrackingLabel,
+    waitingLabelAction,
+    protectedPaths,
+    touchedRuleAreas,
     STICKY_MARKER,
     PR_SYNC_STATUSES,
     READY_STATUSES,
@@ -35,6 +65,18 @@ const {
     LEGACY_STICKY_MARKERS,
     isStickyComment,
     selectStickyCommentIds,
+    selectMarkedCommentIds,
+    selectMarkedComments,
+    stickyUpsertPlan,
+    rateLimitPlan,
+    selectClosedCheckIssues,
+    selectBoardItems,
+    PR_LINK_MARKER,
+    needsPrLinkSticky,
+    renderPrLinkSticky,
+    TRACKER_STICKY_MARKER,
+    needsTrackerSticky,
+    renderTrackerSticky,
     dodHandoffMarker,
     isDodHandoffComment,
     hasDodHandoffComment,
@@ -42,7 +84,28 @@ const {
     extractDodChecklist,
     needsDodHandoff,
     dodHandoffBody,
+    AWAITING_CONTINUATION_STATUS,
+    isCheckpointResult,
+    continuationFilePath,
+    continuationMarker,
+    parseContinuationMarker,
+    parseContinuationFile,
+    DEFAULT_MAX_CHECKPOINT_ITERATIONS,
+    checkpointIterationDecision,
+    DEFAULT_CHECKPOINT_SOFT_LIMIT_MS,
+    shouldSignalCheckpoint,
+    CHECKPOINT_SIGNAL_MESSAGE,
+    CHECKPOINT_CONTINUATION_COMMENT_MARKER,
+    continuationCommentBody,
+    isSteadyStateHitlGate,
+    REVIEW_FINDING_CATEGORIES,
+    parseReviewFindingCategory,
+    countReviewFindings,
+    renderReviewFindingsSummary,
+    REVIEW_FINDING_POLICY,
+    addressReviewPolicyFor,
 } = require('../src/phases');
+const { PROMPT_RE } = require('../src/runner');
 
 test('shouldResend: resend after accept window if attempts remain', () => {
     const cfg = { maxAttempts: 4, acceptWindowMs: 8000 };
@@ -125,6 +188,68 @@ test('phaseForItem: Review released even without review state -> address-review 
     assert.equal(phaseForItem({ status: 'Review', hitlLabel: false }, {}), 'address-review');
 });
 
+test('hasUnhandledChangesRequest: 未処理の新しい changesRequested だけ true (#894)', () => {
+    // changesRequested でない（approve のみ）→ false（無限ループしない）
+    assert.equal(hasUnhandledChangesRequest({ approved: true }, null), false);
+    assert.equal(hasUnhandledChangesRequest(null, null), false);
+    assert.equal(hasUnhandledChangesRequest(undefined, 100), false);
+    // changesRequested だが時刻不明 → false（誤発火を避ける）
+    assert.equal(hasUnhandledChangesRequest({ changesRequested: true }, null), false);
+    // watermark 未設定で changesRequested あり → 未処理なので true
+    assert.equal(
+        hasUnhandledChangesRequest({ changesRequested: true, changesRequestedAt: 200 }, null),
+        true,
+    );
+    // watermark より新しい → true（新しい Request changes）
+    assert.equal(
+        hasUnhandledChangesRequest({ changesRequested: true, changesRequestedAt: 300 }, 200),
+        true,
+    );
+    // watermark と同じ（一度処理済み）→ false（毎 tick 再発火しない）
+    assert.equal(
+        hasUnhandledChangesRequest({ changesRequested: true, changesRequestedAt: 200 }, 200),
+        false,
+    );
+    // watermark より古い → false
+    assert.equal(
+        hasUnhandledChangesRequest({ changesRequested: true, changesRequestedAt: 100 }, 200),
+        false,
+    );
+    // ISO 文字列でも動く（GraphQL の submittedAt）
+    assert.equal(
+        hasUnhandledChangesRequest(
+            { changesRequested: true, changesRequestedAt: '2026-07-08T10:00:00Z' },
+            '2026-07-08T09:00:00Z',
+        ),
+        true,
+    );
+});
+
+test('isGateReleased: 未処理 changesRequested でも解除する (#894)', () => {
+    const item = { hitlLabel: true };
+    // ラベルも発言解除も無いが、未処理の changesRequested があれば解除
+    assert.equal(isGateReleased(item, { unhandledChangesRequested: true }), true);
+    // 未処理 changesRequested 無し + ラベルあり → 待ち
+    assert.equal(isGateReleased(item, { unhandledChangesRequested: false }), false);
+});
+
+test('phaseForItem: approve 後の Request changes は HITL ラベルが残っていても address-review (#894)', () => {
+    // approve 済みで 🙋 ラベルは付いたまま（projection が付け直した）状態でも、
+    // 未処理の新しい changesRequested があれば address-review へ倒す（行き止まり解消）。
+    const item = { status: 'Review', hitlLabel: true };
+    const ctx = {
+        hitlSignals: { issueLabel: true, prLabel: true },
+        review: { approved: false, changesRequested: true, changesRequestedAt: 300 },
+        unhandledChangesRequested: true,
+    };
+    assert.equal(phaseForItem(item, ctx), 'address-review');
+    // 一度処理して watermark が追いついた（unhandledChangesRequested=false）→ 待ちに戻る
+    assert.equal(
+        phaseForItem(item, { ...ctx, unhandledChangesRequested: false }),
+        null,
+    );
+});
+
 test('isActionable: paused -> false', () => {
     assert.equal(isActionable({ status: 'New Item' }, { paused: true }), false);
     assert.equal(isActionable({ status: 'New Item' }, { paused: false }), true);
@@ -163,9 +288,410 @@ test('selectActionable: released Review items dispatch address-review via contex
     );
 });
 
+test('isTrackerItem / hasTrackingLabel: EPIC またはラベルでトラッカー判定', () => {
+    assert.equal(isTrackerItem({ kind: 'EPIC' }), true);
+    assert.equal(isTrackerItem({ kind: 'Issue', labels: [TRACKING_LABEL] }), true);
+    assert.equal(isTrackerItem({ kind: 'Issue', labels: [] }), false);
+    assert.equal(isTrackerItem(null), false);
+    // hasTrackingLabel は Kind を見ない（未分解 EPIC は decompose 対象のため）
+    assert.equal(hasTrackingLabel({ kind: 'EPIC', labels: [] }), false);
+    assert.equal(hasTrackingLabel({ labels: [TRACKING_LABEL] }), true);
+});
+
+test('waitingLabelAction: 待ち↔ラベルの差分だけ add/remove を返す', () => {
+    assert.equal(waitingLabelAction(false, true), 'add'); // 待ち & ラベル無し
+    assert.equal(waitingLabelAction(true, false), 'remove'); // 解決 & ラベル有り
+    assert.equal(waitingLabelAction(true, true), null); // 待ち継続 → 無操作
+    assert.equal(waitingLabelAction(false, false), null); // 解決済み → 無操作
+});
+
+test('phaseForItem: 🧭 tracking ラベル付きは作業 item ではない（常に null）', () => {
+    assert.equal(phaseForItem({ status: 'New Item', labels: [TRACKING_LABEL] }), null);
+    assert.equal(phaseForItem({ status: 'Sprint Backlog', kind: 'EPIC', labels: [TRACKING_LABEL] }), null);
+    assert.equal(phaseForItem({ status: 'Review', hitlLabel: false, labels: [TRACKING_LABEL] }), null);
+    // ラベルの無い EPIC は従来どおり decompose 対象
+    assert.equal(phaseForItem({ status: 'Sprint Backlog', kind: 'EPIC', labels: [] }), 'decompose');
+});
+
+test('selectMergeCandidates / selectPrSyncCandidates: 🧭 tracking も除外', () => {
+    const items = [
+        { issue: 1, status: 'Review', kind: 'Issue' },
+        { issue: 2, status: 'Review', kind: 'EPIC' },
+        { issue: 3, status: 'Review', kind: 'Issue', labels: [TRACKING_LABEL] },
+    ];
+    assert.deepEqual(selectMergeCandidates(items).map((i) => i.issue), [1]);
+    assert.deepEqual(selectPrSyncCandidates(items).map((i) => i.issue), [1]);
+});
+
+test('labelActions: 🧭 tracking は分解済み EPIC にだけ担保する（自動では外さない）', () => {
+    // 分解済み（sub-issue あり）の EPIC には付与する
+    const decomposed = { kind: 'EPIC', hitlLabel: false, status: 'In Progress', subIssues: { total: 3, completed: 1 } };
+    assert.ok(labelActions(decomposed, [AUTOPILOT_LABEL]).add.includes(TRACKING_LABEL));
+    // 既に付いていれば何もしない
+    assert.ok(!labelActions(decomposed, [AUTOPILOT_LABEL, TRACKING_LABEL]).add.includes(TRACKING_LABEL));
+    // 未分解（sub-issue 0/未設定）の EPIC には付与しない（decompose 対象を締め出さない・#680/#681）
+    assert.ok(!labelActions({ kind: 'EPIC', hitlLabel: false, status: 'Sprint Backlog', subIssues: { total: 0 } }, [AUTOPILOT_LABEL]).add.includes(TRACKING_LABEL));
+    assert.ok(!labelActions({ kind: 'EPIC', hitlLabel: false, status: 'Sprint Backlog' }, [AUTOPILOT_LABEL]).add.includes(TRACKING_LABEL));
+    // leaf に人間が手動で付けた tracking は剥がさない
+    const leaf = { kind: 'Issue', hitlLabel: false, status: 'In Progress' };
+    assert.ok(!labelActions(leaf, [AUTOPILOT_LABEL, TRACKING_LABEL]).remove.includes(TRACKING_LABEL));
+});
+
+test('needsPrLinkSticky: base 非デフォルト時のみ true', () => {
+    assert.equal(needsPrLinkSticky({ number: 1, base: 'topic/epic-738' }), true);
+    assert.equal(needsPrLinkSticky({ number: 1, base: 'develop' }), false);
+    assert.equal(needsPrLinkSticky({ number: 1 }), false); // base 不明は投稿しない
+    assert.equal(needsPrLinkSticky(null), false);
+    // defaultBase の上書き
+    assert.equal(needsPrLinkSticky({ number: 1, base: 'main' }, 'main'), false);
+});
+
+test('renderPrLinkSticky: マーカー + PR リンク + base を含む', () => {
+    const body = renderPrLinkSticky({ number: 870, base: 'topic/epic-738' }, 'smalruby/smalruby3-editor');
+    assert.ok(body.startsWith(PR_LINK_MARKER));
+    assert.match(body, /https:\/\/github\.com\/smalruby\/smalruby3-editor\/pull\/870/);
+    assert.match(body, /topic\/epic-738/);
+});
+
+test('needsTrackerSticky: トラッカー && 非終端 && total>0 の真偽表', () => {
+    assert.equal(
+        needsTrackerSticky({ tracker: true, status: 'In Progress', subIssues: { total: 4, completed: 2 } }),
+        true,
+    );
+    // トラッカーでない
+    assert.equal(
+        needsTrackerSticky({ tracker: false, status: 'In Progress', subIssues: { total: 4, completed: 2 } }),
+        false,
+    );
+    // 終端（Close/Done）
+    assert.equal(
+        needsTrackerSticky({ tracker: true, status: 'Close', subIssues: { total: 4, completed: 4 } }),
+        false,
+    );
+    assert.equal(
+        needsTrackerSticky({ tracker: true, status: 'Done', subIssues: { total: 4, completed: 4 } }),
+        false,
+    );
+    // sub-issue 0 件（未分解 or 空トラッカー）
+    assert.equal(
+        needsTrackerSticky({ tracker: true, status: 'In Progress', subIssues: { total: 0, completed: 0 } }),
+        false,
+    );
+    assert.equal(needsTrackerSticky({ tracker: true, status: 'In Progress' }), false); // subIssues 無し
+    assert.equal(needsTrackerSticky(null), false);
+});
+
+test('renderTrackerSticky: 未完了時は進捗 + 「すべて閉じたら Close」を明示', () => {
+    const body = renderTrackerSticky({ issue: 906, subIssues: { total: 4, completed: 2, percent: 50 } });
+    assert.ok(body.startsWith(TRACKER_STICKY_MARKER));
+    assert.match(body, /2\/4 \(50%\)/);
+    assert.match(body, /すべて閉じたらこの EPIC を Close/);
+    assert.match(body, /autopilot は設計上 EPIC を自動 Close しません/);
+    assert.doesNotMatch(body, /全 sub-issue が完了しました/);
+});
+
+test('renderTrackerSticky: 全完了時は Close を促す文言に切り替える', () => {
+    const body = renderTrackerSticky({ issue: 906, subIssues: { total: 4, completed: 4, percent: 100 } });
+    assert.ok(body.startsWith(TRACKER_STICKY_MARKER));
+    assert.match(body, /全 sub-issue が完了しました（4\/4）/);
+    assert.match(body, /この EPIC を Close してください/);
+    assert.match(body, /#906/);
+});
+
+test('renderTrackerSticky: total=0 は未完了文言（呼び出し側は needsTrackerSticky で除外する前提）', () => {
+    const body = renderTrackerSticky({ issue: 1, subIssues: { total: 0, completed: 0, percent: 0 } });
+    assert.match(body, /0\/0 \(0%\)/);
+    assert.doesNotMatch(body, /全 sub-issue が完了しました/);
+});
+
+test('selectMarkedCommentIds: 任意マーカーでコメント id を抽出', () => {
+    const comments = [
+        { id: 1, body: 'ふつうのコメント' },
+        { id: 2, body: `${PR_LINK_MARKER}\n対応 PR: #870` },
+        { id: 3, body: 'また別' },
+        { id: 4, body: `${PR_LINK_MARKER} dup` },
+    ];
+    assert.deepEqual(selectMarkedCommentIds(comments, [PR_LINK_MARKER]), [2, 4]);
+    assert.deepEqual(selectMarkedCommentIds(comments, ['<!-- other -->']), []);
+    assert.deepEqual(selectMarkedCommentIds(null, [PR_LINK_MARKER]), []);
+});
+
+test('sanitizeForSurface: トークン・鍵・機密変数・URL クエリを redact する', () => {
+    const raw = [
+        'push failed: remote rejected with GH_TOKEN=ghs_abcdefghijklmnopqrstuvwx1234',
+        'aws error: AKIAIOSFODNN7EXAMPLE not authorized',
+        'header Authorization: Bearer abcdef1234567890abcdef',
+        'GOOGLE_API_KEY=AIzaSyA-1234567890abcdefghijklmnopqrs',
+        'presigned https://s3.amazonaws.com/bucket/key?X-Amz-Signature=deadbeef&X-Amz-Credential=AKID',
+        'jwt eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N',
+        '-----BEGIN RSA PRIVATE KEY-----\nMIIEow...\n-----END RSA PRIVATE KEY-----',
+        'MY_SECRET: "hunter2" DB_PASSWORD=p@ssw0rd!',
+    ].join('\n');
+    const s = sanitizeForSurface(raw, 5000);
+    assert.doesNotMatch(s, /ghs_abcdefghijklmnopqrstuvwx1234/);
+    assert.doesNotMatch(s, /AKIAIOSFODNN7EXAMPLE/);
+    assert.doesNotMatch(s, /Bearer abcdef1234567890abcdef/);
+    assert.doesNotMatch(s, /AIzaSyA-1234567890abcdefghijklmnopqrs/);
+    assert.doesNotMatch(s, /X-Amz-Signature/);
+    assert.doesNotMatch(s, /eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\./);
+    assert.doesNotMatch(s, /MIIEow/);
+    assert.doesNotMatch(s, /hunter2/);
+    assert.doesNotMatch(s, /p@ssw0rd!/);
+    // 無害な情報（何が起きたか）は残る
+    assert.match(s, /push failed/);
+    assert.match(s, /not authorized/);
+    assert.match(s, /https:\/\/s3\.amazonaws\.com\/bucket\/key\?\[REDACTED\]/);
+});
+
+test('isAuthError: SSO 失効・bot-token 取得不能を認証系と判定する（#949）', () => {
+    // bot-token が SSO 失効時に die するときの実メッセージ（message / stderr の双方を見る）
+    assert.equal(isAuthError(new Error('AWS 認証が失効/未設定のため Secrets Manager から秘密鍵を取得できません')), true);
+    assert.equal(isAuthError(Object.assign(new Error('Command failed: /app/bin/bot-token'), {
+        stderr: 'aws: Error when retrieving token from sso: Token has expired and refresh failed',
+    })), true);
+    assert.equal(isAuthError('aws sso login が必要です'), true);
+    assert.equal(isAuthError('The security token included in the request is expired'), true);
+    assert.equal(isAuthError('Unable to locate credentials'), true);
+    // 文字列でも Error でも受ける
+    assert.equal(isAuthError(new Error('token has expired')), true);
+});
+
+test('isAuthError: 非認証エラー・空入力は false（#949）', () => {
+    assert.equal(isAuthError(null), false);
+    assert.equal(isAuthError(undefined), false);
+    assert.equal(isAuthError(''), false);
+    assert.equal(isAuthError(new Error('')), false);
+    assert.equal(isAuthError(new Error('ECONNRESET: socket hang up')), false);
+    assert.equal(isAuthError(new Error('GraphQL: rate limit exceeded')), false);
+    assert.equal(isAuthError('some random failure'), false);
+});
+
+test('isAuthError: bot-token/SSO/OIDC/Secrets Manager 失敗を認証系と判定する（#982）', () => {
+    // クラッシュした時の実メッセージ: bot-token が OIDC エンドポイントに接続できず die
+    assert.equal(isAuthError(Object.assign(new Error('Command failed: /app/bin/bot-token'), {
+        stderr:
+            'bot-token: aws secretsmanager get-secret-value failed: aws: [ERROR]: ' +
+            'Could not connect to the endpoint URL: "https://oidc.ap-northeast-1.amazonaws.com/token"',
+    })), true);
+    // bot-token 実行そのものの失敗（stderr が拾えず message のみのケース）
+    assert.equal(isAuthError(new Error('Command failed: /app/bin/bot-token')), true);
+    // Secrets Manager から秘密鍵を取得できない（文字列のみ）
+    assert.equal(isAuthError('aws secretsmanager get-secret-value failed: An error occurred'), true);
+    // SSO トークンキャッシュ不在（AWS CLI の実メッセージ）
+    assert.equal(isAuthError('Error loading SSO Token: Token for smalruby does not exist'), true);
+    assert.equal(isAuthError('Token for smalruby-bot does not exist'), true);
+    // OIDC 接続断（bot-token prefix を伴わなくても oidc/sso を含めば拾う）
+    assert.equal(
+        isAuthError('Could not connect to the endpoint URL: "https://oidc.ap-northeast-1.amazonaws.com/token"'),
+        true,
+    );
+});
+
+test('isAuthError: 認証と無関係な接続断は false のまま（過剰マッチ防止・#982）', () => {
+    // 認証系と無関係な AWS サービスへの接続断は auth 扱いにしない（従来どおり exit させる）
+    assert.equal(
+        isAuthError('Could not connect to the endpoint URL: "https://dynamodb.ap-northeast-1.amazonaws.com/"'),
+        false,
+    );
+    assert.equal(isAuthError(new Error('ENOTFOUND api.github.com')), false);
+});
+
+test('protectedPaths: Bot 権限外パス（workflows/actions）を抽出する', () => {
+    const files = [
+        'packages/scratch-gui/src/index.js',
+        '.github/workflows/ci-cd.yml',
+        '.github/actions/setup/action.yml',
+        '.github/ISSUE_TEMPLATE/bug.md', // workflows/actions 以外の .github は対象外
+        'docs/autopilot/README.md',
+    ];
+    assert.deepEqual(protectedPaths(files), ['.github/workflows/ci-cd.yml', '.github/actions/setup/action.yml']);
+    assert.deepEqual(protectedPaths([]), []);
+    assert.deepEqual(protectedPaths(null), []);
+});
+
+test('sanitizeForSurface: 長文は切り詰め、空入力は空文字', () => {
+    assert.equal(sanitizeForSurface(''), '');
+    assert.equal(sanitizeForSurface(null), '');
+    const long = 'x'.repeat(1000);
+    const s = sanitizeForSurface(long, 100);
+    assert.ok(s.length < 200);
+    assert.match(s, /切り詰め/);
+});
+
+test('stickyUpsertPlan: 同一内容なら PATCH をスキップ、重複は集約、無ければ POST', () => {
+    // 無ければ新規 POST
+    assert.deepEqual(stickyUpsertPlan([], 'body'), { action: 'post', keepId: null, deleteIds: [] });
+    // 既存と同一 → skip（書き込み予算の節約）。重複の削除だけは行う
+    assert.deepEqual(
+        stickyUpsertPlan([{ id: 1, body: 'same' }, { id: 2, body: 'dup' }], 'same'),
+        { action: 'skip', keepId: 1, deleteIds: [2] },
+    );
+    // 内容が変わった → PATCH
+    assert.deepEqual(
+        stickyUpsertPlan([{ id: 1, body: 'old' }], 'new'),
+        { action: 'patch', keepId: 1, deleteIds: [] },
+    );
+});
+
+test('selectMarkedComments: マーカーを含むコメントを {id, body} のまま返す', () => {
+    const comments = [
+        { id: 1, body: 'plain' },
+        { id: 2, body: `${PR_LINK_MARKER} x` },
+    ];
+    assert.deepEqual(selectMarkedComments(comments, [PR_LINK_MARKER]), [{ id: 2, body: `${PR_LINK_MARKER} x` }]);
+    assert.deepEqual(selectMarkedComments(null, [PR_LINK_MARKER]), []);
+});
+
+test('rateLimitPlan: 全トークン×リソースの最小残量で warn / skipLowPriority を決める', () => {
+    const plan = rateLimitPlan({
+        bot: { core: { remaining: 4000, limit: 5000 }, graphql: { remaining: 150, limit: 5000 } },
+        read: { core: { remaining: 3000, limit: 5000 }, graphql: { remaining: 2500, limit: 5000 } },
+    });
+    assert.equal(plan.minRemaining, 150);
+    assert.equal(plan.minAt, 'bot/graphql');
+    assert.equal(plan.warn, true); // < 500
+    assert.equal(plan.skipLowPriority, true); // < 200
+    // 余裕があれば通常運転
+    const ok = rateLimitPlan({ bot: { core: { remaining: 4800, limit: 5000 }, graphql: { remaining: 4700, limit: 5000 } } });
+    assert.equal(ok.warn, false);
+    assert.equal(ok.skipLowPriority, false);
+    // 情報無し → 判断しない（スキップもしない）
+    const none = rateLimitPlan({});
+    assert.equal(none.minRemaining, null);
+    assert.equal(none.skipLowPriority, false);
+    // 欠損リソースは無視する
+    const partial = rateLimitPlan({ bot: { core: { remaining: 300, limit: 5000 }, graphql: undefined } });
+    assert.equal(partial.minRemaining, 300);
+});
+
+test('selectClosedCheckIssues: 非終端 + 🤖 ラベル付きだけを closed 確認の対象にする', () => {
+    const items = [
+        { issue: 1, status: 'Review', labels: [AUTOPILOT_LABEL] }, // 対象
+        { issue: 2, status: 'Close', labels: [AUTOPILOT_LABEL] }, // 終端 → 除外（ステータス限定）
+        { issue: 3, status: 'Done', labels: [AUTOPILOT_LABEL] }, // 終端 → 除外
+        { issue: 4, status: 'Backlog', labels: [] }, // ラベル無し → 除外（ラベル限定）
+        { issue: 5, status: 'In Progress', labels: [AUTOPILOT_LABEL, HITL_LABEL] }, // 対象
+    ];
+    assert.deepEqual(selectClosedCheckIssues(items), [1, 5]);
+    assert.deepEqual(selectClosedCheckIssues([]), []);
+});
+
+test('selectBoardItems: assignee 指定でボード表示は「自分が Assignees のいずれか」に限定（#938）', () => {
+    const items = [
+        { issue: 1, status: 'Review', assignees: ['me'] },
+        { issue: 2, status: 'Review', assignees: ['other'] },
+        { issue: 3, status: 'Review', assignees: [] }, // 未 assign（daemon が素通りする item）
+        { issue: 4, status: 'Close', assignees: ['me'] }, // 終端
+        // 共同担当（オーナーでない = 辞書順先頭でない）も観察のため表示対象になる
+        { issue: 5, status: 'Review', assignees: ['aaa', 'me'] },
+    ];
+    assert.deepEqual(selectBoardItems(items, 'me').map((i) => i.issue), [1, 5]);
+    // 未指定は従来どおり（非終端すべて）
+    assert.deepEqual(selectBoardItems(items).map((i) => i.issue), [1, 2, 3, 5]);
+});
+
+test('itemOwner: 辞書順先頭の assignee が決定的な単一オーナー', () => {
+    assert.equal(itemOwner({ assignees: ['takaokouji'] }), 'takaokouji');
+    // 複数 assignee は辞書順先頭（入力順に依存しない）
+    assert.equal(itemOwner({ assignees: ['zeta', 'alpha', 'mike'] }), 'alpha');
+    assert.equal(itemOwner({ assignees: ['alpha', 'zeta'] }), 'alpha');
+    // 未 assign はオーナー不在
+    assert.equal(itemOwner({ assignees: [] }), null);
+    assert.equal(itemOwner({}), null);
+    assert.equal(itemOwner(null), null);
+});
+
+test('ownsItem: assignee モードでは単一オーナーのみ処理、未設定は全件', () => {
+    // login 未設定（従来運用）→ 全件処理
+    assert.equal(ownsItem({ assignees: [] }, null), true);
+    assert.equal(ownsItem({ assignees: ['someone'] }, null), true);
+    // assignee モード: 自分がオーナー
+    assert.equal(ownsItem({ assignees: ['me'] }, 'me'), true);
+    assert.equal(ownsItem({ assignees: ['me', 'zz'] }, 'me'), true);
+    // 複数 assignee で自分が辞書順先頭でない → 処理しない（他人の daemon が拾う）
+    assert.equal(ownsItem({ assignees: ['aa', 'me'] }, 'me'), false);
+    // 他人の item / 未 assign → 処理しない
+    assert.equal(ownsItem({ assignees: ['other'] }, 'me'), false);
+    assert.equal(ownsItem({ assignees: [] }, 'me'), false);
+});
+
+const STATUS_ORDER = ['Backlog', 'Sprint Backlog', 'In Progress', 'Blocked', 'Review', 'DoD', 'Close', 'Icebox'];
+
+test('statusRank: New Item(No Status) は最左、option 定義順、未知は末尾', () => {
+    assert.equal(statusRank('New Item', STATUS_ORDER), -1);
+    assert.equal(statusRank(undefined, STATUS_ORDER), -1); // 未設定は New Item 扱い
+    assert.ok(statusRank('Backlog', STATUS_ORDER) < statusRank('Sprint Backlog', STATUS_ORDER));
+    assert.ok(statusRank('Review', STATUS_ORDER) < statusRank('DoD', STATUS_ORDER));
+    assert.equal(statusRank('Unknown Status', STATUS_ORDER), Number.MAX_SAFE_INTEGER);
+});
+
+test('orderItemsLikeBoard: Status 列順に並べ、同 Status 内は手動並び順（入力順）を保つ', () => {
+    const items = [
+        { issue: 1, status: 'Review' },
+        { issue: 2, status: 'Sprint Backlog' },
+        { issue: 3, status: 'Review' },
+        { issue: 4, status: 'New Item' },
+        { issue: 5, status: 'Sprint Backlog' },
+    ];
+    const ordered = orderItemsLikeBoard(items, STATUS_ORDER);
+    assert.deepEqual(ordered.map((i) => i.issue), [4, 2, 5, 1, 3]);
+    // 元配列は破壊しない
+    assert.deepEqual(items.map((i) => i.issue), [1, 2, 3, 4, 5]);
+});
+
+test('selectActionable: statusOrder 指定で投入順が Board view の見た目に揃う', () => {
+    const items = [
+        // 手動並び順: Review 系が後ろ、Sprint Backlog が先頭付近にある想定を崩した入力
+        { issue: 1, status: 'Sprint Backlog', kind: 'Issue' },
+        { issue: 2, status: 'New Item' },
+        { issue: 3, status: 'Sprint Backlog', kind: 'Issue' },
+    ];
+    const picked = selectActionable(items, { limit: 3, running: new Set(), statusOrder: STATUS_ORDER });
+    // New Item(No Status 列) が最左 → 先頭。Sprint Backlog 内は手動並び順 1 → 3
+    assert.deepEqual(picked.map((p) => p.issue), [2, 1, 3]);
+});
+
+test('selectActionable: assignee 指定で自分がオーナーの item だけ拾う（enroll モデル）', () => {
+    const items = [
+        { issue: 1, status: 'Sprint Backlog', kind: 'Issue', assignees: ['me'] },
+        { issue: 2, status: 'Sprint Backlog', kind: 'Issue', assignees: ['other'] },
+        { issue: 3, status: 'Sprint Backlog', kind: 'Issue', assignees: [] }, // 未 assign は誰も拾わない
+        { issue: 4, status: 'Sprint Backlog', kind: 'Issue', assignees: ['aa', 'me'] }, // 先頭でない
+        { issue: 5, status: 'Sprint Backlog', kind: 'Issue', assignees: ['me', 'zz'] }, // 先頭
+    ];
+    const picked = selectActionable(items, { limit: 10, running: new Set(), assignee: 'me' });
+    assert.deepEqual(picked.map((p) => p.issue), [1, 5]);
+    // assignee 未指定は従来動作（全件）
+    const all = selectActionable(items, { limit: 10, running: new Set() });
+    assert.deepEqual(all.map((p) => p.issue), [1, 2, 3, 4, 5]);
+});
+
 test('PHASE_BY_COMMAND maps triage to the skill and AI status', () => {
     assert.deepEqual(PHASE_BY_COMMAND.triage, { skill: 'autopilot-triage', aiStatus: 'Triaging' });
     assert.equal(PHASE_BY_COMMAND['address-review'].skill, 'autopilot-address-review');
+    assert.deepEqual(PHASE_BY_COMMAND.discuss, { skill: 'autopilot-discuss', aiStatus: 'Discussing' });
+});
+
+test('phaseForItem: 実装前ディスカッション（AI Status=Discussing）の往復', () => {
+    // 人間が 🙋 を外した（返信した）→ discuss を起動
+    assert.equal(phaseForItem({ status: 'Backlog', aiStatus: 'Discussing', hitlLabel: false }), 'discuss');
+    assert.equal(phaseForItem({ status: 'New Item', aiStatus: 'Discussing', hitlLabel: false }), 'discuss');
+    // 🙋 あり = 人間の番（提案への返信待ち）
+    assert.equal(phaseForItem({ status: 'Backlog', aiStatus: 'Discussing', hitlLabel: true }), null);
+    // Discussing でない Backlog は従来どおり人間駆動（何もしない）
+    assert.equal(phaseForItem({ status: 'Backlog', aiStatus: null, hitlLabel: false }), null);
+    // 承認後（discuss done）は Sprint Backlog + AI Status クリア → implement へ直接ハンドオフ
+    assert.equal(phaseForItem({ status: 'Sprint Backlog', kind: 'Issue', aiStatus: null, hitlLabel: false }), 'implement');
+});
+
+test('applyResult: hitl + nextAiStatus=Discussing で議論状態を維持できる', () => {
+    const intents = applyResult({
+        signal: 'hitl', issue: 1, phase: 'triage', summary: 's',
+        reason: 'r', nextStatus: 'Backlog', nextAiStatus: 'Discussing',
+    });
+    const m = Object.fromEntries(intents.map((i) => [i.field, i.value]));
+    assert.equal(m.Status, 'Backlog');
+    assert.equal(m['AI Status'], 'Discussing');
 });
 
 test('DEFAULT_CLAUDE_COMMAND is non-interactive (allows Bash so gh/git do not prompt)', () => {
@@ -215,6 +741,39 @@ test('mergeProgressionIntents: already at target Status -> no intents (idempoten
     assert.deepEqual(mergeProgressionIntents({ status: 'Close', kind: 'Issue' }, true), []);
 });
 
+test('selectClosedToReconcile: GitHub-closed items not yet at a terminal Status (incl. EPIC)', () => {
+    const items = [
+        { issue: 1, status: 'Review', kind: 'Issue' }, // closed + non-terminal -> reconcile
+        { issue: 2, status: 'Close', kind: 'Issue' }, // closed but already terminal -> skip (idempotent)
+        { issue: 3, status: 'Done', kind: 'Issue' }, // closed but terminal -> skip
+        { issue: 4, status: 'Review', kind: 'EPIC' }, // closed EPIC + non-terminal -> reconcile (EPIC included)
+        { issue: 5, status: 'In Progress', kind: 'Issue' }, // open on GitHub -> skip
+        { issue: 6, status: undefined, kind: 'Issue' }, // closed, no Status -> reconcile
+    ];
+    const closedSet = new Set([1, 2, 3, 4, 6]);
+    assert.deepEqual(
+        selectClosedToReconcile(items, closedSet).map((i) => i.issue),
+        [1, 4, 6],
+    );
+});
+
+test('selectClosedToReconcile: accepts an array (not only a Set) as closedSet', () => {
+    const items = [{ issue: 7, status: 'DoD', kind: 'Issue' }];
+    assert.deepEqual(selectClosedToReconcile(items, [7]).map((i) => i.issue), [7]);
+});
+
+test('selectClosedToReconcile: empty/missing inputs -> empty array', () => {
+    assert.deepEqual(selectClosedToReconcile([], new Set([1])), []);
+    assert.deepEqual(selectClosedToReconcile(null, null), []);
+    assert.deepEqual(selectClosedToReconcile([{ issue: 1, status: 'Review' }], new Set()), []);
+});
+
+test('TERMINAL_STATUSES: Close and Done are terminal', () => {
+    assert.ok(TERMINAL_STATUSES.has('Close'));
+    assert.ok(TERMINAL_STATUSES.has('Done'));
+    assert.ok(!TERMINAL_STATUSES.has('Review'));
+});
+
 test('applyResult: done sets Status/Size/Kind, clears AI Status, no HITL field (#813)', () => {
     const intents = applyResult({
         issue: 1, phase: 'triage', signal: 'done', summary: 's',
@@ -226,6 +785,35 @@ test('applyResult: done sets Status/Size/Kind, clears AI Status, no HITL field (
     assert.ok(!('HITL' in m)); // HITL は 🙋 ラベルで表現（Project 意図に含めない）
     assert.equal(m.Size, 'middle');
     assert.equal(m.Kind, 'Issue');
+});
+
+test('subIssueSetupIntents: 未設定の新規 sub-issue に Status/Kind/Size を設定する (#914)', () => {
+    const intents = subIssueSetupIntents('small', {});
+    const m = Object.fromEntries(intents.map(i => [i.field, i.value]));
+    assert.equal(m.Status, 'Sprint Backlog');
+    assert.equal(m.Kind, 'Issue');
+    assert.equal(m.Size, 'small');
+});
+
+test('subIssueSetupIntents: size が無ければ Size は設定しない (#914)', () => {
+    const intents = subIssueSetupIntents(null, {});
+    const m = Object.fromEntries(intents.map(i => [i.field, i.value]));
+    assert.equal(m.Status, 'Sprint Backlog');
+    assert.equal(m.Kind, 'Issue');
+    assert.ok(!('Size' in m));
+});
+
+test('subIssueSetupIntents: 既に設定済みのフィールドは上書きしない（冪等・#914）', () => {
+    const intents = subIssueSetupIntents('large', { status: 'In Progress', kind: 'Issue', size: 'small' });
+    assert.deepEqual(intents, []);
+});
+
+test('subIssueSetupIntents: 一部だけ設定済みなら残りだけ設定する (#914)', () => {
+    const intents = subIssueSetupIntents('middle', { status: 'Sprint Backlog' });
+    const m = Object.fromEntries(intents.map(i => [i.field, i.value]));
+    assert.ok(!('Status' in m));
+    assert.equal(m.Kind, 'Issue');
+    assert.equal(m.Size, 'middle');
 });
 
 test('applyResult: hitl sets optional Status but no HITL field', () => {
@@ -361,12 +949,100 @@ test('isStuckCandidate: In Progress + 作業中 AI Status のみ true', () => {
     assert.equal(isStuckCandidate({ status: 'In Progress', aiStatus: 'Decomposing' }), true);
     // Self-Reviewing は次 tick で自動 dispatch されるので対象外
     assert.equal(isStuckCandidate({ status: 'In Progress', aiStatus: 'Self-Reviewing' }), false);
+    // EPIC Decomposed は decompose 完了済み EPIC の resting 状態（子の実装待ち）で
+    // run が無くて当然 → stuck 対象外（#856）
+    assert.equal(isStuckCandidate({ status: 'In Progress', aiStatus: 'EPIC Decomposed' }), false);
     // AI Status 空の In Progress（人間操作）は対象外
     assert.equal(isStuckCandidate({ status: 'In Progress', aiStatus: null }), false);
     assert.equal(isStuckCandidate({ status: 'In Progress' }), false);
     // In Progress 以外は対象外
     assert.equal(isStuckCandidate({ status: 'Review', aiStatus: 'Implementing' }), false);
     assert.equal(isStuckCandidate(null), false);
+});
+
+// #915: 🙋 HITL 承認待ち（decompose/discuss 等）は人間の番であり stuck ではない
+test('isStuckCandidate: 🙋 HITL 付き item は stuck 候補から除外', () => {
+    assert.equal(
+        isStuckCandidate({ status: 'In Progress', aiStatus: 'Decomposing', hitlLabel: true }), false,
+    );
+    assert.equal(
+        isStuckCandidate({ status: 'In Progress', aiStatus: 'Discussing', hitlLabel: true }), false,
+    );
+    // 🙋 が無ければ従来どおり stuck 候補
+    assert.equal(
+        isStuckCandidate({ status: 'In Progress', aiStatus: 'Implementing', hitlLabel: false }), true,
+    );
+});
+
+// === 孤児 worker の自動復帰（#953） ===
+
+test('PHASE_BY_AI_STATUS: PHASE_BY_COMMAND の全 aiStatus を逆引きできる', () => {
+    for (const [command, meta] of Object.entries(PHASE_BY_COMMAND)) {
+        assert.equal(PHASE_BY_AI_STATUS[meta.aiStatus], command);
+    }
+    assert.equal(PHASE_BY_AI_STATUS.Implementing, 'implement');
+    assert.equal(PHASE_BY_AI_STATUS['Addressing Comments'], 'address-review');
+    assert.equal(PHASE_BY_AI_STATUS['Running DoD'], 'verify');
+});
+
+test('liveWorkerIssuesFromSessions: autopilot-<phase>-<issue> から issue を抽出', () => {
+    const live = liveWorkerIssuesFromSessions([
+        'autopilot-implement-10',
+        'autopilot-address-review-20', // フェーズ名にハイフンを含む
+        'autopilot-daemon',            // 数字末尾でない → 無視
+        'other-session-99',            // 接頭辞が違う → 無視
+        '  autopilot-verify-30  ',     // 前後空白は trim
+    ]);
+    assert.deepEqual([...live].sort((a, b) => a - b), [10, 20, 30]);
+    assert.equal(liveWorkerIssuesFromSessions(null).size, 0);
+    assert.equal(liveWorkerIssuesFromSessions([]).size, 0);
+});
+
+test('IN_FLIGHT_WORK_PHASE_BY_AI_STATUS: 実作業系 AI Status → 再開フェーズの写像', () => {
+    // dispatch のみが設定する in-flight AI Status を、対応する再開フェーズへ写す（#995）。
+    // Creating PR は PHASE_BY_COMMAND に対応コマンドが無いので個別に implement へ。
+    assert.deepEqual(IN_FLIGHT_WORK_PHASE_BY_AI_STATUS, {
+        Understanding: 'understand',
+        Implementing: 'implement',
+        'Creating PR': 'implement',
+        'Self-Reviewing': 'review',
+        'Addressing Comments': 'address-review',
+        'Running DoD': 'verify',
+    });
+});
+
+test('selectStalledInFlightItems: worker 不在の in-flight を {issue, phase} で返す（HITL/Self-Reviewing も含む）', () => {
+    const items = [
+        { issue: 1, status: 'In Progress', aiStatus: 'Implementing', hitlLabel: false },        // stalled
+        { issue: 2, status: 'In Progress', aiStatus: 'Addressing Comments', hitlLabel: false }, // 生存 worker あり → 除外
+        { issue: 3, status: 'In Progress', aiStatus: 'Triaging', hitlLabel: true },             // 実作業系でない → 除外
+        { issue: 4, status: 'In Progress', aiStatus: 'Self-Reviewing', hitlLabel: false },      // 実作業系 → 含む（#995 で変更）
+        { issue: 5, status: 'In Progress', aiStatus: 'Understanding', hitlLabel: false },       // stalled
+        { issue: 6, status: 'Backlog', aiStatus: 'Implementing', hitlLabel: false },            // In Progress でない → 除外
+        { issue: 7, status: 'In Progress', aiStatus: 'Addressing Comments', hitlLabel: true },  // #972 残渣（HITL でも含む）
+    ];
+    const stalled = selectStalledInFlightItems(items, new Set([2]));
+    assert.deepEqual(stalled, [
+        { issue: 1, phase: 'implement' },
+        { issue: 4, phase: 'review' },
+        { issue: 5, phase: 'understand' },
+        { issue: 7, phase: 'address-review' },
+    ]);
+});
+
+test('selectStalledInFlightItems: 生存 worker（liveIssues）に含まれる item は再開しない', () => {
+    const items = [
+        { issue: 10, status: 'In Progress', aiStatus: 'Implementing', hitlLabel: false },
+        { issue: 11, status: 'In Progress', aiStatus: 'Implementing', hitlLabel: true },
+    ];
+    // 両方 live なら空。片方だけ live なら残りのみ返す。
+    assert.deepEqual(selectStalledInFlightItems(items, new Set([10, 11])), []);
+    assert.deepEqual(selectStalledInFlightItems(items, new Set([10])), [{ issue: 11, phase: 'implement' }]);
+});
+
+test('selectStalledInFlightItems: 空入力は空配列', () => {
+    assert.deepEqual(selectStalledInFlightItems(null, null), []);
+    assert.deepEqual(selectStalledInFlightItems([], new Set()), []);
 });
 
 test('hitlLabelAction: non-Review reconciles toward the Issue canonical (hitlLabel)', () => {
@@ -651,6 +1327,40 @@ test('evaluate: normal in-progress -> wait', () => {
     assert.equal(a.action, 'wait');
 });
 
+test('evaluate: 対話プロンプトが tPromptMs 継続 -> hitl（質問させず即打ち切り）', () => {
+    const a = evaluate({
+        resultPresent: false, ready: true, dead: false, elapsedMs: 5000, idleMs: 1000, restarts: 0,
+        promptingMs: cfg.tPromptMs + 1,
+    }, cfg);
+    assert.equal(a.action, 'hitl');
+});
+
+test('evaluate: プロンプトが短時間（tPromptMs 未満）なら wait（誤検知しない）', () => {
+    const a = evaluate({
+        resultPresent: false, ready: true, dead: false, elapsedMs: 5000, idleMs: 1000, restarts: 0,
+        promptingMs: 1000,
+    }, cfg);
+    assert.equal(a.action, 'wait');
+});
+
+test('evaluate: 結果ファイルがあればプロンプト検知より優先して collect', () => {
+    const a = evaluate({
+        resultPresent: true, ready: true, dead: false, elapsedMs: 5000, idleMs: 0, restarts: 0,
+        promptingMs: cfg.tPromptMs + 1,
+    }, cfg);
+    assert.equal(a.action, 'collect');
+});
+
+test('PROMPT_RE: 許可/確認/選択ダイアログを検知し、通常出力は誤検知しない', () => {
+    // 実際に worker が停止したプロンプト群
+    assert.match('❯ 1. Yes\n  2. No\n Esc to cancel · Tab to amend', PROMPT_RE);
+    assert.match('Do you want to proceed?', PROMPT_RE);
+    assert.match('Do you want to create comment.md?', PROMPT_RE);
+    // 通常の作業ログは誤検知しない
+    assert.doesNotMatch('Ran 3 shell commands, read 2 files', PROMPT_RE);
+    assert.doesNotMatch('● The logic chain is coherent.', PROMPT_RE);
+});
+
 // === #827: Issue 本文からの base ブランチ宣言の抽出 ===
 
 test('parseBaseBranch: 宣言が無ければ null（= 既定 develop）', () => {
@@ -682,4 +1392,555 @@ test('parseBaseBranch: 英語 "Base branch" ラベルも認識', () => {
 test('parseBaseBranch: ディレクティブはセクションより優先', () => {
     const body = 'autopilot-base: topic/win\n## ベースブランチ\n- `topic/lose`';
     assert.equal(parseBaseBranch(body), 'topic/win');
+});
+
+test('parseBaseBranch: ディレクティブは行頭のみ反応（本文中の言及では発火しない）', () => {
+    // 例: 「この修正を autopilot に任せる」Issue の説明に仕様として書かれた場合
+    assert.equal(parseBaseBranch('説明のために autopilot-base: topic/x と書くとブランチを指定できる'), null);
+    assert.equal(parseBaseBranch('- リスト内の autopilot-base: topic/x も無効'), null);
+    // 行頭なら反応する（HTML コメントも行頭からなら可）
+    assert.equal(parseBaseBranch('前置き\nautopilot-base: topic/ok\n後書き'), 'topic/ok');
+    assert.equal(parseBaseBranch('前置き\n<!-- autopilot-base: topic/ok -->'), 'topic/ok');
+    // 行頭に空白があるものは行頭扱いしない
+    assert.equal(parseBaseBranch('  autopilot-base: topic/indented'), null);
+});
+
+test('parseBaseBranch: セクションは行頭ラベル + 同一行 : `branch`（DoD 形式）も認識', () => {
+    assert.equal(parseBaseBranch('ベースブランチ: `develop`'), 'develop');
+    assert.equal(parseBaseBranch('base branch: `develop`'), 'develop');
+    assert.equal(parseBaseBranch('ベースブランチ: develop'), 'develop');
+});
+
+test('parseBaseBranch: 識別子/改行跨ぎで誤マッチしない（#938/#941 回帰）', () => {
+    // #938 再現: 本文が `parseBaseBranch`/`baseBranch` に言及し、後続行にバッククォート語がある
+    assert.equal(
+        parseBaseBranch('本文で `parseBaseBranch` / `baseBranch` に言及。\n実装は `directiveLogin` を使う。'),
+        null,
+    );
+    // #941 自己参照: 識別子の言及 + 後続行の `.claude/...` バッククォート語を base と誤認しない
+    assert.equal(
+        parseBaseBranch(
+            '識別子 parseBaseBranch / baseBranch（"BaseBranch" を含む）\n' +
+                '変更は `tools/autopilot/**` のみ。\n' +
+                '`.claude/rules/autopilot/prompts.md` を整合。',
+        ),
+        null,
+    );
+    // camelCase 識別子 baseBranch が行頭にあっても、区切り必須なので拾わない
+    assert.equal(parseBaseBranch('baseBranch を修正する。\n`develop` で動かす。'), null);
+    // ラベル行の後に内容行があれば打ち切る（後続の無関係なバッククォート語を拾わない）
+    assert.equal(parseBaseBranch('## ベースブランチ\nなにか説明の行。\n`topic/should-not`'), null);
+});
+
+test('parseAfterIssues: 行頭の autopilot-after 宣言から依存 Issue を抽出', () => {
+    assert.deepEqual(parseAfterIssues('autopilot-after: #123'), [123]);
+    assert.deepEqual(parseAfterIssues('autopilot-after: #12, #34 56'), [12, 34, 56]);
+    assert.deepEqual(parseAfterIssues('<!-- autopilot-after: #7 -->'), [7]);
+    // 複数行の宣言は合算・重複除去
+    assert.deepEqual(parseAfterIssues('autopilot-after: #1\n本文\nautopilot-after: #2 #1'), [1, 2]);
+    // 行頭以外の言及では発火しない
+    assert.deepEqual(parseAfterIssues('説明: autopilot-after: #99 と書ける'), []);
+    assert.deepEqual(parseAfterIssues(''), []);
+    assert.deepEqual(parseAfterIssues(null), []);
+});
+
+test('parseAfterIssues: 説明用の安全表記（スペース入り・非行頭）は依存として拾わない', () => {
+    // ⚠️ 自己参照の罠の回帰テスト（#898）:
+    // 機能を説明する Issue/ドキュメント/プロンプトが依存ディレクティブを「例示」しても、
+    // 本物の依存として誤検出してはならない。安全な書き方が実際に no-match であることを固定する。
+
+    // 1. スペース入り表記（autopilot - after）はコロン前で切れるので発火しない
+    assert.deepEqual(parseAfterIssues('autopilot - after: #12 と書くと直列化できる'), []);
+    assert.deepEqual(parseAfterIssues('autopilot -after: #34'), []);
+
+    // 2. 行頭でない言及（インデント含む）は発火しない
+    assert.deepEqual(parseAfterIssues('  autopilot-after: #56'), []);
+    assert.deepEqual(parseAfterIssues('- autopilot-after: #78 のように書く'), []);
+    assert.deepEqual(parseAfterIssues('例: `autopilot-after: #90` を行頭に置く'), []);
+
+    // 3. 複数行の文書中で、本物の宣言（行頭）だけを拾い、説明用の言及は無視する
+    const doc = [
+        '依存の書き方を説明する。',
+        '`autopilot-after: #999` のように書く（このバッククォート囲みは拾われない）。',
+        'autopilot - after: #888 のようにスペース入りでも安全。',
+        'autopilot-after: #123',
+    ].join('\n');
+    assert.deepEqual(parseAfterIssues(doc), [123]);
+});
+
+test('parseAssigneeDirective: 行頭の autopilot-assignee 宣言から login を抽出', () => {
+    assert.equal(parseAssigneeDirective('autopilot-assignee: takaokouji'), 'takaokouji');
+    // @ 付きも許容
+    assert.equal(parseAssigneeDirective('autopilot-assignee: @takaokouji'), 'takaokouji');
+    // 行頭 HTML コメント内も可
+    assert.equal(parseAssigneeDirective('<!-- autopilot-assignee: someone -->'), 'someone');
+    // 大文字小文字は無視（ディレクティブ名自体）
+    assert.equal(parseAssigneeDirective('Autopilot-Assignee:  Bob-2 '), 'Bob-2');
+    // 複数行あれば最初の一致
+    assert.equal(
+        parseAssigneeDirective('autopilot-assignee: first\n本文\nautopilot-assignee: second'),
+        'first',
+    );
+    // 無ければ null
+    assert.equal(parseAssigneeDirective(''), null);
+    assert.equal(parseAssigneeDirective(null), null);
+    assert.equal(parseAssigneeDirective('ふつうの本文。担当は takaokouji です。'), null);
+});
+
+test('parseAssigneeDirective: 行頭でない言及では発火しない（説明用の安全表記）', () => {
+    assert.equal(parseAssigneeDirective('説明のために autopilot-assignee: bob と書く'), null);
+    assert.equal(parseAssigneeDirective('- リスト内の `autopilot-assignee: bob` も無効'), null);
+    assert.equal(parseAssigneeDirective('  autopilot-assignee: indented'), null);
+});
+
+test('resolveOwner: ディレクティブが assignees に含まれれば採用、無ければ辞書順先頭', () => {
+    // 指定が assignees に有る → 採用
+    assert.equal(resolveOwner(['aaa', 'bbb'], 'bbb'), 'bbb');
+    // 大文字小文字を無視して一致（元 assignees の表記を返す）
+    assert.equal(resolveOwner(['aaa', 'Bbb'], 'BBB'), 'Bbb');
+    // 指定が assignees に無い → 無視して辞書順先頭
+    assert.equal(resolveOwner(['aaa', 'bbb'], 'takaokouji'), 'aaa');
+    // 未指定 → 辞書順先頭
+    assert.equal(resolveOwner(['zeta', 'alpha'], null), 'alpha');
+    assert.equal(resolveOwner(['zeta', 'alpha'], undefined), 'alpha');
+    // 空/未 assign → null
+    assert.equal(resolveOwner([], 'bbb'), null);
+    assert.equal(resolveOwner(undefined, 'bbb'), null);
+});
+
+test('itemOwner: assigneeDirective が assignees に含まれればそれを優先（#938・後方互換）', () => {
+    // ディレクティブ指定が assignees に含まれる → 優先
+    assert.equal(itemOwner({ assignees: ['aaa', 'bbb'], assigneeDirective: 'bbb' }), 'bbb');
+    // ディレクティブが assignees に無い → 無視して辞書順先頭
+    assert.equal(itemOwner({ assignees: ['aaa', 'bbb'], assigneeDirective: 'ccc' }), 'aaa');
+    // assigneeDirective 未設定（従来の item 形）は従来どおり辞書順先頭
+    assert.equal(itemOwner({ assignees: ['zeta', 'alpha'] }), 'alpha');
+});
+
+test('isAssignee: login が Assignees のいずれかであれば true（オーナーに限らない・#938）', () => {
+    // 自分がオーナーでなくても Assignees に含まれていれば true（board 観察ユースケース）
+    assert.equal(isAssignee({ assignees: ['aaa', 'me'] }, 'me'), true);
+    assert.equal(isAssignee({ assignees: ['aaa', 'me'] }, 'aaa'), true);
+    // 大文字小文字は無視
+    assert.equal(isAssignee({ assignees: ['Me'] }, 'me'), true);
+    // 含まれない / 未 assign → false
+    assert.equal(isAssignee({ assignees: ['other'] }, 'me'), false);
+    assert.equal(isAssignee({ assignees: [] }, 'me'), false);
+    // login 未指定（従来運用）→ 全件許可
+    assert.equal(isAssignee({ assignees: [] }, null), true);
+    assert.equal(isAssignee({ assignees: ['someone'] }, null), true);
+});
+
+test('unresolvedAfterIssues: closed or 終端 Status の依存は解決済み', () => {
+    const ctx = {
+        closedSet: new Set([10]),
+        statusByIssue: { 11: 'Close', 12: 'In Progress', 13: 'Done' },
+    };
+    // 10=closed, 11=Close, 13=Done は解決済み。12=In Progress と 99=不明 は未解決
+    assert.deepEqual(unresolvedAfterIssues([10, 11, 12, 13, 99], ctx), [12, 99]);
+    assert.deepEqual(unresolvedAfterIssues([], ctx), []);
+    // 情報が無い依存は保守的に「未完了」扱い
+    assert.deepEqual(unresolvedAfterIssues([10], {}), [10]);
+    // closedSet が配列でも動く
+    assert.deepEqual(unresolvedAfterIssues([10, 12], { closedSet: [10] }), [12]);
+});
+
+// === プロンプト起動メッセージ（Skill スラッシュではなくファイル参照） ===
+
+test('phasePromptCommand: プロンプトファイルを Read させ Issue 番号を含む（スラッシュではない）', () => {
+    const cmd = phasePromptCommand('autopilot-triage', 833);
+    assert.match(cmd, /tools\/autopilot\/prompts\/autopilot-triage\.md/);
+    assert.match(cmd, /AUTOPILOT_ISSUE=833/);
+    assert.ok(!cmd.startsWith('/'), 'スラッシュコマンドではない');
+});
+
+// === 協調的チェックポイント（EPIC #906・基盤 leaf #910） ===
+
+test('AWAITING_CONTINUATION_STATUS: 新 AI Status 定数', () => {
+    assert.equal(AWAITING_CONTINUATION_STATUS, 'Awaiting Continuation');
+});
+
+test('isCheckpointResult: signal=hitl + nextAiStatus=Awaiting Continuation のときだけ true', () => {
+    assert.equal(
+        isCheckpointResult({ signal: 'hitl', nextAiStatus: 'Awaiting Continuation' }), true,
+    );
+    assert.equal(isCheckpointResult({ signal: 'hitl', nextAiStatus: null }), false);
+    assert.equal(isCheckpointResult({ signal: 'hitl', reason: 'x' }), false);
+    assert.equal(isCheckpointResult({ signal: 'done', nextAiStatus: 'Awaiting Continuation' }), false);
+    assert.equal(isCheckpointResult(null), false);
+    assert.equal(isCheckpointResult(undefined), false);
+});
+
+test('continuationFilePath: tmp/autopilot-continuation-<issue>.md の規約', () => {
+    assert.equal(continuationFilePath(910), 'tmp/autopilot-continuation-910.md');
+    assert.equal(continuationFilePath('852'), 'tmp/autopilot-continuation-852.md');
+});
+
+test('continuationMarker / parseContinuationMarker: ラウンドトリップ', () => {
+    const marker = continuationMarker(852, 'implement', 2);
+    assert.equal(marker, '<!-- autopilot-continuation issue=852 phase=implement iteration=2 -->');
+    assert.deepEqual(parseContinuationMarker(marker), { issue: 852, phase: 'implement', iteration: 2 });
+    assert.deepEqual(parseContinuationMarker(`${marker}\n## 完了済み\n- foo\n`), {
+        issue: 852, phase: 'implement', iteration: 2,
+    });
+});
+
+test('parseContinuationMarker: マッチしなければ null', () => {
+    assert.equal(parseContinuationMarker(''), null);
+    assert.equal(parseContinuationMarker(null), null);
+    assert.equal(parseContinuationMarker('not a marker'), null);
+    assert.equal(parseContinuationMarker('<!-- autopilot-continuation issue=1 -->'), null);
+});
+
+test('parseContinuationFile: 完全なファイルを解析する（EPIC #906 の固定フォーマット）', () => {
+    const content = [
+        continuationMarker(852, 'implement', 1),
+        '## 完了済み',
+        '- deck 1〜3 の実装',
+        '- 単体テスト追加',
+        '',
+        '## 残タスク',
+        '- deck 4〜6 の実装',
+        '- Playwright での動作確認',
+        '',
+        '## 次の一手',
+        'deck 4 のスクリーンショット撮影から再開する。',
+        '',
+        '## 継続して安全か',
+        'はい: WIP はコミット済みで、状態は綺麗。',
+    ].join('\n');
+    const parsed = parseContinuationFile(content);
+    assert.deepEqual(parsed, {
+        issue: 852,
+        phase: 'implement',
+        iteration: 1,
+        completed: ['deck 1〜3 の実装', '単体テスト追加'],
+        remaining: ['deck 4〜6 の実装', 'Playwright での動作確認'],
+        nextStep: 'deck 4 のスクリーンショット撮影から再開する。',
+        safeToContinue: true,
+        reason: 'WIP はコミット済みで、状態は綺麗。',
+    });
+});
+
+test('parseContinuationFile: 「いいえ」も解析できる', () => {
+    const content = [
+        continuationMarker(852, 'implement', 3),
+        '## 継続して安全か',
+        'いいえ: コンフリクトが残っており危険。',
+    ].join('\n');
+    const parsed = parseContinuationFile(content);
+    assert.equal(parsed.safeToContinue, false);
+    assert.equal(parsed.reason, 'コンフリクトが残っており危険。');
+});
+
+test('parseContinuationFile: 見出しが欠けていても落ちない（壊れたファイルへのフォールバック）', () => {
+    assert.deepEqual(parseContinuationFile(''), {
+        issue: null, phase: null, iteration: null,
+        completed: [], remaining: [], nextStep: null, safeToContinue: null, reason: null,
+    });
+    assert.deepEqual(parseContinuationFile(null), {
+        issue: null, phase: null, iteration: null,
+        completed: [], remaining: [], nextStep: null, safeToContinue: null, reason: null,
+    });
+    // マーカーだけあり本文が空
+    const marker = continuationMarker(1, 'review', 1);
+    const parsed = parseContinuationFile(marker);
+    assert.equal(parsed.issue, 1);
+    assert.equal(parsed.phase, 'review');
+    assert.deepEqual(parsed.completed, []);
+    assert.equal(parsed.safeToContinue, null);
+});
+
+test('checkpointIterationDecision: 上限内は continue、超過で escalate', () => {
+    assert.equal(checkpointIterationDecision(1).action, 'continue');
+    assert.equal(checkpointIterationDecision(DEFAULT_MAX_CHECKPOINT_ITERATIONS).action, 'continue');
+    assert.equal(checkpointIterationDecision(DEFAULT_MAX_CHECKPOINT_ITERATIONS + 1).action, 'escalate');
+    assert.equal(checkpointIterationDecision(10).action, 'escalate');
+    // カスタム上限
+    assert.equal(checkpointIterationDecision(2, 1).action, 'escalate');
+    assert.equal(checkpointIterationDecision(1, 1).action, 'continue');
+    // 不正値は 0 として扱う（安全側）
+    assert.equal(checkpointIterationDecision(NaN).action, 'continue');
+    assert.equal(checkpointIterationDecision(undefined).action, 'continue');
+});
+
+test('DEFAULT_MAX_CHECKPOINT_ITERATIONS: EPIC #906 で確定した既定値 3', () => {
+    assert.equal(DEFAULT_MAX_CHECKPOINT_ITERATIONS, 3);
+});
+
+test('shouldSignalCheckpoint: soft-limit 超過かつ未送信・ready・生存中のときだけ true', () => {
+    const base = { ready: true, dead: false, resultPresent: false, softSignalSent: false };
+    assert.equal(shouldSignalCheckpoint({ ...base, elapsedMs: DEFAULT_CHECKPOINT_SOFT_LIMIT_MS + 1 }), true);
+    assert.equal(shouldSignalCheckpoint({ ...base, elapsedMs: DEFAULT_CHECKPOINT_SOFT_LIMIT_MS - 1 }), false);
+    // 既に送信済みなら多重送信しない
+    assert.equal(
+        shouldSignalCheckpoint({ ...base, elapsedMs: DEFAULT_CHECKPOINT_SOFT_LIMIT_MS + 1, softSignalSent: true }),
+        false,
+    );
+    // 結果ファイルが既にあるなら送らない（collect が優先）
+    assert.equal(
+        shouldSignalCheckpoint({ ...base, elapsedMs: DEFAULT_CHECKPOINT_SOFT_LIMIT_MS + 1, resultPresent: true }),
+        false,
+    );
+    // 死んでいるなら送らない
+    assert.equal(
+        shouldSignalCheckpoint({ ...base, elapsedMs: DEFAULT_CHECKPOINT_SOFT_LIMIT_MS + 1, dead: true }),
+        false,
+    );
+    // まだ ready でないなら送らない
+    assert.equal(
+        shouldSignalCheckpoint({ ...base, elapsedMs: DEFAULT_CHECKPOINT_SOFT_LIMIT_MS + 1, ready: false }),
+        false,
+    );
+    // カスタム tSoftMs
+    assert.equal(shouldSignalCheckpoint({ ...base, elapsedMs: 100 }, { tSoftMs: 50 }), true);
+    assert.equal(shouldSignalCheckpoint(null), false);
+});
+
+test('CHECKPOINT_SIGNAL_MESSAGE: worker への checkpoint 信号文言（#911）', () => {
+    assert.equal(
+        CHECKPOINT_SIGNAL_MESSAGE,
+        '⏰ 残り約8分。新しい大きな作業を始めず、安全な区切りで停止して checkpoint 手順を実行して',
+    );
+});
+
+test('continuationCommentBody: 解析済み continuation からマーカー付きコメント本文を組み立てる（#912）', () => {
+    const parsed = parseContinuationFile([
+        continuationMarker(912, 'implement', 2),
+        '## 完了済み',
+        '- daemon.js の下調べ',
+        '',
+        '## 残タスク',
+        '- checkpoint 処理の実装',
+        '',
+        '## 次の一手',
+        'applyCheckpointHandling を実装する。',
+        '',
+        '## 継続して安全か',
+        'はい: WIP はコミット済み。',
+    ].join('\n'));
+    const body = continuationCommentBody(parsed);
+    assert.ok(body.startsWith(CHECKPOINT_CONTINUATION_COMMENT_MARKER));
+    assert.match(body, /2 回目/);
+    assert.match(body, /`implement`/);
+    assert.match(body, /- daemon\.js の下調べ/);
+    assert.match(body, /- checkpoint 処理の実装/);
+    assert.match(body, /applyCheckpointHandling を実装する。/);
+    assert.match(body, /はい: WIP はコミット済み。/);
+    assert.match(body, /🙋 HITL.*外すと.*implement.*再開/);
+});
+
+test('continuationCommentBody: 欠けたフィールドはフォールバック文言になる（壊れたファイル対策）', () => {
+    const body = continuationCommentBody({
+        issue: null, phase: null, iteration: null,
+        completed: [], remaining: [], nextStep: null, safeToContinue: null, reason: null,
+    });
+    assert.match(body, /`implement`/); // phase フォールバック
+    assert.match(body, /1 回目/); // iteration フォールバック
+    assert.match(body, /_\(なし\)_/);
+    assert.match(body, /_\(記載なし\)_/);
+    assert.match(body, /はい/); // safeToContinue=null はデフォルト「はい」扱い
+});
+
+test('continuationCommentBody: safeToContinue=false は「いいえ」+ reason を表示する', () => {
+    const body = continuationCommentBody({
+        phase: 'implement', iteration: 3, completed: [], remaining: [],
+        nextStep: null, safeToContinue: false, reason: 'コンフリクトが残っている',
+    });
+    assert.match(body, /いいえ: コンフリクトが残っている/);
+});
+
+test('DEFAULT_WATCHDOG.tSoftMs: 既定は DEFAULT_CHECKPOINT_SOFT_LIMIT_MS と同値（#911）', () => {
+    assert.equal(DEFAULT_WATCHDOG.tSoftMs, DEFAULT_CHECKPOINT_SOFT_LIMIT_MS);
+});
+
+test('phaseForItem: Awaiting Continuation は解除前 null、解除後は元フェーズへ戻る', () => {
+    const item = { status: 'In Progress', aiStatus: 'Awaiting Continuation', hitlLabel: true, kind: 'Issue' };
+    // 解除前は何もしない（人間の確認待ち）
+    assert.equal(phaseForItem(item, {}), null);
+    // 解除（Issue ラベル除去）後は continuation ファイルの元フェーズへ
+    assert.equal(
+        phaseForItem({ ...item, hitlLabel: false }, { continuation: { phase: 'review' } }), 'review',
+    );
+    // 元フェーズが不明なら implement にフォールバック（checkpoint は主に実装フェーズで発生）
+    assert.equal(phaseForItem({ ...item, hitlLabel: false }, {}), 'implement');
+    // PR 側ラベルのみの解除でも OR セマンティクスで再開する
+    assert.equal(
+        phaseForItem(item, { hitlSignals: { issueLabel: true, prLabel: false }, continuation: { phase: 'implement' } }),
+        'implement',
+    );
+    // ラベルを触らず人間が発言しただけでも解除される
+    assert.equal(
+        phaseForItem(item, { humanSpokeLast: true, continuation: { phase: 'address-review' } }), 'address-review',
+    );
+});
+
+// #915: decompose/triage の「Status を動かさず HITL で待つ」提案系フェーズは、解除後に
+// 元フェーズへ再ディスパッチされないと永久に固着する（isStuckCandidate の hitlLabel 除外と対）。
+test('phaseForItem: decompose の分解案 HITL は解除前 null、解除後は decompose へ再ディスパッチ', () => {
+    const item = { status: 'In Progress', aiStatus: 'Decomposing', hitlLabel: true, kind: 'EPIC' };
+    assert.equal(phaseForItem(item, {}), null);
+    assert.equal(phaseForItem({ ...item, hitlLabel: false }, {}), 'decompose');
+    assert.equal(phaseForItem(item, { humanSpokeLast: true }), 'decompose');
+});
+
+test('phaseForItem: triage の Icebox 提案 HITL は解除前 null、解除後は triage へ再ディスパッチ', () => {
+    const item = { status: 'In Progress', aiStatus: 'Triaging', hitlLabel: true, kind: 'Issue' };
+    assert.equal(phaseForItem(item, {}), null);
+    assert.equal(phaseForItem({ ...item, hitlLabel: false }, {}), 'triage');
+    assert.equal(phaseForItem(item, { humanSpokeLast: true }), 'triage');
+});
+
+test('isSteadyStateHitlGate: Review/DoD と Awaiting Continuation（In Progress）が対象', () => {
+    assert.equal(isSteadyStateHitlGate({ status: 'Review' }), true);
+    assert.equal(isSteadyStateHitlGate({ status: 'DoD' }), true);
+    assert.equal(
+        isSteadyStateHitlGate({ status: 'In Progress', aiStatus: 'Awaiting Continuation' }), true,
+    );
+    // 通常の In Progress（実装中）は対象外
+    assert.equal(isSteadyStateHitlGate({ status: 'In Progress', aiStatus: 'Implementing' }), false);
+    assert.equal(isSteadyStateHitlGate({ status: 'Blocked' }), false);
+    assert.equal(isSteadyStateHitlGate(null), false);
+});
+
+test('hitlLabelAction: Awaiting Continuation steady-state は人間が外したラベルを再付与しない', () => {
+    const item = { status: 'In Progress', aiStatus: 'Awaiting Continuation', hitlLabel: true };
+    // canonical=Yes だが face 側で外された（解除ジェスチャ）-> 再付与しない
+    assert.equal(hitlLabelAction(item, false), null);
+    // canonical=No -> 除去方向はそのまま許可
+    assert.equal(hitlLabelAction({ ...item, hitlLabel: false }, true), 'remove');
+    // force（権威的な checkpoint への遷移）なら明示的に付与する
+    assert.equal(hitlLabelAction(item, false, { force: true }), 'add');
+});
+
+test('renderSticky: Awaiting Continuation は continuation コメントへの 1 行ポインタを追加', () => {
+    const body = renderSticky({
+        issue: 910, status: 'In Progress', aiStatus: 'Awaiting Continuation', hitlLabel: true, size: 'middle',
+    });
+    assert.match(body, /チェックポイント継続待ち/);
+    assert.match(body, /autopilot-continuation/);
+});
+
+test('renderSticky: Implementing 中（通常の In Progress）はポインタを出さない', () => {
+    const body = renderSticky({
+        issue: 1, status: 'In Progress', aiStatus: 'Implementing', hitlLabel: false, size: null,
+    });
+    assert.ok(!/チェックポイント継続待ち/.test(body));
+});
+
+test('isStuckCandidate: Awaiting Continuation は stuck 対象外（意図的な resting・EPIC #906）', () => {
+    assert.equal(
+        isStuckCandidate({ status: 'In Progress', aiStatus: 'Awaiting Continuation' }), false,
+    );
+});
+
+test('parseReviewFindingCategory: マーカーから分類を抜き出す（#921）', () => {
+    assert.equal(parseReviewFindingCategory('**[Must]** null チェック漏れ'), 'Must');
+    assert.equal(parseReviewFindingCategory('**[Question]** ここは意図的？'), 'Question');
+    assert.equal(parseReviewFindingCategory('**[FYI]** 将来的には整理してもよい'), 'FYI');
+    assert.equal(parseReviewFindingCategory('マーカー無しのコメント'), null);
+    assert.equal(parseReviewFindingCategory(''), null);
+    assert.equal(parseReviewFindingCategory(null), null);
+});
+
+test('countReviewFindings: 複数コメントから分類ごとの件数を集計する', () => {
+    const comments = [
+        { body: '**[Must]** バグ A' },
+        { body: '**[Must]** バグ B' },
+        { body: '**[Question]** 設計確認' },
+        { body: '**[FYI]** 気になる点' },
+        { body: '<!-- autopilot-sticky-status -->\n## 🤖 autopilot status' },
+    ];
+    assert.deepEqual(countReviewFindings(comments), { Must: 2, Question: 1, FYI: 1 });
+    assert.deepEqual(countReviewFindings([]), { Must: 0, Question: 0, FYI: 0 });
+    assert.deepEqual(countReviewFindings(undefined), { Must: 0, Question: 0, FYI: 0 });
+});
+
+test('renderReviewFindingsSummary: 件数からサマリ行を作る', () => {
+    assert.equal(
+        renderReviewFindingsSummary({ Must: 1, Question: 2, FYI: 0 }),
+        '指摘 3 件（Must 1 / Question 2 / FYI 0）',
+    );
+    assert.equal(renderReviewFindingsSummary({ Must: 0, Question: 0, FYI: 0 }), '指摘なし。');
+    assert.equal(renderReviewFindingsSummary({}), '指摘なし。');
+});
+
+test('addressReviewPolicyFor: 分類から対応方針を返す（#921 DoD の対応表）', () => {
+    assert.equal(addressReviewPolicyFor('Must'), 'fix');
+    assert.equal(addressReviewPolicyFor('Question'), 'fix-or-hitl');
+    assert.equal(addressReviewPolicyFor('FYI'), 'ignore');
+    // 未知の分類は安全側で無視
+    assert.equal(addressReviewPolicyFor('Unknown'), 'ignore');
+    assert.equal(addressReviewPolicyFor(undefined), 'ignore');
+});
+
+test('REVIEW_FINDING_CATEGORIES / REVIEW_FINDING_POLICY: 3 分類すべてに方針が定義されている', () => {
+    assert.deepEqual(REVIEW_FINDING_CATEGORIES, ['Must', 'Question', 'FYI']);
+    for (const category of REVIEW_FINDING_CATEGORIES) {
+        assert.ok(category in REVIEW_FINDING_POLICY, `${category} に対応方針が無い`);
+    }
+});
+
+test('touchedRuleAreas: 変更ファイルから .claude/rules/<area>/ を導く（#921）', () => {
+    assert.deepEqual(
+        touchedRuleAreas(['packages/scratch-gui/src/lib/foo.js', 'packages/scratch-gui/test/unit/foo.test.js']),
+        ['scratch-gui'],
+    );
+    // 複数エリア・出現順・重複無し
+    assert.deepEqual(
+        touchedRuleAreas([
+            'packages/scratch-vm/src/extensions/foo.js',
+            'infra/smalruby-mesh-v2/lib/foo.ts',
+            'packages/scratch-vm/test/unit/foo.js',
+        ]),
+        ['scratch-vm', 'infra'],
+    );
+    // tools/autopilot と bin/autopilot-* / bin/bot-* はどれも autopilot エリア
+    assert.deepEqual(
+        touchedRuleAreas(['tools/autopilot/src/phases.js', 'bin/autopilot-push', 'bin/bot-git']),
+        ['autopilot'],
+    );
+    // どの area にも当たらないファイルは無視
+    assert.deepEqual(touchedRuleAreas(['README.md', 'CLAUDE.md']), []);
+    assert.deepEqual(touchedRuleAreas([]), []);
+    assert.deepEqual(touchedRuleAreas(undefined), []);
+});
+
+test('resolveBaseRef: 宣言 base を origin/<branch> へ正規化する（#950）', () => {
+    // null/空/未指定 は既定 develop
+    assert.equal(resolveBaseRef(null), 'origin/develop');
+    assert.equal(resolveBaseRef(''), 'origin/develop');
+    assert.equal(resolveBaseRef(undefined), 'origin/develop');
+    assert.equal(resolveBaseRef('   '), 'origin/develop');
+    // ブランチ名は origin/ を付ける
+    assert.equal(resolveBaseRef('develop'), 'origin/develop');
+    assert.equal(resolveBaseRef('epic/koshien-738'), 'origin/epic/koshien-738');
+    // 既に origin/ 付きは重複させない
+    assert.equal(resolveBaseRef('origin/develop'), 'origin/develop');
+    // 既定 base の差し替え
+    assert.equal(resolveBaseRef(null, 'main'), 'origin/main');
+});
+
+test('baseFollowConflictBody: コンフリクト理由と復旧手順を含む Blocked 本文（#950）', () => {
+    const body = baseFollowConflictBody('autopilot-implement', 950, 'origin/develop', 'CONFLICT in foo.js');
+    assert.match(body, /Blocked/);
+    assert.match(body, /origin\/develop/);
+    assert.match(body, /コンフリクト/);
+    assert.match(body, /CONFLICT in foo\.js/);
+    assert.match(body, /🙋 HITL/);
+    // detail 空でもローカルログ参照へ誘導する
+    assert.match(baseFollowConflictBody('s', 1, 'origin/develop', ''), /ローカルログ参照/);
+});
+
+test('shouldPushAfterFollow: PR フェーズで followed のときだけ push する（#953）', () => {
+    // PR あり × followed → push（リモート PR を mergeable に保つ）
+    assert.equal(shouldPushAfterFollow(954, 'followed'), true);
+    // PR あり だが merge していない状態は push しない
+    assert.equal(shouldPushAfterFollow(954, 'current'), false);
+    assert.equal(shouldPushAfterFollow(954, 'skipped-dirty'), false);
+    assert.equal(shouldPushAfterFollow(954, 'conflict'), false);
+    // implement（pr なし）は followed でも push しない（worker が後で自分の commit ごと push する）
+    assert.equal(shouldPushAfterFollow(undefined, 'followed'), false);
+    assert.equal(shouldPushAfterFollow(null, 'followed'), false);
+    assert.equal(shouldPushAfterFollow(0, 'followed'), false);
 });

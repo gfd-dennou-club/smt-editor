@@ -21,6 +21,7 @@
       "default": "./src/index.js"
     },
     "./src/extension-support/block-type": "./src/extension-support/block-type",
+    "./src/extensions/koshien/mock-maps": "./src/extensions/koshien/mock-maps.js",
     "./src/import/load-costume": "./src/import/load-costume.js",
     "./src/import/load-sound": "./src/import/load-sound.js"
   },
@@ -56,6 +57,7 @@
     "test": "npm run lint && npm run tap",
     "test:unit": "tap ./test/unit/*.js",
     "test:integration": "tap './test/integration/*.js' './test/integration/**/*.js'",
+    "koshien:mock-server": "node ./test/fixtures/koshien/mock-server.js",
     "watch": "webpack --progress --watch"
   },
   "browserslist": [

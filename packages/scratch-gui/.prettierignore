@@ -4,8 +4,9 @@
 # How it works: ignore everything, then re-include Smalruby directories/files
 # level by level (gitignore requires parent dirs to be un-ignored first).
 #
-# Canonical file list: .claude/rules/scratch-gui/smalruby-prettier-files.md
-# When adding new Smalruby-specific files, update both this file and the doc.
+# This file is the canonical whitelist of Smalruby-specific files for Prettier.
+# (The .claude/rules mirror was removed; this file is the single source of truth.)
+# When adding a new Smalruby-specific file, add it here.
 
 # ============================================================
 # Level 0: Ignore everything at root
@@ -41,10 +42,13 @@ src/components/*
 !src/components/google-drive-save-dialog/
 !src/components/dncl-mode-notice/
 !src/components/koshien-test-modal/
+!src/components/koshien-settings-modal/
+!src/components/koshien-mock-panel/
 !src/components/mesh-self-sensor-notice/
 !src/components/mobile-bottom-tabs/
 !src/components/mobile-drawer/
 !src/components/mobile-gui/
+!src/components/mobile-mode-notice/
 !src/components/mobile-orientation-gate/
 !src/components/mobile-paint-toolbar-toggle/
 !src/components/mobile-side-rail/
@@ -99,13 +103,18 @@ src/containers/*
 !src/containers/classroom-modal.jsx
 !src/containers/classroom-teacher-modal.jsx
 !src/containers/use-google-classroom.js
+!src/containers/use-student-assignment.js
 !src/containers/use-student-submit.js
+!src/containers/use-teacher-assignment.js
 !src/containers/use-teacher-auth.js
 !src/containers/use-teacher-classroom.js
 !src/containers/use-teacher-classrooms.js
+!src/containers/use-teacher-evaluation.js
+!src/containers/use-teacher-groups.js
 !src/containers/use-teacher-submissions.js
 !src/containers/extension-library.css
 !src/containers/google-drive-loader-hoc.jsx
+!src/containers/koshien-mock-panel.jsx
 !src/containers/mesh-self-sensor-notice.jsx
 !src/containers/google-drive-saver-hoc.jsx
 !src/containers/ruby-downloader.jsx
@@ -130,8 +139,14 @@ src/lib/*
 !src/lib/auto-correct.js
 !src/lib/backpack-mesh-v1-migration.js
 !src/lib/bug-report-api.js
+!src/lib/koshien-mock-config.js
+!src/lib/koshien-test-url.js
 !src/lib/deck-setup.js
 !src/lib/classroom-api.js
+!src/lib/classroom-assignment-utils.js
+!src/lib/classroom-assignment-templates/
+!src/lib/classroom-evaluation/
+!src/lib/classroom-group-utils.js
 !src/lib/classroom-kick-request-storage.js
 !src/lib/google-classroom-auth.js
 !src/lib/block-utils.js
@@ -175,12 +190,14 @@ src/lib/*
 !src/lib/url-loader.js
 !src/lib/url-params.js
 !src/lib/url-parser.js
+!src/lib/use-display-mode.js
 !src/lib/use-is-narrow-screen.js
 !src/lib/version-checker.js
 
 # Level 3: src/lib/libraries/*
 src/lib/libraries/*
 !src/lib/libraries/extensions/
+!src/lib/libraries/decks/
 
 # Level 4: src/lib/libraries/extensions/*
 src/lib/libraries/extensions/*
@@ -190,6 +207,16 @@ src/lib/libraries/extensions/*
 !src/lib/libraries/extensions/microbitMore/
 !src/lib/libraries/extensions/smalruby-ruby/
 !src/lib/libraries/extensions/tm2scratch/
+
+# Level 4: src/lib/libraries/decks/*
+# index.jsx and the other pre-existing deck assets are upstream-derived and
+# not (yet) whitelisted; only the new per-category modules are Smalruby-only
+# (issue #932).
+src/lib/libraries/decks/*
+!src/lib/libraries/decks/categories/
+!src/lib/libraries/decks/green-flag-icon.jsx
+
+# Level 5: src/lib/libraries/decks/categories/* — Smalruby-only, no filter needed
 
 # ============================================================
 # Level 2: src/locales/*
@@ -212,6 +239,7 @@ src/reducers/*
 !src/reducers/extension-filter.js
 !src/reducers/google-drive-file.js
 !src/reducers/koshien-file.js
+!src/reducers/koshien-mock-panel.js
 !src/reducers/mesh-v2.js
 !src/reducers/palette-visibility.js
 !src/reducers/ruby-code.js
@@ -259,6 +287,7 @@ test/integration/*
 !test/integration/palette-toggle-position.test.js
 !test/integration/version-update-notification.test.js
 !test/integration/workspace-glow-regression.test.js
+!test/integration/sounds-direct-nav.test.js
 
 # ============================================================
 # Level 2: test/unit/*
@@ -280,12 +309,19 @@ test/unit/*
 test/unit/components/*
 !test/unit/components/action-menu.test.jsx
 !test/unit/components/bug-report-consent.test.jsx
+!test/unit/components/koshien-mock-panel.test.jsx
+!test/unit/components/koshien-settings-modal.test.jsx
+!test/unit/components/koshien-test-modal.test.jsx
+!test/unit/components/url-loader-modal.test.jsx
 !test/unit/components/dncl-mode-notice.test.jsx
 !test/unit/components/extension-button-dncl.test.jsx
 !test/unit/components/connected-step.test.jsx
 !test/unit/components/mesh-self-sensor-notice.test.jsx
+!test/unit/components/student-assignment-panel.test.jsx
+!test/unit/components/teacher-class-detail.test.jsx
 !test/unit/components/mobile-bottom-tabs.test.jsx
 !test/unit/components/mobile-drawer.test.jsx
+!test/unit/components/mobile-mode-notice.test.jsx
 !test/unit/components/mobile-orientation-gate.test.jsx
 !test/unit/components/mobile-side-rail.test.jsx
 !test/unit/components/mobile-sprite-panel.test.jsx
@@ -308,11 +344,13 @@ test/unit/containers/*
 !test/unit/containers/connection-modal-connected-message.test.jsx
 !test/unit/containers/connection-modal-smalrubot-s1.test.jsx
 !test/unit/containers/connection-modal.test.jsx
+!test/unit/containers/use-teacher-groups-topics.test.js
 !test/unit/containers/google-drive-saver-hoc.test.jsx
 !test/unit/containers/google-drive-state-management.test.jsx
 !test/unit/containers/ruby-downloader.test.jsx
 !test/unit/containers/ruby-tab-project-changed.test.js
 !test/unit/containers/rubytee-modal-hoc-sanitize.test.js
+!test/unit/containers/stage-header.test.jsx
 
 # Level 3: test/unit/helpers/* — Smalruby-only, no filter needed
 
@@ -320,6 +358,7 @@ test/unit/containers/*
 test/unit/lib/*
 # Smalruby-only directories
 !test/unit/lib/dncl/
+!test/unit/lib/libraries/
 !test/unit/lib/ruby-generator/
 !test/unit/lib/ruby-roundtrip/
 !test/unit/lib/ruby-to-blocks-converter/
@@ -330,12 +369,20 @@ test/unit/lib/*
 !test/unit/lib/backpack-mesh-v1-migration.test.js
 !test/unit/lib/block-display-initialization.test.js
 !test/unit/lib/bug-report-api.test.js
+!test/unit/lib/koshien-mock-config.test.js
+!test/unit/lib/koshien-test-url.test.js
 !test/unit/lib/blockly-private-api.test.js
 !test/unit/lib/blocks-gesture-recovery.test.js
 !test/unit/lib/classroom-api.test.js
+!test/unit/lib/classroom-assignment-templates.test.js
+!test/unit/lib/classroom-assignment-utils.test.js
+!test/unit/lib/classroom-group-utils.test.js
+!test/unit/lib/evaluation-utils.test.js
+!test/unit/lib/sb3-analyzer.test.js
 !test/unit/lib/classroom-kick-request-storage.test.js
 !test/unit/lib/deck-setup.test.js
 !test/unit/lib/blocks-screenshot.test.js
+!test/unit/lib/download-blob.test.js
 !test/unit/lib/calculate-popup-position.test.js
 !test/unit/lib/calculate-popup-position-regression.test.js
 !test/unit/lib/furigana-annotator-perf.test.js
@@ -343,6 +390,9 @@ test/unit/lib/*
 !test/unit/lib/google-drive-api.test.js
 !test/unit/lib/touch-device.test.js
 !test/unit/lib/url-loader.test.js
+!test/unit/lib/url-loader-hoc.test.jsx
+!test/unit/lib/project-loader-utils.test.js
+!test/unit/reducers/project-state-restore.test.js
 !test/unit/lib/insert-class.test.js
 !test/unit/lib/join-code-history.test.js
 !test/unit/lib/layout-constants.test.js
@@ -350,7 +400,9 @@ test/unit/lib/*
 !test/unit/lib/make-toolbox-xml.test.js
 !test/unit/lib/mesh-v2-classroom-binding.test.js
 !test/unit/lib/mesh-v2-sensor-collision.test.js
+!test/unit/lib/display-mode-persistence.test.js
 !test/unit/lib/responsive-gui.test.jsx
+!test/unit/lib/use-display-mode.test.js
 !test/unit/lib/use-is-narrow-screen.test.js
 !test/unit/lib/module-sync.test.js
 !test/unit/lib/prism-parser.test.js
@@ -378,10 +430,12 @@ test/unit/lib/*
 !test/unit/lib/smalruby-original-sprites.test.js
 !test/unit/lib/setup-prism.js
 !test/unit/lib/version-checker.test.js
+!test/unit/lib/audio-buffer-player.test.js
 
 # Level 3: test/unit/reducers/*
 test/unit/reducers/*
 !test/unit/reducers/bug-report-reducer.test.js
+!test/unit/reducers/koshien-mock-panel-reducer.test.js
 !test/unit/reducers/cards_reducer.test.js
 !test/unit/reducers/dncl-mode-reducer.test.js
 !test/unit/reducers/classroom-reducer.test.js

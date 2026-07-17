@@ -76,6 +76,46 @@ import rubyBasics1Step3 from './steps/ruby-basics-1-3-result.png';
 import rubyBasics1Step4 from './steps/ruby-basics-1-4-more-math.png';
 import rubyBasics1Step5 from './steps/ruby-basics-1-5-modify.png';
 
+// Ruby Basics 2: 文字列で遊ぼう
+import rubyBasics2Step1 from './steps/ruby-basics-2-1-intro.png';
+import rubyBasics2Step2 from './steps/ruby-basics-2-2-first-puts.png';
+import rubyBasics2Step3 from './steps/ruby-basics-2-3-result.png';
+import rubyBasics2Step4 from './steps/ruby-basics-2-4-methods.png';
+import rubyBasics2Step5 from './steps/ruby-basics-2-5-modify.png';
+
+// Ruby Basics 3: 変数を使ってみよう
+import rubyBasics3Step1 from './steps/ruby-basics-3-1-intro.png';
+import rubyBasics3Step2 from './steps/ruby-basics-3-2-first-var.png';
+import rubyBasics3Step3 from './steps/ruby-basics-3-3-result.png';
+import rubyBasics3Step4 from './steps/ruby-basics-3-4-sentence.png';
+import rubyBasics3Step5 from './steps/ruby-basics-3-5-modify.png';
+
+// Ruby Basics 4: 配列で遊ぼう
+import rubyBasics4Step1 from './steps/ruby-basics-4-1-intro.png';
+import rubyBasics4Step2 from './steps/ruby-basics-4-2-first-array.png';
+import rubyBasics4Step3 from './steps/ruby-basics-4-3-result.png';
+import rubyBasics4Step4 from './steps/ruby-basics-4-4-methods.png';
+import rubyBasics4Step5 from './steps/ruby-basics-4-5-modify.png';
+
+// Ruby Basics 5: ブロック（times）を使ってみよう
+import rubyBasics5Step1 from './steps/ruby-basics-5-1-intro.png';
+import rubyBasics5Step2 from './steps/ruby-basics-5-2-first-times.png';
+import rubyBasics5Step3 from './steps/ruby-basics-5-3-result.png';
+import rubyBasics5Step4 from './steps/ruby-basics-5-4-move.png';
+import rubyBasics5Step5 from './steps/ruby-basics-5-5-modify.png';
+
+// Ruby Basics 6: メソッドをつくってみよう
+import rubyBasics6Step1 from './steps/ruby-basics-6-1-intro.png';
+import rubyBasics6Step2 from './steps/ruby-basics-6-2-first-def.png';
+import rubyBasics6Step3 from './steps/ruby-basics-6-3-result.png';
+import rubyBasics6Step4 from './steps/ruby-basics-6-4-multiple-calls.png';
+import rubyBasics6Step5 from './steps/ruby-basics-6-5-modify.png';
+
+// Ruby Basics 7: 次に進もう (TryRuby 導線)。レビュー用ステップは deck 1/2 の
+// 画像を流用し、最終ステップだけ TryRuby のスクリーンショットを見せる
+// (docs/tutorial/improvement-plan.md Phase 2 / tutorial.md「画像の流用ルール」)。
+import rubyBasics7TryRuby from './thumbnails/ruby-basics-1-tryruby.png';
+
 const jaImages = {
     // Getting Started
     introRubyTab: introRubyTab,
@@ -143,7 +183,39 @@ const jaImages = {
     rubyBasics1Step2: rubyBasics1Step2,
     rubyBasics1Step3: rubyBasics1Step3,
     rubyBasics1Step4: rubyBasics1Step4,
-    rubyBasics1Step5: rubyBasics1Step5
+    rubyBasics1Step5: rubyBasics1Step5,
+    // Ruby Basics 2: 文字列で遊ぼう
+    rubyBasics2Step1: rubyBasics2Step1,
+    rubyBasics2Step2: rubyBasics2Step2,
+    rubyBasics2Step3: rubyBasics2Step3,
+    rubyBasics2Step4: rubyBasics2Step4,
+    rubyBasics2Step5: rubyBasics2Step5,
+    // Ruby Basics 3: 変数を使ってみよう
+    rubyBasics3Step1: rubyBasics3Step1,
+    rubyBasics3Step2: rubyBasics3Step2,
+    rubyBasics3Step3: rubyBasics3Step3,
+    rubyBasics3Step4: rubyBasics3Step4,
+    rubyBasics3Step5: rubyBasics3Step5,
+    // Ruby Basics 4: 配列で遊ぼう
+    rubyBasics4Step1: rubyBasics4Step1,
+    rubyBasics4Step2: rubyBasics4Step2,
+    rubyBasics4Step3: rubyBasics4Step3,
+    rubyBasics4Step4: rubyBasics4Step4,
+    rubyBasics4Step5: rubyBasics4Step5,
+    // Ruby Basics 5: ブロック（times）を使ってみよう
+    rubyBasics5Step1: rubyBasics5Step1,
+    rubyBasics5Step2: rubyBasics5Step2,
+    rubyBasics5Step3: rubyBasics5Step3,
+    rubyBasics5Step4: rubyBasics5Step4,
+    rubyBasics5Step5: rubyBasics5Step5,
+    // Ruby Basics 6: メソッドをつくってみよう
+    rubyBasics6Step1: rubyBasics6Step1,
+    rubyBasics6Step2: rubyBasics6Step2,
+    rubyBasics6Step3: rubyBasics6Step3,
+    rubyBasics6Step4: rubyBasics6Step4,
+    rubyBasics6Step5: rubyBasics6Step5,
+
+    rubyBasics7TryRuby: rubyBasics7TryRuby
 };
 
 export {jaImages};

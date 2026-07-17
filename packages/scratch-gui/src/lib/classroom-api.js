@@ -7,6 +7,21 @@
 
 const CLASSROOM_API_ENDPOINT = process.env.CLASSROOM_API_ENDPOINT || '';
 
+/**
+ * Extract the host (e.g. "classroom.api.smalruby.app") from the configured
+ * classroom API endpoint. Used to build an actionable network-error message
+ * without hard-coding the host (it differs between prod/stg). Falls back to
+ * the raw endpoint string if it cannot be parsed as a URL.
+ * @returns {string} The endpoint host, or the raw endpoint if unparseable.
+ */
+const getEndpointHost = () => {
+    try {
+        return new URL(CLASSROOM_API_ENDPOINT).host;
+    } catch (e) {
+        return CLASSROOM_API_ENDPOINT;
+    }
+};
+
 class ClassroomAPI {
     /**
      * Check if the classroom API is configured.
@@ -23,12 +38,20 @@ class ClassroomAPI {
      * @param {string} assignmentName - Name of the assignment
      * @param {number} studentCount - Number of students
      * @param {string} [googleClassroomCourseId] - Google Classroom course ID (for imported classes)
+     * @param {string} [groupId] - Owning class (group) — inherits studentCount when omitted
      * @returns {Promise<object>} Created classroom data
      */
-    async createClassroom(idToken, className, assignmentName, studentCount, googleClassroomCourseId) {
-        const body = { className, assignmentName, studentCount };
+    async createClassroom(idToken, className, assignmentName, studentCount, googleClassroomCourseId, groupId) {
+        const body = { className, assignmentName };
+        // v2: omit studentCount to inherit it from the owning class (group)
+        if (typeof studentCount === 'number') {
+            body.studentCount = studentCount;
+        }
         if (googleClassroomCourseId) {
             body.googleClassroomCourseId = googleClassroomCourseId;
+        }
+        if (groupId) {
+            body.groupId = groupId;
         }
         return this._request('POST', '/classrooms', body, idToken);
     }
@@ -263,6 +286,111 @@ class ClassroomAPI {
         return this._request('PATCH', `/classrooms/${classroomId}/submissions/${submissionId}`, updates, idToken);
     }
 
+    // --- Groups (組) ---
+
+    /**
+     * Create a group (組) — the teacher-side organizing concept.
+     * @param {string} idToken - Teacher ID token
+     * @param {string} name - Group name (e.g. 2年1組)
+     * @param {number} year - School year
+     * @param {object} [options] - Additional class fields (studentCount, googleClassroomCourseId)
+     * @returns {Promise<object>} Created group
+     */
+    async createGroup(idToken, name, year, options = {}) {
+        return this._request('POST', '/classroom-groups', { name, year, ...options }, idToken);
+    }
+
+    /**
+     * Run the idempotent v1→v2 migration for this teacher: adopt ungrouped
+     * assignments into auto-created classes and lift class-level fields.
+     * Called from the class list on login; a migrated account is a no-op.
+     * @param {string} idToken - Teacher ID token
+     * @returns {Promise<object>} Migration summary
+     */
+    async migrateGroups(idToken) {
+        return this._request('POST', '/classroom-groups/migrate', {}, idToken);
+    }
+
+    /**
+     * Manage the class's topic list. Rename/remove cascade to assignments.
+     * @param {string} idToken - Teacher ID token
+     * @param {string} groupId - Group (class) ID
+     * @param {object} payload - {action: 'add'|'remove'|'rename', name, to?}
+     * @returns {Promise<object>} Updated group summary
+     */
+    async updateGroupTopics(idToken, groupId, payload) {
+        return this._request('PATCH', `/classroom-groups/${groupId}/topics`, payload, idToken);
+    }
+
+    /**
+     * List the teacher's groups (active and archived).
+     * @param {string} idToken - Teacher ID token
+     * @returns {Promise<object>} {groups}
+     */
+    async listGroups(idToken) {
+        return this._request('GET', '/classroom-groups', null, idToken);
+    }
+
+    /**
+     * Update a group (rename / change year / archive / unarchive).
+     * @param {string} idToken - Teacher ID token
+     * @param {string} groupId - Group ID
+     * @param {object} updates - {name?, year?, status?}
+     * @returns {Promise<object>} Updated group
+     */
+    async updateGroup(idToken, groupId, updates) {
+        return this._request('PATCH', `/classroom-groups/${groupId}`, updates, idToken);
+    }
+
+    /**
+     * Duplicate a classroom (lesson) with its assignment content.
+     * @param {string} idToken - Teacher ID token
+     * @param {string} classroomId - Source classroom ID
+     * @param {object} [options] - {groupId?, className?, assignmentName?}
+     * @returns {Promise<object>} Created classroom
+     */
+    async duplicateClassroom(idToken, classroomId, options = {}) {
+        return this._request('POST', `/classrooms/${classroomId}/duplicate`, options, idToken);
+    }
+
+    /**
+     * AI evaluation support: grade proposals or comment drafts from
+     * static-analysis results (max 10 submissions per call — chunk a class).
+     * @param {string} idToken - Teacher ID token
+     * @param {string} classroomId - Classroom ID
+     * @param {object} payload - {mode, assignmentName, assignmentText,
+     *   rubricAxes, strictness, samples, submissions}
+     * @returns {Promise<object>} {mode, results}
+     */
+    async evaluateSubmissions(idToken, classroomId, payload) {
+        return this._request('POST', `/classrooms/${classroomId}/evaluate`, payload, idToken);
+    }
+
+    /**
+     * Set (replace) the assignment content of a classroom (teacher only).
+     * Pages carry either `newImage` (MIME type, requests a fresh upload URL)
+     * or `imageKey` (keep the existing object). `newStarter` / `keepStarter`
+     * control the starter project. An empty payload clears the assignment.
+     * @param {string} idToken - Teacher ID token
+     * @param {string} classroomId - Classroom ID
+     * @param {object} payload - {pages, newStarter, keepStarter}
+     * @returns {Promise<object>} {assignment, imageUploadUrls, starterUploadUrl}
+     */
+    async setAssignment(idToken, classroomId, payload) {
+        return this._request('PUT', `/classrooms/${classroomId}/assignment`, payload, idToken);
+    }
+
+    /**
+     * Get the assignment content of a classroom with download URLs.
+     * Accepts either a teacher ID token or a student session token.
+     * @param {string} token - Teacher ID token or student session token
+     * @param {string} classroomId - Classroom ID
+     * @returns {Promise<object>} {assignment} — null when no assignment is set
+     */
+    async getAssignment(token, classroomId) {
+        return this._request('GET', `/classrooms/${classroomId}/assignment`, null, token);
+    }
+
     /**
      * Upload data to a presigned URL.
      * @param {string} url - Presigned URL
@@ -347,14 +475,32 @@ class ClassroomAPI {
         }
 
         const options = { method, headers };
-        if (body && (method === 'POST' || method === 'PATCH')) {
+        if (body && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
             options.body = JSON.stringify(body);
         }
 
         const maxRetries = 3;
         let lastError;
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
-            const response = await fetch(url, options);
+            let response;
+            try {
+                response = await fetch(url, options);
+            } catch (err) {
+                // fetch rejects with a TypeError when the request never reaches
+                // the server (DNS failure, firewall block, offline, CORS
+                // preflight refusal). This is NOT an HTTP response error, so we
+                // flag it distinctly and expose the unreachable host so the UI
+                // can show an actionable message instead of the raw
+                // "Failed to fetch". Do not retry — retrying an unreachable
+                // host just delays the error.
+                if (err instanceof TypeError) {
+                    const netError = new Error(err.message || 'Network request failed');
+                    netError.isNetworkError = true;
+                    netError.endpointHost = getEndpointHost();
+                    throw netError;
+                }
+                throw err;
+            }
 
             if (response.status === 204) return null;
 
