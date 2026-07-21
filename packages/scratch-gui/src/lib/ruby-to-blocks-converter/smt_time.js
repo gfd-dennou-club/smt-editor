@@ -64,7 +64,7 @@ const SmT_Time_Converter = {
 	    return null;
         });
 
-	['str_datetime', 'str_date', 'str_time', 'year', 'mon', 'mday', 'wday', 'hour', 'min', 'sec', 'msec'].forEach(method => {
+	['datetime', 'date', 'time', 'year', 'mon', 'mday', 'wday', 'hour', 'min', 'sec', 'msec'].forEach(method => {
             converter.registerOnSend('variable', method, 0, (params) => {
                 const { receiver, node, args } = params;
                 const varName = receiver.fields?.VARIABLE?.value || "";

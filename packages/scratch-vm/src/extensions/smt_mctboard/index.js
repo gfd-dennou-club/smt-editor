@@ -227,7 +227,8 @@ class Mctboard {
                         TEXT: { type: ArgumentType.STRING, defaultValue: "hello"}
                     }
                 },
-		{
+/*
+	        {
 		    opcode: 'wifi_init',
 		    text: formatMessage({
                         id: 'mctboard.wifi_init',
@@ -316,6 +317,7 @@ class Mctboard {
 			TIME: { type: ArgumentType.STRING, menu: 'menuRTC' }
                     }
                 },
+*/		    
                 {
                     opcode: 'gps_puts',
                     text: formatMessage({
@@ -340,6 +342,7 @@ class Mctboard {
                     text: formatMessage({ id: 'mctboard.gps_clear', default: 'clear GPS buffer'}),
                     blockType: BlockType.COMMAND
                 },
+/*		
                 {
                     opcode: 'sd_open',
                     text: formatMessage({
@@ -382,6 +385,7 @@ class Mctboard {
                     }),		    		    
                     blockType: BlockType.COMMAND,
                 },
+*/		    
 	    ],
             //ドロップボックスメニューを使う場合は以下に定義が必要
             menus: {

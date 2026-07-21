@@ -14,6 +14,11 @@ const SmT_SPI_SDcard_Converter = {
 	    
 	    // 共通関数で変数ブロックを接続
 	    const varName = Utils.attachVariableBlock(converter, rh, "INSTANCE2", variable);
+
+	    //インスタンス名は決め打ち
+	    const instance = "_sdspi_1_";
+	    if (varName !== instance) return null;
+	    
 	    converter._instanceTypeMap[varName] = "SDSPI";
 	    return rh;
         });
@@ -26,8 +31,6 @@ const SmT_SPI_SDcard_Converter = {
 	    Utils.fixLocationToLineStart(block);
 	    
 	    if (block) {
-		converter.addInput(block, "INSTANCE1", args[0]);
-
 		const pin = Number(args[1]?.get("sym:cs_pin").value);
                 converter.addNumberInput(block, "PIN", "math_integer", pin, 0);
                 
@@ -49,7 +52,6 @@ const SmT_SPI_SDcard_Converter = {
             const block = converter.createBlock(opcode, "statement", node);
 	    
             if (block) {	
-                Utils.attachVariableBlock(converter, block, "INSTANCE", receiver);	
                 return block;
             }
             return null;            
@@ -62,6 +64,11 @@ const SmT_SPI_SDcard_Converter = {
 	    
 	    // 共通関数で変数ブロックを接続
 	    const varName = Utils.attachVariableBlock(converter, rh, "INSTANCE", variable);
+
+	    //インスタンス名は決め打ち
+	    const instance = "_file_1_";
+	    if (varName !== instance) return null;
+	    
 	    converter._instanceTypeMap[varName] = "SDSPI_FILE";
 	    return rh;
         });
@@ -73,9 +80,6 @@ const SmT_SPI_SDcard_Converter = {
             
 	    Utils.fixLocationToLineStart(block);
 
-	    console.log(args[0]);
-	    console.log(args[1]);
-	    
 	    if (block) {
 		converter.addTextInput(block, "FILE", args[0], "");
 		converter.addField(block, "MODE", args[1]);
@@ -94,7 +98,6 @@ const SmT_SPI_SDcard_Converter = {
             const block = converter.createBlock(opcode, "statement", node);
 	    
             if (block) {	
-                Utils.attachVariableBlock(converter, block, "INSTANCE", receiver);	
                 return block;
             }
             return null;            
@@ -111,7 +114,6 @@ const SmT_SPI_SDcard_Converter = {
                 const block = converter.createBlock(opcode, "value", node);
 
                 if (block) {
-                    Utils.attachVariableBlock(converter, block, "INSTANCE", receiver);
 		    converter.addField(block, "MODE", method);
                     return block;
                 }
@@ -129,7 +131,6 @@ const SmT_SPI_SDcard_Converter = {
             const block = converter.createBlock(opcode, "statement", node);
 	    
             if (block) {	
-                Utils.attachVariableBlock(converter, block, "INSTANCE", receiver);
 		converter.addTextInput(block, "TEXT", args[0], "");
                 return block;
             }

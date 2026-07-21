@@ -1,6 +1,7 @@
 /**
  * converter for Utils
  */
+
 const SmT_Utils_Converter = {
     register: function (converter) {
 
@@ -78,3 +79,4 @@ const SmT_Utils_Converter = {
 };
 
 export default SmT_Utils_Converter;
+

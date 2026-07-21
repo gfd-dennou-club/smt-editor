@@ -14,6 +14,11 @@ const SmT_Network_Converter = {
 	    
 	    // 共通関数で変数ブロックを接続
 	    const varName = Utils.attachVariableBlock(converter, rh, "INSTANCE", variable);
+
+	    //インスタンス名は決め打ち
+	    const instance = "_wlan_1_";
+	    if (varName !== instance) return null;
+	    
 	    converter._instanceTypeMap[varName] = "WLAN";
 	    return rh;
         });
@@ -42,7 +47,6 @@ const SmT_Network_Converter = {
             const block = converter.createBlock(opcode, "statement", node);
 
             if (block) {
-                Utils.attachVariableBlock(converter, block, "INSTANCE", receiver);
 		converter.addTextInput(block, "SSID", args[0], '');
 		converter.addTextInput(block, "PASS", args[1], '');
                 return block;
@@ -61,7 +65,6 @@ const SmT_Network_Converter = {
             const block = converter.createBlock(opcode, "value", node);
 
             if (block) {
-                Utils.attachVariableBlock(converter, block, "INSTANCE", receiver);
                 return block;
             }
             return null;

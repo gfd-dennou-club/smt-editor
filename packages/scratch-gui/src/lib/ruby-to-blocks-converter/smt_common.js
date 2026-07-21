@@ -2,6 +2,22 @@
  * Smalruby Converter Common Utilities
  */
 const SmT_Common = {
+
+    /**
+     * 変数名から特定のプレフィックス（クラス名の小文字）を除去して、ピン番号を抽出する
+     * 「gpio13」およびScratch内部名「_gpio13_1_」の両方に対応
+     * @param {string} varName - 変数名
+     * @param {string} prefix - プレフィックス (例: "gpio")
+     * @returns {number|null} ピン番号。マッチしない場合は null
+     */
+    getPinFromVarName: function (varName, prefix) {
+        if (!varName) return null;
+        // 例: "_gpio13_1_" や "gpio13" から "13" をグループ2として抽出する
+        const regex = new RegExp(`^(_)?${prefix}(\\d+)(?:_\\d+)?_?$`);
+        const match = varName.match(regex);
+        return match ? parseInt(match[2], 10) : null;
+    },
+    
     /**
      * 指定したブロックの穴（inputName）に変数ブロックを生成して接続する
      * @param {object} converter - Smalrubyのconverterオブジェクト
@@ -34,7 +50,7 @@ const SmT_Common = {
             varName = varSource.name || varSource.value || (varField ? varField.value : "");
             varId = varSource.id || (varField ? varField.id : null);
         }
-
+	
         const vBlock = converter.createBlock('data_variable', 'value');
         converter.addField(vBlock, 'VARIABLE', varName);
         
@@ -120,6 +136,14 @@ const SmT_Common = {
             return isJapanese 
                 ? `エラー：${argTextJa} 0から100までの整数（デューティ比）を指定してください。` 
                 : `Error: ${argTextEn} must be an integer between 0 and 100.`;
+        case 'INVALID_INSTANCE_NAME':
+            return isJapanese 
+                ? `エラー：${argTextJa} インスタンス名に含まれる数字はピン番号にしてください (例: adc12 = ADC.new(12)。` 
+                : `Error: ${argTextEn} instance name must match the pin number (eg. adc12 = ADC.new(12)).`;
+        case 'INVALID_INSTANCE_NAME2':
+            return isJapanese 
+                ? `エラー：${argTextJa} インスタンス名はクラス名の小文字としてください (例: i2c = I2C.new)。` 
+                : `Error: ${argTextEn} instance name must match the class name (eg. i2c = I2C.new).`;
         default:
             return isJapanese 
                 ? "予期せぬエラーが発生しました。" 

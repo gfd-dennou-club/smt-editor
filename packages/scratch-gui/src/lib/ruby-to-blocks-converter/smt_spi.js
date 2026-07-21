@@ -9,12 +9,19 @@ const SmT_SPI_Converter = {
 
         converter._instanceTypeMap = converter._instanceTypeMap || {};
 
-        // --- 代入 ($spi1 = SPI.new) ---
+        // --- 代入 ($spi = SPI.new) ---
         converter.registerOnVasgn((scope, variable, rh) => {
             if (rh?.opcode !== "unifiedapi_spi_init") return null;
 
-            // 共通関数で変数ブロックを接続
             const varName = Utils.attachVariableBlock(converter, rh, "INSTANCE", variable);
+	    
+	    //インスタンス名は spi で決め打ち
+	    if (varName !== '_spi_1_'){
+		throw new Error(
+                    Utils.getErrorMessage('INVALID_INSTANCE_NAME2')
+                );
+	    }
+
             converter._instanceTypeMap[varName] = "SPI";
             return rh;
         });
@@ -52,7 +59,6 @@ const SmT_SPI_Converter = {
             const block = converter.createBlock(opcode, "statement", node);
 	    
             if (block) {
-                Utils.attachVariableBlock(converter, block, "INSTANCE", receiver);
 		converter.addTextInput(block, "HEX1", `0x${args[0].value.toString(16).toUpperCase().padStart(2, '0')}`, '0x00');
 		converter.addTextInput(block, "HEX2", `0x${args[1].value.toString(16).toUpperCase().padStart(2, '0')}`, '0x00');
                 return block;
@@ -71,7 +77,6 @@ const SmT_SPI_Converter = {
             const block = converter.createBlock(opcode, "value", node);
 	    
             if (block) {
-                Utils.attachVariableBlock(converter, block, "INSTANCE", receiver);
 		converter.addNumberInput(block, 'BYTES', "math_integer", Number(args[0].value), 0);
                 return block;
             }

@@ -35,7 +35,6 @@ const PeripheralsMenus = {
 	    { id: 'peripherals.menu_dist', default: 'Distance',    value: 'distance'}
 	]
     },    
-/*
     menuILI934Xline: {
 	items: [
 	    { id: 'peripherals.menuILI934Xline_line', default: 'Line', value: 'line' },
@@ -60,7 +59,6 @@ const PeripheralsMenus = {
 
 	]
     },
-*/
     menuSensors2: {
 	items: [
 	    { text: 'PCF85063', value: 'PCF85063' },
@@ -74,9 +72,9 @@ const PeripheralsMenus = {
     },
     menuTime: {
 	items: [
-	    {id: 'mctboard.menuTime_str_datetime', default: '%Y%m%d %H%M%S', value: 'datetime' },
-	    {id: 'mctboard.menuTime_str_date', default: '%Y-%m-%d', value: 'date' },
-	    {id: 'mctboard.menuTime_str_time', default: '%H:%M:%S', value: 'time' },
+	    {id: 'mctboard.menuTime_str_datetime', default: '%Y%m%d %H%M%S', value: 'str_datetime' },
+	    {id: 'mctboard.menuTime_str_date', default: '%Y-%m-%d', value: 'str_date' },
+	    {id: 'mctboard.menuTime_str_time', default: '%H:%M:%S', value: 'str_time' },
 	    {id: 'mctboard.menuTime_year', default: '%Y', value: 'year' },
 	    {id: 'mctboard.menuTime_mon',  default: '%m', value: 'mon' },
 	    {id: 'mctboard.menuTime_mday', default: '%d', value: 'mday' },
@@ -87,6 +85,19 @@ const PeripheralsMenus = {
 	    {id: 'mctboard.menuTime_msec', default: '%ms', value: 'msec' }
 	]
     },
+/*    
+    menuSNTP: {
+	items: [
+	    {id: 'mctboard.menuSNTP_year', default: '%Y', value: 'year' },
+	    {id: 'mctboard.menuSNTP_mon',  default: '%m', value: 'mon' },
+	    {id: 'mctboard.menuSNTP_mday', default: '%d', value: 'mday' },
+	    {id: 'mctboard.menuSNTP_wday', default: '%w', value: 'wday' },
+	    {id: 'mctboard.menuSNTP_hour', default: '%H', value: 'hour' },
+	    {id: 'mctboard.menuSNTP_min',  default: '%M', value: 'min' },
+	    {id: 'mctboard.menuSNTP_sec',  default: '%S', value: 'sec' }
+	]
+    },
+*/	
     menuSDopen: {
 	items: [
 	    {id: 'mctboard.menuSDopen_w', default: '(new)', value: 'w' },
@@ -133,10 +144,18 @@ class Peripherals {
                     opcode: 'i2c_sensor_init',
                     text: formatMessage({
                         id: 'peripherals.i2c_sensor_init',
-                        default: 'I2C: setup [SENSOR]'
+                        default: 'I2C: setup [SENSOR] named [INSTANCE2] using [INSTANCE1]'
                     }),
                     blockType: BlockType.COMMAND,
                     arguments: {
+                        INSTANCE1: {
+                            type: ArgumentType.STRING,
+                            defaultValue: '[i2c]'
+			},
+                        INSTANCE2: {
+                            type: ArgumentType.STRING,
+                            defaultValue: '[sensor]'
+			},
                         SENSOR: {
                             type: ArgumentType.STRING,
                             menu: 'menuSensors'
@@ -147,28 +166,28 @@ class Peripherals {
                     opcode: 'i2c_sensor_read',
                     text: formatMessage({
                         id: 'peripherals.i2c_sensor_read',
-                        default: 'I2C: [SENSOR] fetch all data' 
+                        default: 'I2C: [INSTANCE] fetch all data' 
                     }),
                     blockType: BlockType.COMMAND,
                     arguments: {
-                        SENSOR: {
+                        INSTANCE: {
                             type: ArgumentType.STRING,
-                            menu: 'menuSensors'
-                        }
+                            defaultValue: '[sensor]'
+			}
                     }		    
                 }, 
                 {
                     opcode: 'i2c_sensor_value',
                     text: formatMessage({
                         id: 'peripherals.i2c_sensor_value',
-                        default: 'I2C: [TARGET] of [SENSOR]' 
+                        default: 'I2C: [TARGET] of [INSTANCE]' 
                     }),
                     blockType: BlockType.REPORTER,
                     arguments: {
-                        SENSOR: {
+                        INSTANCE: {
                             type: ArgumentType.STRING,
-                            menu: 'menuSensors'
-                        },
+                            defaultValue: '[sensor]'
+			},
                         TARGET: {
                             type: ArgumentType.STRING,
                             menu: 'menuTargets'
@@ -227,11 +246,19 @@ class Peripherals {
                     opcode: 'lcd_init',
                     text: formatMessage({
                         id: 'peripherals.lcd_init',
-                        default: 'LCD: setup [LCD]'
+                        default: 'LCD: setup [SENSOR] named [INSTANCE2] using [INSTANCE1]'
                     }),		    		    
                     blockType: BlockType.COMMAND,
                     arguments: {
-                        LCD: {
+                        INSTANCE1: {
+                            type: ArgumentType.STRING,
+                            defaultValue: '[i2c]'
+			},
+                        INSTANCE2: {
+                            type: ArgumentType.STRING,
+                            defaultValue: '[lcd]'
+			},
+                        SENSOR: {
                             type: ArgumentType.STRING,
                             menu: 'menuLCD'
                         }
@@ -241,13 +268,13 @@ class Peripherals {
                     opcode: 'lcd_cursor',
                     text: formatMessage({
                         id: 'peripherals.lcd_cursor',
-                        default: 'LCD: [LCD] set cursor to line [LINE]',
+                        default: 'LCD: [INSTANCE] set cursor to line [LINE]',
                     }),		    		    
                     blockType: BlockType.COMMAND,
                     arguments: {
-                        LCD: {
+                        INSTANCE: {
                             type: ArgumentType.STRING,
-                            menu: 'menuLCD'
+                            defaultValue: '[lcd]'
 			},
 			LINE: { type: ArgumentType.NUMBER, defaultValue: 1 }
                     }
@@ -256,13 +283,13 @@ class Peripherals {
                     opcode: 'lcd_print',
                     text: formatMessage({
                         id: 'peripherals.lcd_print',
-                        default: 'LCD: [LCD] print [TEXT]',
+                        default: 'LCD: [INSTANCE] print [TEXT]',
                     }),		    		    
                     blockType: BlockType.COMMAND,
                     arguments: {
-                        LCD: {
+                        INSTANCE: {
                             type: ArgumentType.STRING,
-                            menu: 'menuLCD'
+                            defaultValue: '[lcd]'
 			},
 			TEXT: { type: ArgumentType.STRING, defaultValue: "hogehoge" }
 		    }
@@ -271,13 +298,13 @@ class Peripherals {
                     opcode: 'lcd_clear',
                     text: formatMessage({
                         id: 'peripherals.lcd_clear',
-                        default: 'LCD: [LCD] clear',
+                        default: 'LCD: [INSTANCE] clear',
                     }),		    		    
                     blockType: BlockType.COMMAND,
                     arguments: {
-                        LCD: {
+                        INSTANCE: {
                             type: ArgumentType.STRING,
-                            menu: 'menuLCD'
+                            defaultValue: '[lcd]'
 			}
                     }
                 },
@@ -315,18 +342,28 @@ class Peripherals {
                     opcode: 'time_now',
                     text: formatMessage({
                         id: 'peripherals.time_now',
-                        default: 'Time: insert current time',
+                        default: 'Time: insert current time into [INSTANCE]',
                     }),		    		    
                     blockType: BlockType.COMMAND,
+                    arguments: {
+                        INSTANCE: {
+                            type: ArgumentType.STRING,
+                            defaultValue: '[time]'
+			}
+		    }
                 },
                 {
                     opcode: 'time_value',
                     text: formatMessage({
                         id: 'peripherals.time_value',
-                        default: 'Time: [TARGET]',
+                        default: 'Time: [TARGET] of [INSTANCE]',
                     }),		    		    
                     blockType: BlockType.REPORTER,
                     arguments: {
+                        INSTANCE: {
+                            type: ArgumentType.STRING,
+                            defaultValue: '[time]'
+			},
 			TARGET: { type: ArgumentType.STRING, menu: 'menuTime' }
                     }
                 },
@@ -334,18 +371,28 @@ class Peripherals {
 		    opcode: 'wifi_init',
 		    text: formatMessage({
                         id: 'peripherals.wifi_init',
-                        default: 'Wi-Fi: setup',
+                        default: 'Wi-Fi: setup named [INSTANCE]',
                     }),	
                     blockType: BlockType.COMMAND,   
+                    arguments: {
+                        INSTANCE: {
+                            type: ArgumentType.STRING,
+                            defaultValue: '[wlan]'
+			}
+                    }
                 },
 		{
 		    opcode: 'wifi_connect',
 		    text: formatMessage({
                         id: 'peripherals.wifi_connect',
-                        default: 'Wi-Fi: connect using SSID=[SSID], passphrase=[PASS]',
+                        default: 'Wi-Fi: [INSTANCE] connect using SSID=[SSID], passphrase=[PASS]',
                     }),
                     blockType: BlockType.COMMAND,
                     arguments: {
+                        INSTANCE: {
+                            type: ArgumentType.STRING,
+                            defaultValue: '[wlan]'
+			},			
 			SSID: { type: ArgumentType.STRING, defaultValue: "SugiyamaLab" },
 			PASS: { type: ArgumentType.STRING, defaultValue: "hogehoge" }
                     }
@@ -354,9 +401,15 @@ class Peripherals {
                     opcode: 'wifi_connected',
                     text: formatMessage({
                         id: 'peripherals.wifi_connected',
-                        default: 'Wi-Fi: connected?'
+                        default: 'Wi-Fi: [INSTANCE] connected?'
                     }),
 		    blockType: BlockType.BOOLEAN,
+                    arguments: {
+                        INSTANCE: {
+                            type: ArgumentType.STRING,
+                            defaultValue: '[wlan]'
+			}
+                    }
                 },
                 {
                     opcode: 'http_get',
@@ -385,10 +438,18 @@ class Peripherals {
                     opcode: 'sd_init',
                     text: formatMessage({
                         id: 'peripherals.sd_init',
-                        default: 'SD: mount (cs_pin:[PIN], mount_point:[DIR])'
+                        default: 'SD: mount [INSTANCE1] as [INSTANCE2] (cs_pin:[PIN], mount_point:[DIR])'
                     }),		    		    
                     blockType: BlockType.COMMAND,
                     arguments: {
+                        INSTANCE1: {
+                            type: ArgumentType.STRING,
+                            defaultValue: '[spi]'
+			},
+                        INSTANCE2: {
+                            type: ArgumentType.STRING,
+                            defaultValue: '[sd]'
+			},
 			PIN: { type: ArgumentType.NUMBER, defaultValue: 2 },
 			DIR: { type: ArgumentType.STRING, defaultValue: "/sd" },
                     }
@@ -397,10 +458,14 @@ class Peripherals {
                     opcode: 'sd_open',
                     text: formatMessage({
                         id: 'peripherals.sd_open',
-                        default: 'SD+File: open [FILE] (mode:[MODE])'
+                        default: 'SD: file open named [INSTANCE] (file:[FILE], mode:[MODE])'
                     }),		    		    
                     blockType: BlockType.COMMAND,
                     arguments: {
+                        INSTANCE: {
+                            type: ArgumentType.STRING,
+                            defaultValue: '[file]'
+			},
 			FILE: { type: ArgumentType.STRING, defaultValue: "/sd/filename.txt" },
 			MODE: { type: ArgumentType.STRING, menu: 'menuSDopen' }
                     }
@@ -409,10 +474,14 @@ class Peripherals {
                     opcode: 'sd_puts',
                     text: formatMessage({
                         id: 'peripherals.sd_puts',
-                        default: 'SD+File: puts [TEXT]'
+                        default: 'SD: [INSTANCE] puts [TEXT]'
                     }),		    		    
                     blockType: BlockType.COMMAND,
                     arguments: {
+                        INSTANCE: {
+                            type: ArgumentType.STRING,
+                            defaultValue: '[file]'
+			},
 			TEXT: { type: ArgumentType.STRING, defaultValue: "Hello World!" }
                     }
                 },
@@ -420,10 +489,14 @@ class Peripherals {
                     opcode: 'sd_gets',
                     text: formatMessage({
                         id: 'peripherals.sd_gets',
-                        default: 'SD+File: [MODE]'
+                        default: 'SD: [INSTANCE] [MODE]'
                     }),
                     blockType: BlockType.REPORTER,
                     arguments: {
+                        INSTANCE: {
+                            type: ArgumentType.STRING,
+                            defaultValue: '[file]'
+			},
 			MODE: { type: ArgumentType.STRING, menu: 'menuSDread' }
                     }
                 },
@@ -431,17 +504,29 @@ class Peripherals {
                     opcode: 'sd_close',
                     text: formatMessage({
                         id: 'peripherals.sd_close',
-                        default: 'SD+File: close'
+                        default: 'SD: [INSTANCE] close'
                     }),		    		    
                     blockType: BlockType.COMMAND,
+                    arguments: {
+                        INSTANCE: {
+                            type: ArgumentType.STRING,
+                            defaultValue: '[file]'
+			},
+                    }		    
                 },
                 {
                     opcode: 'sd_umount',
                     text: formatMessage({
                         id: 'peripherals.sd_umount',
-                        default: 'SD: umount'
+                        default: 'SD: [INSTANCE] umount'
                     }),		    		    
                     blockType: BlockType.COMMAND,
+                    arguments: {
+                        INSTANCE: {
+                            type: ArgumentType.STRING,
+                            defaultValue: '[sd]'
+			},
+                    }		    
                 },
             ],
 	    menus: {
@@ -453,6 +538,7 @@ class Peripherals {
 		// menuILI934Xcircle: { acceptReporters: false, items: createMenuItems('menuILI934Xcircle')},
 		// menuILI934Xcolor:  { acceptReporters: false, items: createMenuItems('menuILI934Xcolor')},
                 menuTime:   { acceptReporters: false, items: createMenuItems('menuTime')},
+                // menuSNTP:  { acceptReporters: false, items: createMenuItems('menuSNTP')},
 		menuSDopen:{ acceptReporters: false, items: createMenuItems('menuSDopen') },
 		menuSDread:{ acceptReporters: false, items: createMenuItems('menuSDread') }		
             }

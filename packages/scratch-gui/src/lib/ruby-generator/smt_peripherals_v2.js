@@ -45,21 +45,20 @@ export default function (Generator) {
     // I2C Sensors
     //
     Generator.peripherals_i2c_sensor_init = function (block) {
+        const instance1 = Generator.valueToCode(block, 'INSTANCE1', Generator.ORDER_NONE) || null;
+        const instance2 = Generator.valueToCode(block, 'INSTANCE2', Generator.ORDER_NONE) || null;
         const sensor = Generator.getFieldValue(block, 'SENSOR') || null;
-	const instance = sensor.toLowerCase()
-        return `${instance} = ${sensor}.new( i2c )\n`;
+        return `${instance2} = ${sensor}.new( ${instance1} )\n`;
     };
 
     Generator.peripherals_i2c_sensor_read = function (block) {
-        const sensor = Generator.getFieldValue(block, 'SENSOR') || null;
-	const instance = sensor.toLowerCase()
+        const instance = Generator.valueToCode(block, 'INSTANCE', Generator.ORDER_NONE) || null;
         return `${instance}.read\n`;
     };
     
     Generator.peripherals_i2c_sensor_value = function (block) {
-        const sensor = Generator.getFieldValue(block, 'SENSOR') || null;
+        const instance = Generator.valueToCode(block, 'INSTANCE', Generator.ORDER_NONE) || null;
         const target = Generator.getFieldValue(block, 'TARGET') || null;
-	const instance = sensor.toLowerCase()
         return [`${instance}.${target}`, Generator.ORDER_ATOMIC];
    };
 
@@ -67,32 +66,30 @@ export default function (Generator) {
     // LCD
     //
     Generator.peripherals_lcd_init = function (block) {
-        const lcd = Generator.getFieldValue(block, 'LCD') || null;
-	const instance = lcd.toLowerCase()
-        return `${instance} = ${lcd}.new( i2c )\n`;
+        const instance1 = Generator.valueToCode(block, 'INSTANCE1', Generator.ORDER_NONE) || null;
+        const instance2 = Generator.valueToCode(block, 'INSTANCE2', Generator.ORDER_NONE) || null;
+        const sensor = Generator.getFieldValue(block, 'SENSOR') || null;
+        return `${instance2} = ${sensor}.new( ${instance1} )\n`;
     };
 
     Generator.peripherals_lcd_cursor = function (block) {
-        const lcd = Generator.getFieldValue(block, 'LCD') || null;
+        const instance = Generator.valueToCode(block, 'INSTANCE', Generator.ORDER_NONE) || null;
         const line = Generator.valueToCode(block, 'LINE', Generator.ORDER_NONE) || 1;
-	const instance = lcd.toLowerCase()
         return (
 	    `${instance}.cursor(line: ${line})\n`
 	);
     };
 
     Generator.peripherals_lcd_print = function (block) {
-        const lcd = Generator.getFieldValue(block, 'LCD') || null;
+        const instance = Generator.valueToCode(block, 'INSTANCE', Generator.ORDER_NONE) || null;
         const text = Generator.valueToCode(block, 'TEXT', Generator.ORDER_NONE) || null;
-	const instance = lcd.toLowerCase()
         return (
 	    `${instance}.print(${text})\n`
 	);
     };
 
     Generator.peripherals_lcd_clear = function (block) {
-        const lcd = Generator.getFieldValue(block, 'LCD') || null;
-	const instance = lcd.toLowerCase()
+        const instance = Generator.valueToCode(block, 'INSTANCE', Generator.ORDER_NONE) || null;
         return (
 	    `${instance}.clear\n`
 	);
@@ -121,35 +118,38 @@ export default function (Generator) {
     Generator.peripherals_time_now = function (block) {
         const instance = Generator.valueToCode(block, 'INSTANCE', Generator.ORDER_NONE) || null;
         return (
-	    `time = Time.now\n`
+	    `${instance} = Time.now\n`
 	);
     };
 
     Generator.peripherals_time_value = function (block) {
         const instance = Generator.valueToCode(block, 'INSTANCE', Generator.ORDER_NONE) || null;
         const target = Generator.getFieldValue(block, 'TARGET') || null;
-        return [`time.${target}`, Generator.ORDER_ATOMIC];
+        return [`${instance}.${target}`, Generator.ORDER_ATOMIC];
     };
 
     //
     // Wi-Fi
     //
     Generator.peripherals_wifi_init = function (block) {
+        const instance = Generator.valueToCode(block, 'INSTANCE', Generator.ORDER_NONE) || null;
         return (
-	    `wlan = WLAN.new()\n`
+	    `${instance} = WLAN.new()\n`
 	);
     };
 
     Generator.peripherals_wifi_connect = function (block) {
+        const instance = Generator.valueToCode(block, 'INSTANCE', Generator.ORDER_NONE) || null;
         const ssid = Generator.valueToCode(block, 'SSID', Generator.ORDER_NONE);
         const pass = Generator.valueToCode(block, 'PASS', Generator.ORDER_NONE);
         return (
-	    `wlan.connect(${ssid}, ${pass}) \n`
+	    `${instance}.connect(${ssid}, ${pass}) \n`
 	);
     };
 
     Generator.peripherals_wifi_connected = function (block) {
-        return [`wlan.connected?`, Generator.ORDER_ATOMIC];
+	const instance = Generator.valueToCode(block, 'INSTANCE', Generator.ORDER_NONE) || null;
+        return [`${instance}.connected?`, Generator.ORDER_ATOMIC];
     };
     
     Generator.peripherals_http_get = function (block) {
@@ -167,43 +167,51 @@ export default function (Generator) {
     // SD
     //
     Generator.peripherals_sd_init = function (block) {
+        const instance1 = Generator.valueToCode(block, 'INSTANCE1', Generator.ORDER_NONE) || null;
+        const instance2 = Generator.valueToCode(block, 'INSTANCE2', Generator.ORDER_NONE) || null;
         const pin = Generator.valueToCode(block, 'PIN', Generator.ORDER_NONE) || null;
 	const dir = Generator.valueToCode(block, 'DIR', Generator.ORDER_NONE) || null;
         return (
-  	    `sdspi = SDSPI.new(spi, cs_pin:${pin}, mount_point:${dir})\n` 
+  	    `${instance2} = SDSPI.new(${instance1}, cs_pin:${pin}, mount_point:${dir})\n` 
 	);
     };
 
     Generator.peripherals_sd_open = function (block) {
+        const instance = Generator.valueToCode(block, 'INSTANCE', Generator.ORDER_NONE) || null;
         const file = Generator.valueToCode(block, 'FILE', Generator.ORDER_NONE) || null;
         const mode = Generator.getFieldValue(block, 'MODE') || null;
         return (
-	    `file = File.open(${file}, "${mode}")\n`
+	    `${instance} = File.open(${file}, "${mode}")\n`
 	);
     };
 
     Generator.peripherals_sd_puts = function (block) {
+        const instance = Generator.valueToCode(block, 'INSTANCE', Generator.ORDER_NONE) || null;
         const text = Generator.valueToCode(block, 'TEXT', Generator.ORDER_NONE) || null;
         return (
-	    `file.puts(${text})\n`
+	    `${instance}.puts(${text})\n`
 	);
     };
 
     Generator.peripherals_sd_gets = function (block) {
+        const instance = Generator.valueToCode(block, 'INSTANCE', Generator.ORDER_NONE) || null;
         const mode = Generator.getFieldValue(block, 'MODE') || null;
-        return [`file.${mode}`, Generator.ORDER_ATOMIC];
+        return [`${instance}.${mode}`, Generator.ORDER_ATOMIC];
     };
     
     Generator.peripherals_sd_close = function (block) {
+        const instance = Generator.valueToCode(block, 'INSTANCE', Generator.ORDER_NONE) || null;
         return (
-	    `file.close\n`
+	    `${instance}.close\n`
 	);
     };
 
     Generator.peripherals_sd_umount = function (block) {
+        const instance = Generator.valueToCode(block, 'INSTANCE', Generator.ORDER_NONE) || null;
         return (
-	    `sdspi.umount\n`
+	    `${instance}.umount\n`
 	);
     };
+
 }
 
