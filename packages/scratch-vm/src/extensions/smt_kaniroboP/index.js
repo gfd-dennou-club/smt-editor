@@ -43,7 +43,6 @@ const kaniroboPMenus = {
     },
     menuServoID: {
         items: [
-            { text: '0', value: '0' },
             { text: '1', value: '1' }
         ]
     },

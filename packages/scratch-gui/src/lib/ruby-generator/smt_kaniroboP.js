@@ -23,8 +23,9 @@ export default function (Generator) {
 
     Generator.kaniroboP_servo_init = function (block) {
 	return (
-	    `pwm0 = PWM.new(0, timer:1, frequency:50, duty:0)\n` +
- 	    `pwm1 = PWM.new(1, timer:1, frequency:50, duty:0)\n`
+	    `gpio0 = GPIO.new(0, GPIO::OUT)\n` +
+	    `gpio0.write(1)\n` +
+ 	    `pwm1  = PWM.new(1, timer:1, frequency:50, duty:0)\n`
 	);
     };
     
