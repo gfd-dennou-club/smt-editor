@@ -59,7 +59,7 @@ class RubyUploader extends React.Component {
         //console.log(`master: ${base64MasterCode}`);
 
         // 送信
-        const CompileServerURI = 'https://ceres.epi.it.matsue-ct.ac.jp/compile/code';
+        const CompileServerURI = 'https://mrubyc.gfd-dennou.org/compile/code';
         const res = fetch(CompileServerURI, {
             method: 'POST',
             headers: {
