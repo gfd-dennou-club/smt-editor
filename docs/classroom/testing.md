@@ -36,7 +36,8 @@ Playwright MCP および Selenium integration tests で使用する `data-testid
 | `classroom-back` | button | 戻る |
 | `classroom-refresh` | button | 更新 (↻) |
 | `classroom-google-import` | button | Google Classroom からインポート |
-| `classroom-teacher-logout` | button | ログアウト |
+| `classroom-avatar-button` | button | アカウントメニュー（タイトルバー右上・メール頭文字 + ▼） |
+| `classroom-teacher-logout` | button | ログアウト（アカウントメニュー内） |
 
 ### クラス作成
 
@@ -204,7 +205,8 @@ Playwright MCP および Selenium integration tests で使用する `data-testid
 | `classroom-class-open-{groupId}` | button | クラスカード本体（クリックでクラスをひらく） |
 | `classroom-class-evaluate-{groupId}` | button | クラスカードの「評価」 |
 | `classroom-class-import-gc` | button | クラス一覧の「Google Classroom からインポート」（Google ログイン時のみ） |
-| `classroom-teacher-logout` | button | ログアウト（タイトルバー右端に常時表示） |
+| `classroom-avatar-button` / `classroom-avatar-initials` / `classroom-avatar-email` | button/span | アカウントメニュー（右上・メール頭文字 + ▼。クリックでメール表示 + ログアウト） |
+| `classroom-teacher-logout` | button | ログアウト（アカウントメニュー内。#1111 レビューでタイトルバー常時表示から移動） |
 | `classroom-class-create-section` | input | 同時作成: セクション（オプション） |
 | `classroom-class-settings-open-{groupId}` | button | クラスカードの「設定」（インライン編集を開く） |
 | `classroom-class-settings-{groupId}` | form | クラス設定のインライン編集フォーム |
@@ -242,6 +244,46 @@ Playwright MCP および Selenium integration tests で使用する `data-testid
 | `classroom-board-download-class` | button | ボードの「全課題の提出物をダウンロード」（active + アーカイブ済みを 1 つの zip に） |
 | `classroom-retention-banner` | div | 課題詳細の保存期限アラートバナー（30 日以下で表示） |
 | `classroom-retention-banner-download` | button | バナー内の「全作品ダウンロード」 |
+| `classroom-share-assignment` | button | 課題詳細の「この課題を共有」（みんなの課題フォームを開く） |
+| `shared-form` | form | みんなの課題の共有フォーム |
+| `shared-form-title` / `shared-form-summary` | input | タイトル / 短い説明 |
+| `shared-form-level` | select | 学校種 |
+| `shared-form-subject` | select | 教科（制御語彙。学校種=その他のときは `shared-form-subject-free` input） |
+| `shared-form-grade-{n}` | checkbox | 対象学年 |
+| `shared-form-tags` | input | タグ（カンマ区切り・最大5） |
+| `shared-form-lesson-count` | input | 想定コマ数 |
+| `shared-form-url` | input | 補足資料 URL（https のみ。ガイダンス=`shared-form-url-hint`、エラー=`shared-form-url-error`） |
+| `shared-form-author-name` / `shared-form-author-affiliation` | input | 表示名 / 所属表記（localStorage 記憶） |
+| `shared-form-consent` | checkbox | CC BY 4.0 同意（未チェックだと送信不可） |
+| `shared-form-submit` / `shared-form-cancel` | button | 共有する / キャンセル |
+| `shared-form-success` | p | 公開完了メッセージ（© 表示名 / CC BY 4.0） |
+| `classroom-board-shared-catalog` | button | ボードの「みんなの課題からさがす」 |
+| `shared-catalog` | div | みんなの課題カタログ（ボード内に展開） |
+| `shared-catalog-close` | button | カタログを閉じる |
+| `shared-catalog-tab-all` / `shared-catalog-tab-mine` | button | すべて / 自分の投稿 タブ |
+| `shared-catalog-filter-level/subject/grade/tag` | select/input | 絞り込み（学校種・教科・学年・タグ） |
+| `shared-catalog-filter-apply` | button | 絞り込み実行 |
+| `shared-catalog-list` / `shared-catalog-item-{id}` / `shared-catalog-open-{id}` | ul/li/button | カード一覧（属性バッジ・投稿者・取り込み回数） |
+| `shared-catalog-load-more` | button | 次ページ読み込み（cursor があるときのみ） |
+| `shared-catalog-empty` | p | 空メッセージ |
+| `shared-catalog-detail` | div | 詳細プレビュー |
+| `shared-detail-close` | button | 一覧に戻る |
+| `shared-detail-credit` | p | 「© 表示名（所属） / CC BY 4.0」クレジット行 |
+| `shared-detail-starter` | p | スターター付きの説明 |
+| `shared-detail-url` | button | 補足資料リンク（クリックで確認表示） |
+| `shared-detail-url-confirm` / `shared-detail-url-open` / `shared-detail-url-cancel` | span/a/button | 外部ドメイン名付き確認 →「開く」（rel=noopener・新規タブ） |
+| `shared-detail-import` | button | このクラスに取り込む（published のみ表示） |
+| `shared-detail-report` | button | 通報フォームを開く（他人の投稿のみ） |
+| `shared-report-form` / `shared-report-reason` / `shared-report-submit` | div/textarea/button | 通報理由（必須）と送信 |
+| `shared-report-sent` | p | 通報完了メッセージ |
+| `shared-detail-unlist` / `shared-detail-republish` | button | 自分の投稿の取り下げ / 再公開 |
+| `shared-card-limited-badge` / `shared-card-recommended-badge` | span | カードの 限定公開 / 推薦 バッジ（#1110） |
+| `shared-detail-recommended-note` | p | 自分の限定公開が推薦を受けたときの注記（#1110） |
+| `shared-detail-broaden` | button | 「みんなの課題に公開する」（自分の限定公開のみ・#1110） |
+| `shared-broaden-done` | p | 全体公開の完了メッセージ（#1110） |
+| `shared-import-success` | p | 取り込み完了メッセージ（ボード上） |
+| `classroom-share-suggestion-banner` / `classroom-share-suggestion-open` | div/button | 共有推奨バナーと「共有フォームを開く」CTA（#1106） |
+| `classroom-board-share-suggested-{classroomId}` | span | ボード行の「共有おすすめ」マーク（#1106） |
 | `classroom-breadcrumbs` | nav | パンくず（クラス一覧 > 課題一覧 > 課題詳細） |
 | `classroom-breadcrumb-class-list` / `classroom-breadcrumb-assignments` | button | パンくずリンク |
 | `classroom-board-create-name` / `classroom-board-create-submit` | input / button | インライン課題作成（課題名のみ） |
@@ -254,7 +296,7 @@ Playwright MCP および Selenium integration tests で使用する `data-testid
 | `classroom-description-preview` | div | 右ペインの生徒視点プレビュー |
 | `classroom-description-preview-body` | div | プレビュー本文（テキスト+画像） |
 | `classroom-description-preview-prev` / `-next` | button | プレビューのページ送り |
-| `classroom-teacher-email` | span | タイトルバーのユーザーメール（OIDC トークンに email がある場合のみ） |
+| `classroom-avatar-email` | span | アカウントメニュー内のユーザーメール（OIDC トークンに email がある場合のみ。旧 `classroom-teacher-email` は廃止） |
 | `classroom-board-create-cancel` / `classroom-board-reuse-cancel` | button | インラインフォームのキャンセル |
 | `classroom-google-course-imported-{courseId}` | span | GC コースの「インポート済み」バッジ |
 | `classroom-breadcrumb-assignments` | button | パンくず「課題一覧」リンク |

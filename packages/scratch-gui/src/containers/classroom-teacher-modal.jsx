@@ -198,6 +198,8 @@ const ClassroomTeacherModal = () => {
         onReuseAssignment: teacher.handleReuseAssignment,
         onUpdateGroup: teacher.handleUpdateGroup,
         evaluation: teacher.evaluation,
+        shared: teacher.shared,
+        notificationsCenter: teacher.notificationsCenter,
     };
     return <ClassroomTeacherModalComponent containerProps={teacherContainerProps} onClose={handleClose} />;
 };
