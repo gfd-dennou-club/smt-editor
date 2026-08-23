@@ -280,7 +280,7 @@ export default function (Generator) {
     Generator.mctboard_i2c_lcd_init = function () {
         Generator.prepares_.i2c = Generator.mctboard_i2c_init(null);
         return (
-	    `aqm0802a = AQM0802A.new($i2c)\n`
+	    `aqm0802a = AQM0802A.new(i2c)\n`
 	);
     };
 
