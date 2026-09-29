@@ -95,10 +95,32 @@ Issue 本文のディレクティブは **行頭のみ**で発火する（`phase
   main へ **symlink** する（#1001）。npm install（=prepare の DL 生成）を走らせないため、
   これが無いと webpack dev server が `Module not found: microbit-*-hex-url` で起動しない。
   `--full` は npm install で実ファイルが生成されるため対象外。
+- 軽量モードは **husky の生成物 `.husky/_`**（gitignored・`npm install` = prepare の
+  `husky install` が生成）も main へ **symlink** する（#1137）。`core.hooksPath=.husky` は
+  共有設定なので `.husky/commit-msg` は worktree でも起動し、これが無いと
+  `cannot open .husky/_/husky.sh` で **すべての commit が失敗**する。特に daemon の base 追従
+  （`git merge origin/<base>`）は merge コミット作成段階で落ち、競合ゼロなのに
+  `base-follow-conflict` として Blocked になっていた（#957）。`--full` は対象外。
 - 既存 PR ブランチでの作業（review / address-review）は `--pr <number>`（daemon の
   `ensureWorktree` が使う経路）。
-- worktree 内では node_modules / prepare 生成物 symlink の誤ステージ防止を `git-common-dir`
-  の `info/exclude` で担保している（Issue #801 / #1001）。この保険を外さない。
+- worktree 内では node_modules / prepare 生成物 / `.husky/_` symlink の誤ステージ防止を
+  `git-common-dir` の `info/exclude` で担保している（Issue #801 / #1001 / #1137）。
+  この保険を外さない。
+
+## infra のデプロイは worker が行わない
+
+worker は **`cdk deploy` を実行しない**（stg / prod とも）。stg は共有資源で、複数の worker が
+同時に撃つと CloudFormation の更新が中断する。stg に自分の変更を載せたいときは:
+
+1. PR に **`deploy-stg` ラベル**を付ける（`GH_TOKEN="$(bin/bot-token)" gh pr edit <n> --add-label "deploy-stg"`）
+2. `.github/workflows/deploy-infra-stg.yml` の完了を待つ（`gh run watch` / `gh pr checks`）
+3. workflow が PR に残すコメントで「いまの stg が自分の SHA か」を確認してから DoD を行う
+
+ラベルは **1 回きりの操作**で、run の完了時に workflow が自動で外す。**外す処理を自分で書かない**
+（二重に外そうとして 404 になる）。再度載せたいときは付け直す。
+
+prod への反映は**人間の作業**。結果ファイルや PR 本文に「prod は人間が実施」と明記して終える
+（`.claude/rules/infra/development.md` の「デプロイ経路」）。
 
 ## UI 確認（pw-check）
 

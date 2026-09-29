@@ -13,6 +13,8 @@
    ├─ 先生の UI で確認してもらう:
    │    クラス一覧 →「アーカイブ済みのクラス」/ 課題ボード →「アーカイブ済みの課題」
    │    → ここに見えていれば【誤アーカイブ】→ 先生自身が「元に戻す」で復元完了（運用者対応不要）
+   │      先生が UI に到達できない場合は、Admin の「クラス・課題 →クラス（学級）検索」から
+   │      運用者がクラスのアーカイブを解除できる（docs/admin/README.md。中の課題の状態は変わらない）
    └─ アーカイブ済み一覧にも無い → 【期限切れ（TTL 削除）の可能性】→ 2 へ
 
 2. スナップショットを検索する（運用者、下記「復元スクリプト」）
@@ -48,7 +50,7 @@ eval "$(aws configure export-credentials --profile smalruby --format env)"
 # 参加コードで検索（先生に聞くのが最速。大文字小文字は不問）
 npx ts-node bin/restore-classroom.ts --join-code abc234
 
-# クラス名（部分一致）で検索。複数一致時は候補一覧が出るので --classroom-id で特定
+# クラス（学級）名（`Classrooms.className`・部分一致）で検索。複数一致時は候補一覧が出るので --classroom-id で特定
 npx ts-node bin/restore-classroom.ts --class-name "2年1組"
 
 # classroomId 直接指定
@@ -60,7 +62,7 @@ npx ts-node bin/restore-classroom.ts --classroom-id <uuid> --apply
 
 | フラグ | 意味 | 既定 |
 |--------|------|------|
-| `--classroom-id` / `--join-code` / `--class-name` | 復元対象の指定（いずれか必須） | — |
+| `--classroom-id` / `--join-code` / `--class-name` | 復元対象の課題の指定（いずれか必須） | — |
 | `--apply` | 実際に書き込む | dry-run |
 | `--ttl-days` | 復元データの新しい保存期限 | 90 |
 | `--group-ttl-days` | 復元するクラス（学級）の保存期限 | 400 |
@@ -71,6 +73,57 @@ npx ts-node bin/restore-classroom.ts --classroom-id <uuid> --apply
 - 復元内容: 課題本体（`status: active` + `restoredAt` スタンプ）+ メンバー + 提出メタ + （消えていれば）所属クラス（group）。**TTL はすべて実行時点から再設定**（過去の TTL のまま書くと即再削除されるため）
 - 提出ファイル（S3 実体）の存在確認を行い、欠落があれば dry-run 時に警告表示
 - 課題本体の書き込みは `attribute_not_exists` 条件付き（復元の競合で生きているデータを上書きしない）
+
+## 共同管理者の逆引き索引バックフィル `bin/backfill-coteacher-index.ts`
+
+`GET /classrooms` は共同管理の課題・クラスを **逆引き索引** `ClassroomCoTeacherIndex{suffix}`
+（PK `coTeacherEmail` / SK `resourceKey`）から集める。索引は後付けなので、**それ以前に登録された
+共同管理者の行は存在しない** — 流し込まないまま読み取りを索引に切り替えると、既存の共同管理者から
+課題・クラスが**一覧に出なくなる**（権限そのものは item 上の `coTeacherEmails` で判定しているので
+落ちない。直リンクなら操作できてしまうぶん気付きにくい）。
+
+**デプロイ順（守る）:**
+
+1. `npx cdk deploy` — 索引テーブルと `groupId-index` GSI を作る
+2. **`groupId-index` が `ACTIVE` になるまで待つ**（下記）
+3. **バックフィルを `--apply` で実行**（下記）
+4. 読み取りを索引に切り替えた Lambda を反映する `npx cdk deploy`
+
+1 と 4 が同じ deploy に乗る場合（=通常のリリース）は、**deploy 直後に速やかに 2→3 を実行する**。
+その間だけ共同管理の資源が一覧に出ない。
+
+**GSI の待ちを飛ばさないこと。** GSI は作成直後 `CREATING`（`Backfilling: true`）で、この間は
+その索引への Query が失敗しうる。**項目が 100 件程度の stg でも ACTIVE まで約 5 分かかった**実績が
+あるので、本番ではもう少し見ておく。
+
+```bash
+# ACTIVE になるまで待つ
+until [ "$(aws dynamodb describe-table --table-name Classrooms<suffix> \
+  --query 'Table.GlobalSecondaryIndexes[?IndexName==`groupId-index`].IndexStatus' --output text)" = ACTIVE ]; do
+  sleep 20
+done
+```
+
+```bash
+# デフォルトは dry-run（何件・どの行を作るかだけ表示）
+npx ts-node bin/backfill-coteacher-index.ts
+
+# 確認後に実行
+npx ts-node bin/backfill-coteacher-index.ts --apply
+```
+
+**dry-run は索引テーブルが無くても動く**（既存テーブルを読むだけ）。デプロイ前に流して
+「何行できるはずか」を先に確認しておくと、`--apply` の結果と突き合わせられるうえ、
+一覧に出ない窓を短くできる。ステージは `.env` の symlink で切り替える
+（`ln -sfn .env.prod .env`。`.claude/rules/infra/development.md`）。
+
+- **冪等**。行のキーは `(coTeacherEmail, resourceKey)` なので、何度実行しても同じ行を上書きするだけ。
+  取りこぼしが疑われるときは再実行して差分を埋めてよい
+- 対象は Classrooms / ClassroomGroups の**全件**（アーカイブ済みも含む。`?includeArchived=1` の
+  一覧からも共同管理者に見えるべきで、消えるのは TTL に任せる）
+- 索引行は資源の `ttl` を写すので、資源と一緒に自然消滅する
+- email は保存時と同じ正規化（trim + 小文字）でキーにする。**手で書き換えた項目**が正規化されて
+  いないと索引に載らない（一覧に出ない）ので、その場合は項目側を直してから再実行する
 
 ## よくあるケース
 
@@ -90,4 +143,4 @@ npx ts-node bin/restore-classroom.ts --classroom-id <uuid> --apply
 
 **復元できない場合（保持期間超過）:**
 
-> ご連絡ありがとうございます。恐れ入りますが、ご指定のクラスはデータの保持期間（削除から 1 年）を過ぎており、復元することができませんでした。今後は、課題ボードの保存期限表示をご確認のうえ、「全課題の提出物をダウンロード」機能でお手元に保存いただけますようお願いいたします。
+> ご連絡ありがとうございます。恐れ入りますが、ご指定の課題はデータの保持期間（削除から 1 年）を過ぎており、復元することができませんでした。今後は、課題ボードの保存期限表示をご確認のうえ、「全課題の提出物をダウンロード」機能でお手元に保存いただけますようお願いいたします。

@@ -1,3 +1,7 @@
+// このファイルをモジュールにするための宣言。import/export を持たない .ts は TypeScript の
+// グローバルスクリプト扱いになり、トップレベルの const がテストファイル間で衝突する（#1144）。
+export {};
+
 /**
  * Archive recoverability tests (issue #1050 / EPIC #1049).
  *
@@ -14,6 +18,7 @@
  *   already-working update path so it cannot regress into an active-only
  *   guard).
  */
+
 
 // Replace only the DynamoDB document client's send(); keep the real command
 // classes so the handler can still build Get/Update/Query/Scan commands.
@@ -292,3 +297,4 @@ describe('archive recoverability (issue #1050)', () => {
         });
     });
 });
+

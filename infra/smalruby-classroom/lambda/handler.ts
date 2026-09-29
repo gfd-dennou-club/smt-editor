@@ -5,10 +5,10 @@ import {
   PutCommand,
   GetCommand,
   QueryCommand,
-  ScanCommand,
   DeleteCommand,
   UpdateCommand,
   BatchWriteCommand,
+  BatchGetCommand,
 } from '@aws-sdk/lib-dynamodb';
 import {
   S3Client,
@@ -30,6 +30,8 @@ const MEMBERSHIPS_TABLE = process.env.MEMBERSHIPS_TABLE_NAME || 'ClassroomMember
 const SUBMISSIONS_TABLE = process.env.SUBMISSIONS_TABLE_NAME || 'ClassroomSubmissions';
 const KICK_REQUESTS_TABLE = process.env.KICK_REQUESTS_TABLE_NAME || 'ClassroomKickRequests';
 const GROUPS_TABLE = process.env.GROUPS_TABLE_NAME || 'ClassroomGroups';
+// 共同管理者 email → 資源 の逆引き（#1146）。list 属性は GSI にできないため別テーブル。
+const CO_TEACHER_INDEX_TABLE = process.env.CO_TEACHER_INDEX_TABLE_NAME || 'ClassroomCoTeacherIndex';
 const SUBMISSIONS_BUCKET = process.env.SUBMISSIONS_BUCKET_NAME || 'smalruby-classroom-submissions';
 // みんなの課題 — nationwide shared assignment library (EPIC #1066)
 const SHARED_ASSIGNMENTS_TABLE = process.env.SHARED_ASSIGNMENTS_TABLE_NAME || 'SharedAssignments';
@@ -151,6 +153,86 @@ const ddbClient = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(ddbClient, {
   marshallOptions: { removeUndefinedValues: true },
 });
+
+// --- Paginated reads (#1146) ---
+
+// DynamoDB は 1 回の Query で最大 1MB しか読まず、続きは
+// LastEvaluatedKey で辿る。しかもこの 1MB 上限は **FilterExpression 適用前**
+// に効くため、辿らないとテーブルが育った時点でエラーも出さずに黙って
+// 取りこぼす。一覧系の読み取りは下の queryAll に寄せる。
+// 上限は暴走（壊れたページャで無限ループ）を防ぐ保険。
+// 不正値（NaN / 0 以下）はそのまま使うと 1 ページも読まずに空配列を返し、
+// このヘルパーが無くそうとしている「黙って取りこぼす」挙動そのものになる。
+// 既定へフォールバックして、設定ミスが一覧の消失に化けないようにする。
+const parsedMaxPages = parseInt(process.env.DDB_MAX_PAGES || '25', 10);
+const MAX_PAGES = Number.isFinite(parsedMaxPages) && parsedMaxPages > 0 ? parsedMaxPages : 25;
+
+/**
+ * Query を LastEvaluatedKey が無くなるまで辿って全項目を返す。
+ * `Limit` 付き（= 上位 N 件だけ欲しい）の呼び出しには使わない。
+ */
+async function paginateAll(
+  makeCommand: (startKey?: Record<string, unknown>) => QueryCommand,
+): Promise<Record<string, unknown>[]> {
+  const items: Record<string, unknown>[] = [];
+  let startKey: Record<string, unknown> | undefined;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const result = await docClient.send(makeCommand(startKey));
+    items.push(...((result.Items || []) as Record<string, unknown>[]));
+    startKey = result.LastEvaluatedKey as Record<string, unknown> | undefined;
+    if (!startKey) {
+      return items;
+    }
+  }
+  // ページ上限に達した = 想定より遥かに大きいテーブル。取りこぼしは
+  // 起きるが、無限ループよりは検知可能な形（ログ）で止める。
+  console.warn('[ddb] pagination truncated at MAX_PAGES', { maxPages: MAX_PAGES, items: items.length });
+  return items;
+}
+
+/**
+ * ページングする Query（GSI 一覧など）。
+ * Scan 版は置かない — 一覧経路の Scan は #1146 で全廃したので、
+ * 「ページングしてくれる Scan」を用意しておくと表全体を読む経路が
+ * 再び生えやすくなる（必要になったらそのとき書く）。
+ */
+async function queryAll(input: QueryCommand['input']): Promise<Record<string, unknown>[]> {
+  return paginateAll(startKey => new QueryCommand({ ...input, ExclusiveStartKey: startKey }));
+}
+
+// BatchGetItem は 1 リクエスト 100 キーまで。
+const BATCH_GET_LIMIT = 100;
+
+/**
+ * Fetch many items by key, in chunks of 100, retrying whatever DynamoDB hands
+ * back as `UnprocessedKeys` (it throttles by returning keys, not by erroring —
+ * dropping them would be the same silent-loss failure mode as an untraversed
+ * `LastEvaluatedKey`). Keys that no longer exist are simply absent from the
+ * result, which is what a lagging reverse-index row should look like (#1146).
+ * @param tableName - table to read from
+ * @param keys - primary keys to fetch (duplicates are fine)
+ * @returns the items that still exist, in no particular order
+ */
+async function batchGetAll(
+  tableName: string,
+  keys: Record<string, unknown>[],
+): Promise<Record<string, unknown>[]> {
+  const items: Record<string, unknown>[] = [];
+  for (let i = 0; i < keys.length; i += BATCH_GET_LIMIT) {
+    let pending = keys.slice(i, i + BATCH_GET_LIMIT);
+    for (let attempt = 0; pending.length > 0 && attempt < MAX_PAGES; attempt++) {
+      const result = await docClient.send(new BatchGetCommand({
+        RequestItems: { [tableName]: { Keys: pending } },
+      }));
+      items.push(...((result.Responses?.[tableName] || []) as Record<string, unknown>[]));
+      pending = (result.UnprocessedKeys?.[tableName]?.Keys || []) as Record<string, unknown>[];
+    }
+    if (pending.length > 0) {
+      console.warn('[ddb] batchGet gave up on unprocessed keys', { tableName, pending: pending.length });
+    }
+  }
+  return items;
+}
 
 // --- S3 Client ---
 
@@ -454,6 +536,18 @@ export function validateCoTeacherEmail(value: unknown): string {
 }
 
 /**
+ * Whether `email` appears in a stored co-teacher list. Both sides are
+ * normalized: writes go through validateCoTeacherEmail, but older records (and
+ * hand-edited items) may hold mixed case, and a case difference must never
+ * decide authorization.
+ */
+function emailInCoTeacherList(list: unknown, email: string | null): boolean {
+  if (!email || !Array.isArray(list)) return false;
+  const target = normalizeEmail(email);
+  return list.some(entry => typeof entry === 'string' && normalizeEmail(entry) === target);
+}
+
+/**
  * Whether the given teacher identity may manage the classroom: either they are
  * the owner (teacherSub) or their verified email is in the classroom's
  * coTeacherEmails list. Used by every teacher-facing ownership check.
@@ -464,9 +558,22 @@ export function canManageClassroom(
 ): boolean {
   if (!classroom) return false;
   if (classroom.teacherSub === identity.sub) return true;
-  if (!identity.email) return false;
-  const coTeacherEmails = classroom.coTeacherEmails;
-  return Array.isArray(coTeacherEmails) && coTeacherEmails.includes(identity.email);
+  return emailInCoTeacherList(classroom.coTeacherEmails, identity.email);
+}
+
+/**
+ * Whether the teacher may manage the class (group): its owner, or a
+ * class-level co-teacher. Shared by the group gate and by the assignment-level
+ * check so a co-teacher never sees a class through one door and a 404 through
+ * another (issue #1138).
+ */
+export function canManageGroup(
+  group: Record<string, unknown> | undefined,
+  identity: TeacherIdentity,
+): boolean {
+  if (!group) return false;
+  if (group.teacherSub === identity.sub) return true;
+  return emailInCoTeacherList(group.coTeacherEmails, identity.email);
 }
 
 /**
@@ -487,15 +594,7 @@ async function canManageViaGroup(
       TableName: GROUPS_TABLE,
       Key: { groupId: item.groupId },
     }));
-    const group = groupResult.Item;
-    if (group) {
-      if (group.teacherSub === identity.sub) {
-        return true;
-      }
-      if (identity.email && Array.isArray(group.coTeacherEmails)) {
-        return (group.coTeacherEmails as string[]).includes(normalizeEmail(identity.email));
-      }
-    }
+    return canManageGroup(groupResult.Item, identity);
   }
   return false;
 }
@@ -514,11 +613,11 @@ async function handleCreateClassroom(identity: TeacherIdentity, body: Record<str
   let assignmentName = validateClassName(body.assignmentName); // reuse same validator (1-50 chars)
   const googleClassroomCourseId = typeof body.googleClassroomCourseId === 'string' ? body.googleClassroomCourseId.trim() : undefined;
 
-  // Optional group (クラス) assignment — must be a group this teacher owns.
+  // Optional group (クラス) assignment — must be a class this teacher owns or co-manages.
   let groupId: string | undefined;
   let group: Record<string, unknown> | undefined;
   if (typeof body.groupId === 'string' && body.groupId) {
-    group = await getOwnedGroup(identity, body.groupId);
+    group = await getManageableGroup(identity, body.groupId);
     groupId = body.groupId;
   }
   // v2: the class's studentCount is the source of truth — an assignment
@@ -534,24 +633,29 @@ async function handleCreateClassroom(identity: TeacherIdentity, body: Record<str
   }
   const sortDate = body.sortDate !== undefined ? validateSortDate(body.sortDate) : undefined;
 
-  // Auto-number duplicate assignment names within the same class
-  const existingClassrooms = await docClient.send(new QueryCommand({
-    TableName: CLASSROOMS_TABLE,
-    IndexName: 'teacherSub-index',
-    KeyConditionExpression: 'teacherSub = :ts',
-    ExpressionAttributeValues: { ':ts': identity.sub },
-  }));
-  if (existingClassrooms.Items) {
-    const sameClassAssignments = existingClassrooms.Items
-      .filter(item => item.className === className && item.status === 'active')
-      .map(item => item.assignmentName as string);
-    if (sameClassAssignments.includes(assignmentName)) {
-      let suffix = 2;
-      while (sameClassAssignments.includes(`${assignmentName} (${suffix})`)) {
-        suffix++;
-      }
-      assignmentName = `${assignmentName} (${suffix})`;
+  // Auto-number duplicate assignment names within the same class. Inside a
+  // class (組) the siblings are enumerated by groupId so a co-teacher's
+  // assignments count too (#1138 / #1145); ungrouped (pre-v2) assignments have
+  // no class row to key off, so they still match on className within the
+  // creator's own assignments.
+  // ページング必須: 1MB で打ち切られると既存の課題名を見落として重複を配ってしまう。
+  const existingClassrooms = groupId
+    ? await listAssignmentsInGroups([groupId])
+    : await queryAll({
+      TableName: CLASSROOMS_TABLE,
+      IndexName: 'teacherSub-index',
+      KeyConditionExpression: 'teacherSub = :ts',
+      ExpressionAttributeValues: { ':ts': identity.sub },
+    });
+  const sameClassAssignments = existingClassrooms
+    .filter(item => (groupId ? true : item.className === className) && item.status === 'active')
+    .map(item => item.assignmentName as string);
+  if (sameClassAssignments.includes(assignmentName)) {
+    let suffix = 2;
+    while (sameClassAssignments.includes(`${assignmentName} (${suffix})`)) {
+      suffix++;
     }
+    assignmentName = `${assignmentName} (${suffix})`;
   }
 
   // Generate unique join code (retry up to 5 times)
@@ -605,9 +709,184 @@ async function handleCreateClassroom(identity: TeacherIdentity, body: Record<str
   };
 }
 
+// --- Co-teacher reverse index (#1146) ---
+
+/** What a reverse-index row points at: an assignment (課題) or a class (組). */
+type CoTeacherResourceType = 'assignment' | 'group';
+
+/** Sort key of a reverse-index row. Prefixed so one email lists either kind. */
+function coTeacherResourceKey(type: CoTeacherResourceType, id: string): string {
+  return `${type}#${id}`;
+}
+
+/**
+ * Keep the co-teacher reverse index in step with a resource's coTeacherEmails.
+ * Writes only the difference, so re-saving an unchanged list costs nothing.
+ *
+ * Called after the resource itself is written: if this throws the caller gets
+ * a 500 and retries, and because the sync is a diff of the *current* list the
+ * retry (or any later edit of the same list) repairs the index. Authorization
+ * never depends on the index — `canManageClassroom` still reads the list off
+ * the item — so a lagging index only delays the resource showing up in the
+ * teacher's list.
+ * @param type - resource kind the row points at
+ * @param id - classroomId or groupId
+ * @param before - the co-teacher list as it was stored
+ * @param after - the co-teacher list just written
+ * @param ttl - the resource's ttl (epoch seconds), so rows expire with it
+ */
+async function syncCoTeacherIndex(
+  type: CoTeacherResourceType,
+  id: string,
+  before: string[],
+  after: string[],
+  ttl?: unknown,
+): Promise<void> {
+  const beforeSet = new Set(before.map(normalizeEmail));
+  const afterSet = new Set(after.map(normalizeEmail));
+  const resourceKey = coTeacherResourceKey(type, id);
+  const now = new Date().toISOString();
+  const writes: Promise<unknown>[] = [];
+  for (const email of afterSet) {
+    if (!beforeSet.has(email)) {
+      writes.push(docClient.send(new PutCommand({
+        TableName: CO_TEACHER_INDEX_TABLE,
+        Item: {
+          coTeacherEmail: email,
+          resourceKey,
+          resourceType: type,
+          resourceId: id,
+          updatedAt: now,
+          ...(typeof ttl === 'number' ? { ttl } : {}),
+        },
+      })));
+    }
+  }
+  for (const email of beforeSet) {
+    if (!afterSet.has(email)) {
+      writes.push(docClient.send(new DeleteCommand({
+        TableName: CO_TEACHER_INDEX_TABLE,
+        Key: { coTeacherEmail: email, resourceKey },
+      })));
+    }
+  }
+  await Promise.all(writes);
+}
+
 /** Read the coTeacherEmails list from a classroom item, defaulting to []. */
 function readCoTeacherEmails(item: Record<string, unknown>): string[] {
   return Array.isArray(item.coTeacherEmails) ? (item.coTeacherEmails as string[]) : [];
+}
+
+/**
+ * Ids of the resources of one kind shared with this email, read off the
+ * reverse index instead of scanning the resource table (#1146). The sort key
+ * is `<type>#<id>`, so one `begins_with` picks either kind.
+ * @param email - the co-teacher's verified email (already normalized)
+ * @param type - assignment (課題) or group (組)
+ * @returns the resource ids, deduplicated
+ */
+async function listCoTeacherResourceIds(
+  email: string,
+  type: CoTeacherResourceType,
+): Promise<string[]> {
+  const rows = await queryAll({
+    TableName: CO_TEACHER_INDEX_TABLE,
+    KeyConditionExpression: 'coTeacherEmail = :email AND begins_with(resourceKey, :prefix)',
+    ExpressionAttributeValues: { ':email': email, ':prefix': `${type}#` },
+  });
+  const ids = new Set<string>();
+  for (const row of rows) {
+    if (typeof row.resourceId === 'string' && row.resourceId) {
+      ids.add(row.resourceId);
+    }
+  }
+  return [...ids];
+}
+
+/**
+ * Classes (組) shared with this teacher as a class-level co-teacher. Read via
+ * the co-teacher reverse index + BatchGet, so the cost scales with how many
+ * classes this teacher co-manages rather than with the size of the groups
+ * table — which matters because `ClassroomGroups` has a 400-day TTL and so
+ * accumulates (#1146).
+ */
+async function listCoManagedGroups(identity: TeacherIdentity): Promise<Record<string, unknown>[]> {
+  if (!identity.email) {
+    return [];
+  }
+  const ids = await listCoTeacherResourceIds(normalizeEmail(identity.email), 'group');
+  if (ids.length === 0) {
+    return [];
+  }
+  const groups = await batchGetAll(GROUPS_TABLE, ids.map(groupId => ({ groupId })));
+  // The index is eventually consistent with the item, and authorization still
+  // reads the item's own list, so re-check it here rather than trusting the row.
+  return groups.filter(item => item.teacherSub !== identity.sub
+    && emailInCoTeacherList(item.coTeacherEmails, identity.email));
+}
+
+/**
+ * Ids of every class (組) this teacher may manage: the ones they own plus the
+ * ones they co-manage. Used to collect the assignments inside them (#1138).
+ */
+async function listManageableGroupIds(identity: TeacherIdentity): Promise<string[]> {
+  const owned = await queryAll({
+    TableName: GROUPS_TABLE,
+    IndexName: 'teacherSub-index',
+    KeyConditionExpression: 'teacherSub = :ts',
+    ExpressionAttributeValues: { ':ts': identity.sub },
+  });
+  const ids = new Set<string>();
+  for (const group of [...owned, ...(await listCoManagedGroups(identity))]) {
+    if (typeof group.groupId === 'string') {
+      ids.add(group.groupId);
+    }
+  }
+  return [...ids];
+}
+
+/**
+ * Assignments (課題) shared with this teacher one by one, i.e. their email sits
+ * in the assignment's own `coTeacherEmails`. Read off the reverse index +
+ * BatchGet: a list attribute cannot be a GSI key, and the Scan this replaces
+ * was charged on every row of the classrooms table before the filter (#1146).
+ * @param email - the co-teacher's verified email (already normalized)
+ */
+async function listAssignmentsCoTaughtBy(email: string): Promise<Record<string, unknown>[]> {
+  const ids = await listCoTeacherResourceIds(email, 'assignment');
+  if (ids.length === 0) {
+    return [];
+  }
+  const items = await batchGetAll(CLASSROOMS_TABLE, ids.map(classroomId => ({ classroomId })));
+  // Re-check against the item itself: the index may lag a removal, and
+  // authorization has always been decided by the list stored on the item.
+  return items.filter(item => emailInCoTeacherList(item.coTeacherEmails, email));
+}
+
+/**
+ * Assignments filed under any of the given classes, whoever created them.
+ * Queried through the `groupId-index` GSI, one Query per class, so the cost
+ * scales with the assignments actually in those classes instead of with the
+ * whole table (#1146). Managing a class grants access to everything inside it
+ * regardless of who created each assignment (#1138), so this covers both
+ * directions and replaces the old `groupId IN (...)` Scan — with it the
+ * 100-operand `IN` cap, and the chunking it forced, are gone.
+ */
+async function listAssignmentsInGroups(groupIds: string[]): Promise<Record<string, unknown>[]> {
+  const byId = new Map<string, Record<string, unknown>>();
+  for (const groupId of new Set(groupIds)) {
+    const items = await queryAll({
+      TableName: CLASSROOMS_TABLE,
+      IndexName: 'groupId-index',
+      KeyConditionExpression: 'groupId = :gid',
+      ExpressionAttributeValues: { ':gid': groupId },
+    });
+    for (const item of items) {
+      byId.set(item.classroomId as string, item);
+    }
+  }
+  return [...byId.values()];
 }
 
 /** Fetch the owning class (group) of an assignment, or undefined (pre-v2). */
@@ -667,34 +946,39 @@ function mapClassroomSummary(item: Record<string, unknown>, identity: TeacherIde
 }
 
 async function handleListClassrooms(identity: TeacherIdentity, includeArchived = false): Promise<APIGatewayProxyStructuredResultV2> {
-  // Classes the teacher owns — fast GSI query on teacherSub.
-  const owned = await docClient.send(new QueryCommand({
+  // Assignments the teacher owns — fast GSI query on teacherSub.
+  const owned = await queryAll({
     TableName: CLASSROOMS_TABLE,
     IndexName: 'teacherSub-index',
     KeyConditionExpression: 'teacherSub = :ts',
     ExpressionAttributeValues: { ':ts': identity.sub },
-  }));
+  });
 
-  // Classes the teacher co-manages — matched by verified email. DynamoDB cannot
-  // index a list attribute with a GSI, so we Scan + filter on coTeacherEmails.
-  // The classrooms table is small (single org, 30-day TTL) so this is fine;
-  // revisit with a reverse-index table (email -> classroomId) if it grows large.
-  let coManaged: Record<string, unknown>[] = [];
-  if (identity.email) {
-    const scan = await docClient.send(new ScanCommand({
-      TableName: CLASSROOMS_TABLE,
-      FilterExpression: 'contains(coTeacherEmails, :email)',
-      ExpressionAttributeValues: { ':email': identity.email },
-    }));
-    coManaged = scan.Items || [];
-  }
+  // Everything else the teacher may see. Both halves are index lookups, so
+  // this request no longer Scans the classrooms or the groups table at all
+  // (#1146) — the cost now scales with what this teacher can see, not with how
+  // much data every other teacher has accumulated:
+  //   - assignments co-taught one by one, via the co-teacher reverse index
+  //     (a list attribute cannot be a GSI key, hence the separate table);
+  //   - assignments living inside a class (組) the teacher may manage, whether
+  //     they own that class or co-manage it, via the `groupId-index` GSI.
+  //     Managing a class grants access to everything inside it regardless of
+  //     who created each assignment, so this covers both directions (issue
+  //     #1138): a co-teacher must see the owner's assignments, and the owner
+  //     must see assignments a co-teacher created. Keying off teacherSub would
+  //     miss the other party, so key off groupId.
+  const [coTaught, inGroups] = await Promise.all([
+    identity.email ? listAssignmentsCoTaughtBy(normalizeEmail(identity.email)) : [],
+    listManageableGroupIds(identity).then(listAssignmentsInGroups),
+  ]);
+  const shared = [...coTaught, ...inGroups];
 
   // Merge by classroomId (owned wins). Archived classes are excluded unless
   // the caller opts in with ?includeArchived=1 (the archive-list / restore UI,
   // issue #1050) — the default stays active-only so already-deployed frontends
   // never see archived items reappear.
   const byId = new Map<string, Record<string, unknown>>();
-  for (const item of [...(owned.Items || []), ...coManaged]) {
+  for (const item of [...owned, ...shared]) {
     const id = item.classroomId as string;
     const visible = item.status === 'active' || (includeArchived && item.status === 'archived');
     if (visible && !byId.has(id)) {
@@ -802,6 +1086,7 @@ async function handleAddCoTeacher(identity: TeacherIdentity, classroomId: string
     UpdateExpression: 'SET coTeacherEmails = :list, updatedAt = :now',
     ExpressionAttributeValues: { ':list': updated, ':now': new Date().toISOString() },
   }));
+  await syncCoTeacherIndex('assignment', classroomId, existing, updated, result.Item.ttl);
 
   return { statusCode: 200, body: JSON.stringify({ coTeacherEmails: updated }) };
 }
@@ -829,6 +1114,7 @@ async function handleRemoveCoTeacher(identity: TeacherIdentity, classroomId: str
       UpdateExpression: 'SET coTeacherEmails = :list, updatedAt = :now',
       ExpressionAttributeValues: { ':list': updated, ':now': new Date().toISOString() },
     }));
+    await syncCoTeacherIndex('assignment', classroomId, existing, updated, result.Item.ttl);
   }
 
   return { statusCode: 200, body: JSON.stringify({ coTeacherEmails: updated }) };
@@ -865,12 +1151,12 @@ async function handleUpdateClassroom(identity: TeacherIdentity, classroomId: str
     updates.joinCode = generateJoinCode();
   }
   // Assign to / remove from a group (クラス). `groupId: null` clears the
-  // assignment; a string must be a group this teacher owns.
+  // assignment; a string must be a class this teacher owns or co-manages.
   if (body.groupId !== undefined) {
     if (body.groupId === null || body.groupId === '') {
       updates.groupId = null;
     } else if (typeof body.groupId === 'string') {
-      await getOwnedGroup(identity, body.groupId);
+      await getManageableGroup(identity, body.groupId);
       updates.groupId = body.groupId;
     } else {
       throw new ValidationError('groupId must be a string or null');
@@ -1015,17 +1301,15 @@ async function handleJoinClassroom(sourceIp: string, body: Record<string, unknow
   // Personalized recap: when the lesson belongs to a group (組), surface the
   // returned teacher comment this seat received in the most recent prior
   // lesson of the same group. Best-effort — joining must never fail on this.
+  // Enumerated by groupId, not by the class owner's teacherSub: a prior lesson
+  // in the same class may have been created by a class co-teacher (#1138), and
+  // that row carries their own teacherSub (#1145).
   let previousComment: Record<string, unknown> | null = null;
   if (classroom.groupId) {
     try {
-      const siblings = await docClient.send(new QueryCommand({
-        TableName: CLASSROOMS_TABLE,
-        IndexName: 'teacherSub-index',
-        KeyConditionExpression: 'teacherSub = :ts',
-        ExpressionAttributeValues: { ':ts': classroom.teacherSub },
-      }));
+      const siblings = await listAssignmentsInGroups([classroom.groupId as string]);
       const prior = selectPriorClassrooms(
-        siblings.Items || [],
+        siblings,
         classroom.groupId as string,
         classroom.classroomId as string,
       );
@@ -2340,17 +2624,21 @@ export function topicToEnsureForDuplicate(
   return topic && groupId ? topic : undefined;
 }
 
-/** Fetch a group and assert the teacher owns it. */
-async function getOwnedGroup(identity: TeacherIdentity, groupId: string): Promise<Record<string, unknown>> {
+/**
+ * Fetch a class (group) and assert the teacher may manage it — its owner or a
+ * class-level co-teacher (issue #1138). Teachers with no relationship to the
+ * class still get the existence-hiding 404, same policy as classrooms.
+ */
+async function getManageableGroup(identity: TeacherIdentity, groupId: string): Promise<Record<string, unknown>> {
   const result = await docClient.send(new GetCommand({
     TableName: GROUPS_TABLE,
     Key: { groupId },
   }));
-  if (!result.Item || result.Item.teacherSub !== identity.sub) {
+  if (!canManageGroup(result.Item, identity)) {
     // Existence-hiding 404, same policy as classrooms.
     throw new NotFoundError('Group not found');
   }
-  return result.Item;
+  return result.Item as Record<string, unknown>;
 }
 
 /**
@@ -2436,24 +2724,14 @@ async function handleCreateGroup(identity: TeacherIdentity, body: Record<string,
 }
 
 async function handleListGroups(identity: TeacherIdentity): Promise<APIGatewayProxyStructuredResultV2> {
-  const result = await docClient.send(new QueryCommand({
+  const result = await queryAll({
     TableName: GROUPS_TABLE,
     IndexName: 'teacherSub-index',
     KeyConditionExpression: 'teacherSub = :ts',
     ExpressionAttributeValues: { ':ts': identity.sub },
-  }));
-  // Classes shared with this teacher as a class-level co-teacher. Same scan
-  // trade-off as the co-managed classroom list: small table, low frequency.
-  let coManaged: Record<string, unknown>[] = [];
-  if (identity.email) {
-    const scanned = await docClient.send(new ScanCommand({
-      TableName: GROUPS_TABLE,
-      FilterExpression: 'contains(coTeacherEmails, :email)',
-      ExpressionAttributeValues: { ':email': normalizeEmail(identity.email) },
-    }));
-    coManaged = (scanned.Items || []).filter(item => item.teacherSub !== identity.sub);
-  }
-  const groups = [...(result.Items || []), ...coManaged].map(item => ({
+  });
+  const coManaged = await listCoManagedGroups(identity);
+  const groups = [...result, ...coManaged].map(item => ({
     ...mapGroupSummary(item),
     role: item.teacherSub === identity.sub ? 'owner' : 'co-teacher',
   }));
@@ -2461,7 +2739,13 @@ async function handleListGroups(identity: TeacherIdentity): Promise<APIGatewayPr
 }
 
 async function handleUpdateGroup(identity: TeacherIdentity, groupId: string, body: Record<string, unknown>): Promise<APIGatewayProxyStructuredResultV2> {
-  await getOwnedGroup(identity, groupId);
+  const group = await getManageableGroup(identity, groupId);
+  // A class co-teacher works inside the class like its owner, but the
+  // membership list itself stays owner-only — otherwise a co-teacher could
+  // invite others or remove themselves out of the owner's control (#1138).
+  if (body.coTeacherEmails !== undefined && group.teacherSub !== identity.sub) {
+    throw new AuthError('Only the class owner can change the co-teacher list');
+  }
 
   const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() };
   if (body.name !== undefined) {
@@ -2517,17 +2801,23 @@ async function handleUpdateGroup(identity: TeacherIdentity, groupId: string, bod
     ReturnValues: 'ALL_NEW',
   }));
 
+  if (updates.coTeacherEmails !== undefined) {
+    await syncCoTeacherIndex(
+      'group',
+      groupId,
+      readCoTeacherEmails(group),
+      updates.coTeacherEmails as string[],
+      group.ttl,
+    );
+  }
+
   // The class's studentCount is authoritative, so a change must flow down to
   // its existing assignments (classrooms) — otherwise growing/shrinking the
   // class leaves old assignments on their creation-time snapshot. Increasing
   // adds seats (safe); decreasing drops seats — the teacher UI warns first
   // that submissions on the removed seats stop showing.
   if (updates.studentCount !== undefined) {
-    await propagateStudentCountToClassrooms(
-      String((result.Attributes as Record<string, unknown>)?.teacherSub ?? identity.sub),
-      groupId,
-      updates.studentCount as number,
-    );
+    await propagateStudentCountToClassrooms(groupId, updates.studentCount as number);
   }
 
   return { statusCode: 200, body: JSON.stringify(mapGroupSummary(result.Attributes || {})) };
@@ -2535,25 +2825,20 @@ async function handleUpdateGroup(identity: TeacherIdentity, groupId: string, bod
 
 /**
  * Set every active classroom (assignment) in a class to the class's new seat
- * count. Enumerates via teacherSub-index + a groupId filter (no groupId GSI on
- * the classrooms table), the same pattern topic cascades use.
- * @param teacherSub - owning teacher (partition key of teacherSub-index)
+ * count. Enumerated by groupId, not by the class owner's teacherSub: a class
+ * co-teacher can file assignments in this class too (#1138) and those rows
+ * carry their own teacherSub, so keying off the owner would leave their
+ * assignments showing a stale student count (#1145).
  * @param groupId - the class whose assignments to update
  * @param studentCount - the new seat count to write
  */
 async function propagateStudentCountToClassrooms(
-  teacherSub: string, groupId: string, studentCount: number,
+  groupId: string, studentCount: number,
 ): Promise<void> {
   const now = new Date().toISOString();
-  const result = await docClient.send(new QueryCommand({
-    TableName: CLASSROOMS_TABLE,
-    IndexName: 'teacherSub-index',
-    KeyConditionExpression: 'teacherSub = :ts',
-    FilterExpression: 'groupId = :gid AND #status = :active',
-    ExpressionAttributeNames: { '#status': 'status' },
-    ExpressionAttributeValues: { ':ts': teacherSub, ':gid': groupId, ':active': 'active' },
-  }));
-  for (const item of result.Items || []) {
+  const assignments = (await listAssignmentsInGroups([groupId]))
+    .filter(item => item.status === 'active');
+  for (const item of assignments) {
     await docClient.send(new UpdateCommand({
       TableName: CLASSROOMS_TABLE,
       Key: { classroomId: item.classroomId },
@@ -2569,23 +2854,29 @@ async function propagateStudentCountToClassrooms(
  * it: create classes, adopt ungrouped assignments, lift class-level fields.
  * Safe to call on every class-list view — a fully migrated account produces
  * an empty plan.
+ *
+ * Deliberately keyed off the caller's own teacherSub (not groupId): this
+ * migrates the caller's *ungrouped* (pre-v2) rows, which have no class to
+ * enumerate from, and each teacher migrates their own account (#1145).
  */
 async function handleMigrateGroups(identity: TeacherIdentity): Promise<APIGatewayProxyStructuredResultV2> {
+  // Paginated: the plan drives writes (create classes, adopt assignments), so
+  // a truncated read would silently leave part of the account unmigrated.
   const [classroomsResult, groupsResult] = await Promise.all([
-    docClient.send(new QueryCommand({
+    queryAll({
       TableName: CLASSROOMS_TABLE,
       IndexName: 'teacherSub-index',
       KeyConditionExpression: 'teacherSub = :ts',
       ExpressionAttributeValues: { ':ts': identity.sub },
-    })),
-    docClient.send(new QueryCommand({
+    }),
+    queryAll({
       TableName: GROUPS_TABLE,
       IndexName: 'teacherSub-index',
       KeyConditionExpression: 'teacherSub = :ts',
       ExpressionAttributeValues: { ':ts': identity.sub },
-    })),
+    }),
   ]);
-  const plan = planGroupMigration(classroomsResult.Items || [], groupsResult.Items || []);
+  const plan = planGroupMigration(classroomsResult, groupsResult);
 
   const now = new Date().toISOString();
   const groupIdByKey = new Map<string, string>();
@@ -2644,6 +2935,20 @@ async function handleMigrateGroups(identity: TeacherIdentity): Promise<APIGatewa
       ...(Object.keys(names).length > 0 ? { ExpressionAttributeNames: names } : {}),
       ExpressionAttributeValues: values,
     }));
+    // Migration lifts each assignment's co-teachers up onto the class, so this
+    // is another writer of coTeacherEmails and must keep the reverse index in
+    // step — otherwise a migrated teacher's shared classes stay invisible to
+    // the index-based reads above (#1146).
+    if (update.set.coTeacherEmails !== undefined) {
+      const existing = groupsResult.find(g => String(g.groupId) === update.groupKey);
+      await syncCoTeacherIndex(
+        'group',
+        groupId,
+        existing ? readCoTeacherEmails(existing) : [],
+        update.set.coTeacherEmails as string[],
+        existing ? existing.ttl : undefined,
+      );
+    }
   }
 
   return {
@@ -2665,20 +2970,19 @@ async function handleMigrateGroups(identity: TeacherIdentity): Promise<APIGatewa
 async function handleUpdateGroupTopics(
   identity: TeacherIdentity, groupId: string, body: Record<string, unknown>,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const group = await getOwnedGroup(identity, groupId);
+  const group = await getManageableGroup(identity, groupId);
   const topics: string[] = Array.isArray(group.topics) ? [...(group.topics as string[])] : [];
   const action = body.action;
   const now = new Date().toISOString();
 
+  // Enumerated by groupId, not by the class owner's teacherSub: a class
+  // co-teacher can file assignments in this class too (#1138) and those rows
+  // carry their own teacherSub, so keying off the owner would leave them
+  // pointing at a topic the class no longer has.
   const cascadeAssignments = async (fromTopic: string, toTopic: string | null): Promise<void> => {
-    const result = await docClient.send(new QueryCommand({
-      TableName: CLASSROOMS_TABLE,
-      IndexName: 'teacherSub-index',
-      KeyConditionExpression: 'teacherSub = :ts',
-      FilterExpression: 'groupId = :gid AND topic = :from',
-      ExpressionAttributeValues: { ':ts': String(group.teacherSub), ':gid': groupId, ':from': fromTopic },
-    }));
-    for (const item of result.Items || []) {
+    const targets = (await listAssignmentsInGroups([groupId]))
+      .filter(assignment => assignment.topic === fromTopic);
+    for (const item of targets) {
       await docClient.send(new UpdateCommand({
         TableName: CLASSROOMS_TABLE,
         Key: { classroomId: item.classroomId },
@@ -2756,7 +3060,7 @@ async function handleDuplicateClassroom(
   // explicit rather than silently inheriting the source group).
   let groupId: string | undefined;
   if (typeof body.groupId === 'string' && body.groupId) {
-    await getOwnedGroup(identity, body.groupId);
+    await getManageableGroup(identity, body.groupId);
     groupId = body.groupId;
   }
 
@@ -3997,7 +4301,7 @@ async function importSharedItem(
   if (typeof groupId !== 'string' || !groupId) {
     throw new ValidationError('groupId is required');
   }
-  const group = await getOwnedGroup(identity, groupId);
+  const group = await getManageableGroup(identity, groupId);
 
   const assignmentName = body.assignmentName !== undefined
     ? validateClassName(body.assignmentName)

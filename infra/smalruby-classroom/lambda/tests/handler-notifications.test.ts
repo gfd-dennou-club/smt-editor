@@ -1,3 +1,7 @@
+// このファイルをモジュールにするための宣言。import/export を持たない .ts は TypeScript の
+// グローバルスクリプト扱いになり、トップレベルの const がテストファイル間で衝突する（#1144）。
+export {};
+
 /**
  * お知らせ (notification center) tests — EPIC #1111.
  *
@@ -5,6 +9,7 @@
  * request path (router → auth → handlers) with DynamoDB mocked. Items are
  * written by the admin stack, so there is no create path here.
  */
+
 
 const mockSend = jest.fn();
 jest.mock('@aws-sdk/lib-dynamodb', () => {
@@ -215,3 +220,4 @@ describe('お知らせセンター (EPIC #1111)', () => {
     });
   });
 });
+

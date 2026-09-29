@@ -1,3 +1,7 @@
+// このファイルをモジュールにするための宣言。import/export を持たない .ts は TypeScript の
+// グローバルスクリプト扱いになり、トップレベルの const がテストファイル間で衝突する（#1144）。
+export {};
+
 /**
  * Handler-level authorization tests for the co-teacher endpoints.
  *
@@ -12,6 +16,7 @@
  * ({sub: 'dev-test-teacher', email: 'dev-test-teacher@example.com'}), which is
  * a legitimately authenticated teacher but a stranger to the mocked classroom.
  */
+
 
 // Replace only the DynamoDB document client's send(); keep the real command
 // classes so the handler can still build Get/Update/Query/Scan commands.
@@ -128,3 +133,4 @@ describe('co-teacher endpoints — cross-tenant authorization', () => {
         expect(JSON.parse(res.body as string).coTeacherEmails).toContain('dev-test-teacher@example.com');
     });
 });
+

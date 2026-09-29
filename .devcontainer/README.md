@@ -120,8 +120,41 @@ NaCl の隔離ガイドラインでは「非公開認証情報が到達する隔
 | AWS | `ip-ranges.json` のうち **デプロイリージョン + us-east-1 + GLOBAL**、加えて SSO 系 (`oidc/portal.sso/sso.<region>.amazonaws.com`, SSO ポータル) | `cdk deploy` / `aws sso login` |
 | DNS | `/etc/resolv.conf` のリゾルバ + docker DNS (127.0.0.11) の 53 番のみ | 名前解決 (任意 DNS への exfil を遮断) |
 
+- 製品がランタイムで取りに行く先も許可している: **`cdn.jsdelivr.net`** (顔認識拡張が
+  `@mediapipe/face_detection` を CDN から読む。Monaco Editor 本体は自前配信に切り替えたので
+  この許可には依存しない → `docs/ruby-editor/README.md`)、**`accounts.google.com` /
+  `apis.google.com`** (Google ログイン)。これが無いと **コンテナ内のブラウザで該当機能を
+  使えず**、検証そのものができない。解析用の `www.googletagmanager.com` は
+  開発に不要なので入れていない (拒否されても即失敗するだけで先に進む)。
 - AWS のリージョンと SSO ポータルは **`infra/aws-sso.env`** から自動取得する
   (fork 時はそのファイルだけ書き換えれば firewall も追従)。
+
+### 許可外は DROP ではなく REJECT (即座に失敗させる)
+
+許可外の宛先には **TCP RST / ICMP port-unreachable を返す**。外に出るデータは無いので遮断の
+強度は DROP と同じだが、**待たされない**のが大きく違う:
+
+| | DROP (以前) | REJECT (現在) |
+|---|---|---|
+| 許可外への接続 | タイムアウトまで無応答 (実測 8 秒以上) | **即座に失敗** (実測 0.01 秒) |
+| ブラウザで GUI を開いたとき | 外部依存を待ち続けて **ページ全体が読み込み完了しない** | その機能だけ失敗し、**エディタは使える** |
+| 何が弾かれたか | 分かりにくい | すぐ分かる |
+
+ポリシー自体は `-P OUTPUT DROP` のまま残してある (REJECT ルールの構築に失敗しても閉じる
+fail-closed の保険)。
+
+### ホスト名の allowlist は定期的に再解決される
+
+`dig` で引いた IP を入れているだけなので、**CDN のように A レコードが変わる宛先は
+起動時 1 回の解決では追随できない** (追加した直後は通るのに数十分後に切れる)。そのため:
+
+- ホスト名から入れた IP は **期限付き** (既定 1 時間) で ipset に入る。CIDR レンジ
+  (GitHub / AWS) は従来どおり無期限。
+- `init-firewall.sh` が **再解決ループを background で起動** し、既定 5 分ごとに
+  `EXTRA_HOSTS` と `firewall-allow.local` のホストを引き直して入れ直す。
+  消えた IP は期限切れで自然に落ちるので、許可が広がりっぱなしにならない。
+- 間隔と期限は env で変えられる: `FIREWALL_REFRESH_INTERVAL` (秒) / `FIREWALL_HOST_TTL` (秒)。
+- ループのログは `/tmp/init-firewall-refresh.log`、PID は `/tmp/init-firewall-refresh.pid`。
 - IPv4 allowlist のみ。**IPv6 は egress を全遮断**する (allowlist を IPv4 で組むため、
   IPv6 を開けると素通りの抜け道になる)。
 - **fail-closed**: allowlist の構築に一部失敗しても、最後の DROP は必ず適用される。
@@ -302,6 +335,7 @@ tmux source-file ~/.tmux.conf   # または prefix r
 |---|---|---|
 | `~/ghq` | `/ghq` | 関連 OSS の参照・push |
 | `~/.config/smalruby-bot` | 同上 (ro) | GitHub App bot 設定 (非秘密)。rebuild/delete を跨いで永続させる。詳細は下記 |
+| `~/.config/smalruby-gh` | 同上 (ro) | repo 設定 (Actions の Variables / Secrets / Environments) 変更用の個人 PAT。`bin/gh-admin` **専用**。詳細は下記 |
 | `~/.claude/settings.json` | 同上 (ro) | Claude Code グローバル設定 (host で編集、container は読むだけ) |
 | `~/.claude/skills` | 同上 (ro) | 自作 skills |
 | `~/.claude/plugins` | 同上 (ro) | プラグイン |
@@ -368,6 +402,34 @@ devcontainer rebuild / `devpod delete` で消える (毎回作り直しになる
 これは rebuild を跨いで残る)。ro にすることで、コンテナ側の誤動作で host の設定を
 消す事故を防ぐ (上記「rw でマウントしない」原則の適用)。生の `.pem` は host にも
 マウントにも載せないので、共有されるのは非秘密の識別子だけになる。
+
+### repo 設定用の admin トークンを rebuild を跨いで永続させる
+
+GitHub App の bot トークンでは **repo 設定を変更できない**
+(`Resource not accessible by integration`)。Actions の Variables / Secrets /
+Environments を触るときだけ、個人の fine-grained PAT を使う。これも
+`~/.config/smalruby-gh/` に置くとコンテナ fs 上になり rebuild で消えるので、
+host の同じパスから **read-only** で bind マウントする (上記「個人マウント」)。
+
+1. **PAT を作る** (fine-grained・対象は `smalruby/smalruby3-editor` のみ):
+   Secrets = Read and write / Variables = Read and write / Metadata = Read。
+   有効期限は短めにする。Environments は任意 (既存 Environment の設定を触るときだけ)。
+
+   > **Environment の作成 (`stg` など) はブラウザで行う。** API の
+   > `PUT /repos/{owner}/{repo}/environments/{name}` は **`administration=write`** を要求し
+   > (`X-Accepted-Github-Permissions` で確認済み)、Environments 権限では 403 になる。
+   > `administration=write` はブランチ保護・リポジトリ設定まで及ぶので、この一度きりの操作の
+   > ために PAT へ付与しない。
+2. **host に置く**: `~/.config/smalruby-gh/admin-token` に保存し `chmod 600`。
+3. **ro マウントをアンコメント**: `devcontainer.json` の `~/.config/smalruby-gh` 行を
+   有効化して rebuild する。
+4. **確認**: コンテナ内で `bin/gh-admin --whoami` → 持ち主と variables / secrets /
+   environments の可否が出る。
+
+**`GH_TOKEN` に export しないこと。** `gh` は `GH_TOKEN` を無条件に拾い、autopilot の
+読み取りトークン解決も `AUTOPILOT_READ_TOKEN` → `GH_TOKEN` → … の順なので、export すると
+**daemon の全読み取りが admin 権限で走る**。使うのは `bin/gh-admin` 経由だけにする
+(このラッパは repo 設定の API 以外を実行前に拒否する)。
 
 ### Claude Code memory の共有メカニズム
 

@@ -68,12 +68,20 @@ upstream ファイルに追加した Smalruby 固有コードのマーカー一�
 | `src/reducers/menus.js` | display mode menu | `PreferenceMenu` サブメニューの開閉用 Redux state (`displayModeMenu`)。定数/rootMenu への登録/initialState/open・close・selector の追加 (Issue #865) |
 | `webpack.config.js` | classroom API | CLASSROOM_API_ENDPOINT 環境変数注入 |
 | `webpack.config.js` | scratch api proxy endpoint | SCRATCH_API_PROXY_ENDPOINT 環境変数注入 |
+| `webpack.config.js` | self-hosted Monaco Editor (#1171) | Monaco 本体 (`min/vs`) を `static/monaco/vs` へコピーする定数・CopyWebpackPlugin パターンと、PWA precache 除外 + runtime caching 設定。マーカーは 2 箇所の `GenerateSW` にも単一行で入る |
 | `eslint.config.mjs` | react lifecycle typo detection | `react/no-typos` を error にして getDerivedStateFromProps/Error の static 抜け等を lint で検出 |
 | `eslint.config.mjs` | prettier integration | eslintConfigPrettier を最後に置いて prettier と競合する整形ルールを無効化 |
 | `src/lib/blocks.js` | gesture recovery import | ジェスチャー復旧モジュールの import |
 | `src/lib/blocks.js` | gesture recovery | ジェスチャー復旧ハンドラーのインストール |
 | `src/lib/blocks.js` | comment icon patch import | ScratchCommentIcon パッチモジュールの import |
 | `src/lib/blocks.js` | comment icon patch | ScratchCommentIcon.fireCreateEvent をオーバーライドして create 後に block_comment_change を re-fire (Blockly v12 の create payload に text が含まれない問題のフォロー) |
+| `src/lib/blocks.js` | IME composition patch import | IME 変換ガードモジュールの import (issue #1167) |
+| `src/lib/blocks.js` | IME composition patch | `FieldInput.prototype.onHtmlInputKeyDown_` をラップし、IME 変換中の Enter / Escape でフィールドエディタが閉じないようにする (Blockly 12.4.1 のコメント「Trap Enter without IME」が未実装なため) |
+| `src/containers/question.jsx` | IME composition guard | 「聞いて待つ」の回答欄で IME 変換確定の Enter が送信にならないようにする (issue #1167) |
+| `src/containers/prompt.jsx` | IME composition guard | 変数・リスト・ブロック作成ダイアログで IME 変換確定の Enter が OK にならないようにする (issue #1167) |
+| `src/containers/slider-prompt.jsx` | IME composition guard | スライダー範囲設定で IME 変換確定の Enter が OK にならないようにする (issue #1167) |
+| `src/containers/list-monitor.jsx` | IME composition guard | ステージ上のリスト編集で IME 変換確定の Enter が新規項目挿入にならないようにする (issue #1167) |
+| `src/components/forms/buffered-input-hoc.jsx` | IME composition guard | スプライト名 / x / y / 大きさ / 向きの入力で IME 変換確定の Enter が flush + blur にならないようにする (issue #1167) |
 | `src/playground/index.ejs` | interactive-widget viewport for Android keyboard | meta viewport に `interactive-widget=resizes-content` を追加。Android Chrome 108+ でキーボード出現時に layout viewport が縮み、`100dvh` 等の dvh 系単位が追従するようになる |
 | `src/playground/render-gui.jsx` | URL params for Playwright | URL パラメーター import |
 | `src/playground/render-gui.jsx` | no_beforeunload URL param | beforeunload 無効化 |
