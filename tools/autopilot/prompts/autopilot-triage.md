@@ -24,6 +24,10 @@ GH_TOKEN="$(bin/bot-token)" gh issue view "$AUTOPILOT_ISSUE" --repo "${AUTOPILOT
 **Kind（EPIC / Issue）**
 - **EPIC**: 複数の独立した作業に分割でき、1 PR で終わらない規模。または本文に複数の機能・段階・チェックリストが並ぶ。
 - **Issue**: 単一の変更で完結し、1 PR で対応できる粒度。
+- **infra とそれ以外の両方に変更が要る**（`infra/**` の API・Lambda・CDK と、GUI など）なら、
+  1 PR の大きさでも **EPIC** にする。infra は別の sub-issue に分けて先に develop へ出す決まり
+  （infra-first・`.claude/rules/infra/development.md`）なので、decompose で分ける。
+  `infra/**` だけ・それ以外だけの Issue は従来どおり判断する。
 
 **スコープ（Backlog / Icebox）**
 - **Backlog**（やる）: 妥当なバグ報告・機能要望で、プロジェクト方針に沿う。**既定はこちら。**
@@ -107,7 +111,7 @@ Icebox 提案（人間確認。**Status は動かさない** — 提案段階で
 ```bash
 cat > "$AUTOPILOT_RESULT_FILE" <<EOF
 {"issue":$AUTOPILOT_ISSUE,"phase":"triage","signal":"hitl","summary":"スコープ外の可能性。人間確認を依頼。",
-"reason":"重複の可能性があり Icebox を提案。同意なら Status を Icebox へ。再検討させるなら 🙋 HITL を外す（またはコメントで指示）と再トリアージします。","commentUrl":"<投稿したコメントURL>","nextStatus":null}
+"reason":"重複の可能性があり Icebox を提案。同意なら Status を Icebox へ。再検討させるならコメントで指示して 🙋 HITL を外すと再トリアージします。","commentUrl":"<投稿したコメントURL>","nextStatus":null}
 EOF
 echo AUTOPILOT_HITL
 ```

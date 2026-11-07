@@ -27,6 +27,9 @@ import ExtensionsButton from '../extension-button/extension-button.jsx';
 // === Smalruby: Start of DNCL mode notice ===
 import DnclModeNotice from '../dncl-mode-notice/dncl-mode-notice.jsx';
 // === Smalruby: End of DNCL mode notice ===
+// === Smalruby: Start of genai concierge ===
+import GenaiConcierge from '../../containers/genai-concierge.jsx';
+// === Smalruby: End of genai concierge ===
 import WebGlModal from '../../containers/webgl-modal.jsx';
 import TipsLibrary from '../../containers/tips-library.jsx';
 import Cards from '../../containers/cards.jsx';
@@ -40,6 +43,10 @@ import SmalrubotFirmwareModal from '../../containers/smalrubot-firmware-modal.js
 // === Smalruby: End of smalrubot firmware modal ===
 // === Smalruby: Start of classroom modal ===
 import ClassroomModal from '../../containers/classroom-modal.jsx';
+import ClassroomKickRequestWatcher from '../../containers/classroom-kick-request-watcher.jsx';
+import ClassroomTeacherKickAlerts from '../../containers/classroom-teacher-kick-alerts.jsx';
+import ClassroomTeacherPanel from '../../containers/classroom-teacher-panel.jsx';
+import ClassroomPeerPanel from '../../containers/classroom-peer-panel.jsx';
 import ClassroomTeacherModal from '../../containers/classroom-teacher-modal.jsx';
 // === Smalruby: End of classroom modal ===
 // === Smalruby: Start of bug report modal ===
@@ -48,6 +55,7 @@ import {isBugReportConfigured} from '../../lib/bug-report-api.js';
 // === Smalruby: End of bug report modal ===
 // === Smalruby: Start of meshV2 classroom binding ===
 import MeshV2ClassroomBinding from '../../lib/mesh-v2-classroom-binding.jsx';
+import ClassroomMeshConnectPrompt from '../../containers/classroom-mesh-connect-prompt.jsx';
 // === Smalruby: End of meshV2 classroom binding ===
 
 // === Smalruby: Start of meshV2 self-sensor notice ===
@@ -486,7 +494,10 @@ const GUIComponent = props => {
                         <SmalrubotFirmwareModal />
                     ) : null}
                     {/* === Smalruby: Start of classroom modal === */}
-                    {classroomModalVisible ? <ClassroomModal /> : null}
+                    {classroomModalVisible ? <ClassroomModal /> : <ClassroomKickRequestWatcher />}
+                    <ClassroomTeacherKickAlerts />
+                    <ClassroomTeacherPanel />
+                    <ClassroomPeerPanel />
                     {teacherModalVisible ? <ClassroomTeacherModal /> : null}
                     {/* === Smalruby: End of classroom modal === */}
                     {/* === Smalruby: Start of bug report modal === */}
@@ -494,6 +505,7 @@ const GUIComponent = props => {
                     {/* === Smalruby: End of bug report modal === */}
                     {/* === Smalruby: Start of meshV2 classroom binding === */}
                     <MeshV2ClassroomBinding />
+                    <ClassroomMeshConnectPrompt />
                     {/* === Smalruby: End of meshV2 classroom binding === */}
                     {/* === Smalruby: Start of meshV2 self-sensor notice === */}
                     <MeshSelfSensorNotice />
@@ -743,6 +755,9 @@ const GUIComponent = props => {
                                             onExitDnclMode={onRequestExitDnclMode}
                                         />
                                         {/* === Smalruby: End of DNCL mode notice === */}
+                                        {/* === Smalruby: Start of genai concierge === */}
+                                        <GenaiConcierge vm={vm} />
+                                        {/* === Smalruby: End of genai concierge === */}
                                     </Box>
                                     {/* === Smalruby: Start of DNCL extension button === */}
                                     <ExtensionsButton

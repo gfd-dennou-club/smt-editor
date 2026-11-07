@@ -11,14 +11,42 @@
 const MAX_ASSIGNMENT_PAGES = 10;
 const MAX_ASSIGNMENT_PAGE_TEXT_LENGTH = 500;
 const ASSIGNMENT_IMAGE_CONTENT_TYPES = ['image/png', 'image/jpeg'];
+// "Peer view" (#1208): whether students may see classmates' submission images.
+// Mirrors PEER_VIEW_VALUES in the Lambda (#1239).
+const PEER_VIEW_VALUES = ['none', 'always', 'afterSubmit'];
+// Mesh group size limit (#1257): 6 = "up to 6", 0 = "no limit". Mirrors
+// validateMeshGroupLimit in the Lambda (#1255). New assignments get 6.
+const MESH_GROUP_LIMIT_VALUES = [6, 0];
+const DEFAULT_MESH_GROUP_LIMIT = 6;
+
+/**
+ * Normalize a peerView value from the server (old assignments have none).
+ * @param {*} value - Raw value
+ * @returns {string} One of PEER_VIEW_VALUES ('none' when unknown)
+ */
+const normalizePeerView = (value) => (PEER_VIEW_VALUES.includes(value) ? value : 'none');
+
+/**
+ * Normalize a meshGroupLimit value (from the server or a <select>).
+ * Assignments made before #1255 have none — the server reports them as 0
+ * ("no limit"), and so does this.
+ * @param {*} value - Raw value (number or numeric string)
+ * @returns {number} One of MESH_GROUP_LIMIT_VALUES (0 when unknown)
+ */
+const normalizeMeshGroupLimit = (value) => {
+    const n = Number(value);
+    return value !== null && MESH_GROUP_LIMIT_VALUES.includes(n) ? n : 0;
+};
 
 /**
  * Build the PUT /classrooms/{id}/assignment payload from editor state.
  * @param {Array<object>} editorPages - Editor page objects
  * @param {string} starterMode - 'none' | 'keep' | 'new'
- * @returns {object} Request payload {pages, newStarter?, keepStarter?}
+ * @param {boolean} [startFromPrevious] - "start from the previous submission" setting
+ * @param {string} [peerView] - "peer view" setting (one of PEER_VIEW_VALUES)
+ * @returns {object} Request payload {pages, newStarter?, keepStarter?, startFromPrevious?, peerView?}
  */
-const buildAssignmentPayload = (editorPages, starterMode) => {
+const buildAssignmentPayload = (editorPages, starterMode, startFromPrevious, peerView) => {
     const pages = (editorPages || []).map((page) => {
         if (page.newImageType) {
             return { text: page.text, newImage: page.newImageType };
@@ -33,6 +61,13 @@ const buildAssignmentPayload = (editorPages, starterMode) => {
         payload.newStarter = true;
     } else if (starterMode === 'keep') {
         payload.keepStarter = true;
+    }
+    // Omitted unless given so the server keeps the stored value (#1202).
+    if (typeof startFromPrevious === 'boolean') {
+        payload.startFromPrevious = startFromPrevious;
+    }
+    if (PEER_VIEW_VALUES.includes(peerView)) {
+        payload.peerView = peerView;
     }
     return payload;
 };
@@ -86,7 +121,12 @@ export {
     MAX_ASSIGNMENT_PAGES,
     MAX_ASSIGNMENT_PAGE_TEXT_LENGTH,
     ASSIGNMENT_IMAGE_CONTENT_TYPES,
+    DEFAULT_MESH_GROUP_LIMIT,
+    MESH_GROUP_LIMIT_VALUES,
+    PEER_VIEW_VALUES,
     buildAssignmentPayload,
+    normalizeMeshGroupLimit,
+    normalizePeerView,
     validateEditorPages,
     isEmptyAssignment,
     moveItem,

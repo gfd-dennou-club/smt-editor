@@ -9,6 +9,8 @@ const {
     baseFollowConflictBody,
     shouldPushAfterFollow,
     parseAfterIssues,
+    directivesOnFetchFailure,
+    directivesBlockDispatch,
     unresolvedAfterIssues,
     parseAssigneeDirective,
     resolveOwner,
@@ -18,9 +20,7 @@ const {
     hitlDesireFromResult,
     isHitlReleased,
     isGateReleased,
-    hasUnhandledChangesRequest,
     progressOnMerge,
-    computeReviewApproval,
     mergeProgressionIntents,
     selectMergeCandidates,
     selectClosedToReconcile,
@@ -95,6 +95,9 @@ const {
     DEFAULT_CHECKPOINT_SOFT_LIMIT_MS,
     shouldSignalCheckpoint,
     CHECKPOINT_SIGNAL_MESSAGE,
+    checkpointSignalMessage,
+    watchdogFromSettings,
+    DEFAULT_RUN_MAX_MS,
     CHECKPOINT_CONTINUATION_COMMENT_MARKER,
     continuationCommentBody,
     isSteadyStateHitlGate,
@@ -188,68 +191,18 @@ test('phaseForItem: Review released even without review state -> address-review 
     assert.equal(phaseForItem({ status: 'Review', hitlLabel: false }, {}), 'address-review');
 });
 
-test('hasUnhandledChangesRequest: 未処理の新しい changesRequested だけ true (#894)', () => {
-    // changesRequested でない（approve のみ）→ false（無限ループしない）
-    assert.equal(hasUnhandledChangesRequest({ approved: true }, null), false);
-    assert.equal(hasUnhandledChangesRequest(null, null), false);
-    assert.equal(hasUnhandledChangesRequest(undefined, 100), false);
-    // changesRequested だが時刻不明 → false（誤発火を避ける）
-    assert.equal(hasUnhandledChangesRequest({ changesRequested: true }, null), false);
-    // watermark 未設定で changesRequested あり → 未処理なので true
-    assert.equal(
-        hasUnhandledChangesRequest({ changesRequested: true, changesRequestedAt: 200 }, null),
-        true,
-    );
-    // watermark より新しい → true（新しい Request changes）
-    assert.equal(
-        hasUnhandledChangesRequest({ changesRequested: true, changesRequestedAt: 300 }, 200),
-        true,
-    );
-    // watermark と同じ（一度処理済み）→ false（毎 tick 再発火しない）
-    assert.equal(
-        hasUnhandledChangesRequest({ changesRequested: true, changesRequestedAt: 200 }, 200),
-        false,
-    );
-    // watermark より古い → false
-    assert.equal(
-        hasUnhandledChangesRequest({ changesRequested: true, changesRequestedAt: 100 }, 200),
-        false,
-    );
-    // ISO 文字列でも動く（GraphQL の submittedAt）
-    assert.equal(
-        hasUnhandledChangesRequest(
-            { changesRequested: true, changesRequestedAt: '2026-07-08T10:00:00Z' },
-            '2026-07-08T09:00:00Z',
-        ),
-        true,
-    );
-});
-
-test('isGateReleased: 未処理 changesRequested でも解除する (#894)', () => {
-    const item = { hitlLabel: true };
-    // ラベルも発言解除も無いが、未処理の changesRequested があれば解除
-    assert.equal(isGateReleased(item, { unhandledChangesRequested: true }), true);
-    // 未処理 changesRequested 無し + ラベルあり → 待ち
-    assert.equal(isGateReleased(item, { unhandledChangesRequested: false }), false);
-});
-
-test('phaseForItem: approve 後の Request changes は HITL ラベルが残っていても address-review (#894)', () => {
-    // approve 済みで 🙋 ラベルは付いたまま（projection が付け直した）状態でも、
-    // 未処理の新しい changesRequested があれば address-review へ倒す（行き止まり解消）。
+test('phaseForItem: Request changes やコメントだけでは開かず、🙋 を外したときだけ address-review', () => {
+    // 人間が Request changes を出しても 🙋 が残っていれば待つ（気軽にコメントできるように）
     const item = { status: 'Review', hitlLabel: true };
-    const ctx = {
-        hitlSignals: { issueLabel: true, prLabel: true },
-        review: { approved: false, changesRequested: true, changesRequestedAt: 300 },
-        unhandledChangesRequested: true,
-    };
-    assert.equal(phaseForItem(item, ctx), 'address-review');
-    // 一度処理して watermark が追いついた（unhandledChangesRequested=false）→ 待ちに戻る
-    assert.equal(
-        phaseForItem(item, { ...ctx, unhandledChangesRequested: false }),
-        null,
-    );
+    const labeled = { hitlSignals: { issueLabel: true, prLabel: true } };
+    assert.equal(phaseForItem(item, labeled), null);
+    // 旧ゲートの ctx（発言・changesRequested）を渡されても開かない
+    assert.equal(phaseForItem(item, { ...labeled, humanSpokeLast: true, unhandledChangesRequested: true }), null);
+    // PR か Issue のどちらかの 🙋 を外したら address-review
+    assert.equal(phaseForItem(item, { hitlSignals: { issueLabel: true, prLabel: false } }), 'address-review');
+    assert.equal(phaseForItem(item, { hitlSignals: { issueLabel: false, prLabel: true } }), 'address-review');
+    assert.equal(phaseForItem({ status: 'DoD', hitlLabel: true }, { hitlSignals: { issueLabel: false } }), 'address-review');
 });
-
 test('isActionable: paused -> false', () => {
     assert.equal(isActionable({ status: 'New Item' }, { paused: true }), false);
     assert.equal(isActionable({ status: 'New Item' }, { paused: false }), true);
@@ -782,8 +735,25 @@ test('selectMergeCandidates: leaf items in post-PR statuses; excludes EPIC and t
         { issue: 5, status: 'Close', kind: 'Issue' }, // no (terminal)
         { issue: 6, status: 'Sprint Backlog', kind: 'Issue' }, // no (まだ PR 無し)
         { issue: 7, status: 'New Item', kind: 'Issue' }, // no
+        { issue: 8, status: 'Blocked', kind: 'Issue', hitlLabel: true }, // yes (#1351: 人間が Blocked のまま merge しうる)
+        { issue: 9, status: 'Blocked', kind: 'EPIC' }, // no (EPIC)
+        { issue: 10, status: 'Icebox', kind: 'Issue' }, // no (保留)
+        { issue: 11, status: 'Done', kind: 'Issue' }, // no (terminal)
     ];
-    assert.deepEqual(selectMergeCandidates(items).map((i) => i.issue), [1, 2, 3]);
+    assert.deepEqual(selectMergeCandidates(items).map((i) => i.issue), [1, 2, 3, 8]);
+});
+
+test('selectMergeCandidates: 🧭 tracking は Blocked でも対象外（#1351）', () => {
+    const items = [{ issue: 1, status: 'Blocked', kind: 'Issue', labels: [TRACKING_LABEL] }];
+    assert.deepEqual(selectMergeCandidates(items), []);
+});
+
+test('mergeProgressionIntents: Blocked + 🙋 の leaf も merge で Close（HITL は Project 意図に含めない・#1351）', () => {
+    const intents = mergeProgressionIntents({ issue: 1, status: 'Blocked', kind: 'Issue', hitlLabel: true }, true);
+    assert.deepEqual(intents, [
+        { field: 'Status', value: 'Close' },
+        { field: 'AI Status', value: null },
+    ]);
 });
 
 test('mergeProgressionIntents: merged leaf -> Close, clear AI Status (no HITL field)', () => {
@@ -965,48 +935,6 @@ test('draftAction: only acts on a diff (idempotent, Status 基準) (#815)', () =
     assert.equal(draftAction(false, { status: 'In Progress' }), 'draft');
     // In Progress, currently draft -> no change
     assert.equal(draftAction(true, { status: 'In Progress' }), null);
-});
-
-// #815: reviewDecision が空でも reviews から approve を導く
-test('computeReviewApproval: reviewDecision 優先 (APPROVED/CHANGES_REQUESTED)', () => {
-    assert.deepEqual(computeReviewApproval([], 'APPROVED'), { approved: true, changesRequested: false });
-    assert.deepEqual(
-        computeReviewApproval([{ author: { login: 'x' }, state: 'APPROVED' }], 'CHANGES_REQUESTED'),
-        { approved: false, changesRequested: true },
-    );
-});
-
-test('computeReviewApproval: reviewDecision 空なら reviews の著者別最新 state で判定 (#815)', () => {
-    const isHuman = (l) => l !== 'bot';
-    // approve のみ -> approved
-    assert.deepEqual(
-        computeReviewApproval([{ author: { login: 'ko' }, state: 'APPROVED' }], '', isHuman),
-        { approved: true, changesRequested: false },
-    );
-    // 同一著者の最新が優先（古い→新しい順）。後の CHANGES_REQUESTED が勝つ
-    assert.deepEqual(
-        computeReviewApproval(
-            [{ author: { login: 'ko' }, state: 'APPROVED' }, { author: { login: 'ko' }, state: 'CHANGES_REQUESTED' }],
-            '', isHuman,
-        ),
-        { approved: false, changesRequested: true },
-    );
-    // COMMENTED は承認判断に効かない。bot の approve は人間判定で除外
-    assert.deepEqual(
-        computeReviewApproval(
-            [{ author: { login: 'ko' }, state: 'COMMENTED' }, { author: { login: 'bot' }, state: 'APPROVED' }],
-            null, isHuman,
-        ),
-        { approved: false, changesRequested: false },
-    );
-    // 変更要求が1人でもあれば approve より優先
-    assert.deepEqual(
-        computeReviewApproval(
-            [{ author: { login: 'a' }, state: 'APPROVED' }, { author: { login: 'b' }, state: 'CHANGES_REQUESTED' }],
-            '', isHuman,
-        ),
-        { approved: false, changesRequested: true },
-    );
 });
 
 // #816: In Progress + AI 作業中マーカーのまま止まった item の検知（純粋部分）
@@ -1498,6 +1426,34 @@ test('parseBaseBranch: 識別子/改行跨ぎで誤マッチしない（#938/#94
     assert.equal(parseBaseBranch('## ベースブランチ\nなにか説明の行。\n`topic/should-not`'), null);
 });
 
+test('directivesOnFetchFailure: キャッシュが無ければ unavailable（fail-closed・#1309）', () => {
+    const d = directivesOnFetchFailure(undefined, 5000, 1000);
+    assert.equal(d.unavailable, true);
+    assert.deepEqual(d.after, []);
+    assert.equal(d.base, null);
+    assert.equal(d.at, 4000); // TTL 切れ → 次回すぐ取り直す
+    assert.equal(directivesBlockDispatch(d), true);
+});
+
+test('directivesOnFetchFailure: 前回のエントリがあればその内容を使う（#1309）', () => {
+    const cached = { base: 'topic/x', after: [9], assignee: 'me', at: 100 };
+    const d = directivesOnFetchFailure(cached, 5000, 1000);
+    assert.equal(d.base, 'topic/x');
+    assert.deepEqual(d.after, [9]);
+    assert.equal(d.assignee, 'me');
+    assert.equal(d.stale, true);
+    assert.equal(d.unavailable, undefined);
+    assert.equal(d.at, 4000);
+    assert.equal(directivesBlockDispatch(d), false);
+    // 前回も取得失敗（unavailable）なら引き続き unavailable
+    assert.equal(directivesOnFetchFailure({ ...d, unavailable: true }, 6000, 1000).unavailable, true);
+});
+
+test('directivesBlockDispatch: 取得できたエントリは dispatch を止めない', () => {
+    assert.equal(directivesBlockDispatch({ base: null, after: [], assignee: null, at: 0 }), false);
+    assert.equal(directivesBlockDispatch(undefined), true);
+});
+
 test('parseAfterIssues: 行頭の autopilot-after 宣言から依存 Issue を抽出', () => {
     assert.deepEqual(parseAfterIssues('autopilot-after: #123'), [123]);
     assert.deepEqual(parseAfterIssues('autopilot-after: #12, #34 56'), [12, 34, 56]);
@@ -1820,6 +1776,35 @@ test('DEFAULT_WATCHDOG.tSoftMs: 既定は DEFAULT_CHECKPOINT_SOFT_LIMIT_MS と�
     assert.equal(DEFAULT_WATCHDOG.tSoftMs, DEFAULT_CHECKPOINT_SOFT_LIMIT_MS);
 });
 
+test('DEFAULT_WATCHDOG: 1 回の run は既定 60 分、checkpoint 信号は 52 分', () => {
+    assert.equal(DEFAULT_WATCHDOG.tMaxMs, 60 * 60 * 1000);
+    assert.equal(DEFAULT_RUN_MAX_MS, 60 * 60 * 1000);
+    assert.equal(DEFAULT_CHECKPOINT_SOFT_LIMIT_MS, 52 * 60 * 1000);
+});
+
+test('watchdogFromSettings: 分単位の settings を runner の ms に変える', () => {
+    const min = 60 * 1000;
+    assert.deepEqual(watchdogFromSettings(), { tMaxMs: 60 * min, tSoftMs: 52 * min, stuckMs: 65 * min });
+    assert.deepEqual(watchdogFromSettings({ maxMinutes: 90, softMinutes: 80 }), {
+        tMaxMs: 90 * min,
+        tSoftMs: 80 * min,
+        stuckMs: 95 * min,
+    });
+    // softMinutes を省くと max − 8 分
+    assert.equal(watchdogFromSettings({ maxMinutes: 45 }).tSoftMs, 37 * min);
+    // 不正な値は既定に戻す（soft が max 以上・0 以下・数でない）
+    assert.equal(watchdogFromSettings({ maxMinutes: 60, softMinutes: 60 }).tSoftMs, 52 * min);
+    assert.equal(watchdogFromSettings({ maxMinutes: 0 }).tMaxMs, 60 * min);
+    assert.equal(watchdogFromSettings({ maxMinutes: '60' }).tMaxMs, 60 * min);
+    // 短い上限でも soft は max の半分以上（信号の直後に kill しない）
+    assert.equal(watchdogFromSettings({ maxMinutes: 10 }).tSoftMs, 5 * min);
+});
+
+test('checkpointSignalMessage: 残り時間を設定から計算する', () => {
+    assert.equal(checkpointSignalMessage(), CHECKPOINT_SIGNAL_MESSAGE);
+    assert.match(checkpointSignalMessage({ tMaxMs: 90 * 60000, tSoftMs: 75 * 60000 }), /^⏰ 残り約15分。/);
+});
+
 test('phaseForItem: Awaiting Continuation は解除前 null、解除後は元フェーズへ戻る', () => {
     const item = { status: 'In Progress', aiStatus: 'Awaiting Continuation', hitlLabel: true, kind: 'Issue' };
     // 解除前は何もしない（人間の確認待ち）
@@ -1835,10 +1820,8 @@ test('phaseForItem: Awaiting Continuation は解除前 null、解除後は元フ
         phaseForItem(item, { hitlSignals: { issueLabel: true, prLabel: false }, continuation: { phase: 'implement' } }),
         'implement',
     );
-    // ラベルを触らず人間が発言しただけでも解除される
-    assert.equal(
-        phaseForItem(item, { humanSpokeLast: true, continuation: { phase: 'address-review' } }), 'address-review',
-    );
+    // ラベルを触らず人間が発言しただけでは解除されない
+    assert.equal(phaseForItem(item, { humanSpokeLast: true, continuation: { phase: 'address-review' } }), null);
 });
 
 // #915: decompose/triage の「Status を動かさず HITL で待つ」提案系フェーズは、解除後に
@@ -1847,14 +1830,14 @@ test('phaseForItem: decompose の分解案 HITL は解除前 null、解除後は
     const item = { status: 'In Progress', aiStatus: 'Decomposing', hitlLabel: true, kind: 'EPIC' };
     assert.equal(phaseForItem(item, {}), null);
     assert.equal(phaseForItem({ ...item, hitlLabel: false }, {}), 'decompose');
-    assert.equal(phaseForItem(item, { humanSpokeLast: true }), 'decompose');
+    assert.equal(phaseForItem(item, { humanSpokeLast: true }), null, 'コメントだけでは再開しない');
 });
 
 test('phaseForItem: triage の Icebox 提案 HITL は解除前 null、解除後は triage へ再ディスパッチ', () => {
     const item = { status: 'In Progress', aiStatus: 'Triaging', hitlLabel: true, kind: 'Issue' };
     assert.equal(phaseForItem(item, {}), null);
     assert.equal(phaseForItem({ ...item, hitlLabel: false }, {}), 'triage');
-    assert.equal(phaseForItem(item, { humanSpokeLast: true }), 'triage');
+    assert.equal(phaseForItem(item, { humanSpokeLast: true }), null, 'コメントだけでは再開しない');
 });
 
 test('isSteadyStateHitlGate: Review/DoD と Awaiting Continuation（In Progress）が対象', () => {
@@ -2010,3 +1993,81 @@ test('shouldPushAfterFollow: PR フェーズで followed のときだけ push �
     assert.equal(shouldPushAfterFollow(null, 'followed'), false);
     assert.equal(shouldPushAfterFollow(0, 'followed'), false);
 });
+
+test('unresolvedAfterIssues: 🧱 infra（closedOnly）は Project が Close でも GitHub で閉じるまで未完了', () => {
+    const { unresolvedAfterIssues } = require('../src/phases.js');
+    const statusByIssue = { 10: 'Close', 11: 'Close' };
+    // 11 は infra: merge で Project は Close だが prod デプロイ前（GitHub は open）
+    assert.deepEqual(unresolvedAfterIssues([10, 11], { statusByIssue, closedOnly: new Set([11]) }), [11]);
+    // workflow が prod デプロイ後に閉じたら完了
+    assert.deepEqual(
+        unresolvedAfterIssues([10, 11], { statusByIssue, closedOnly: [11], closedSet: [11] }),
+        [],
+    );
+});
+
+test('infraIssueSet / shouldCloseIssueOnMerge: 🧱 infra ラベルで判定する', () => {
+    const { infraIssueSet, shouldCloseIssueOnMerge, INFRA_LABEL } = require('../src/phases.js');
+    const items = [
+        { issue: 1, labels: [INFRA_LABEL, '🤖 autopilot'] },
+        { issue: 2, labels: ['🤖 autopilot'] },
+        { issue: 3 },
+    ];
+    assert.deepEqual([...infraIssueSet(items)], [1]);
+    assert.equal(shouldCloseIssueOnMerge(items[0]), false);
+    assert.equal(shouldCloseIssueOnMerge(items[1]), true);
+    assert.equal(shouldCloseIssueOnMerge(items[2]), true);
+});
+
+// ---- address-review が対応する Request changes の選別 ----
+{
+    const { addressReviewMarker, handledReviewIds, selectRequestedReviews, extractCommentRefs } = require('../src/phases');
+    const human = { login: 'takaokouji', type: 'User' };
+    const bot = { login: 'smalruby3-editor-bot[bot]', type: 'Bot' };
+
+    test('addressReviewMarker → handledReviewIds で対応済みレビュー ID を往復できる', () => {
+        assert.equal(addressReviewMarker([12, '34', 12, 0, 'x']), '<!-- autopilot-address-review handled-reviews=12,34 -->');
+        const comments = [
+            { body: `${addressReviewMarker([12, 34])}\n指摘 2 件: 対応 2 件` },
+            { body: 'ふつうのコメント' },
+            { body: `${addressReviewMarker([56])}\n対応なし` },
+            {},
+        ];
+        assert.deepEqual([...handledReviewIds(comments)].sort((a, b) => a - b), [12, 34, 56]);
+        assert.equal(handledReviewIds(null).size, 0);
+    });
+
+    test('selectRequestedReviews: 人間の未対応の Request changes だけを古い順に返す', () => {
+        const reviews = [
+            { id: 3, state: 'CHANGES_REQUESTED', user: human, submitted_at: '2026-10-31T12:00:00Z' },
+            { id: 1, state: 'CHANGES_REQUESTED', user: human, submitted_at: '2026-10-31T10:00:00Z' },
+            { id: 2, state: 'COMMENTED', user: human, submitted_at: '2026-10-31T11:00:00Z' }, // コメントは依頼ではない
+            { id: 4, state: 'APPROVED', user: human, submitted_at: '2026-10-31T13:00:00Z' },
+            { id: 5, state: 'CHANGES_REQUESTED', user: bot, submitted_at: '2026-10-31T14:00:00Z' }, // bot 自身
+            { id: 6, state: 'CHANGES_REQUESTED', user: human, submitted_at: '2026-10-31T09:00:00Z' }, // 対応済み
+        ];
+        const comments = [{ body: addressReviewMarker([6]) }];
+        assert.deepEqual(selectRequestedReviews(reviews, comments).map((r) => r.id), [1, 3]);
+        // すべて対応済みなら空（= 何もせず人間の merge を待つ）
+        assert.deepEqual(selectRequestedReviews(reviews, [{ body: addressReviewMarker([1, 3, 6]) }]), []);
+        assert.deepEqual(selectRequestedReviews(null, null), []);
+    });
+
+    test('extractCommentRefs: 会話コメント・行コメント・レビューの URL を拾い、Issue 番号とは混同しない', () => {
+        const base = 'https://github.com/smalruby/smalruby3-editor/pull/1289';
+        const text = [
+            `FYI1 を直して ${base}#issuecomment-6543538012`,
+            `ここも ${base}#discussion_r2501`,
+            `${base}/files#r2502 と ${base}#pullrequestreview-777`,
+            `重複 ${base}#issuecomment-6543538012 と Issue 参照 #1279 と見出し #readme`,
+        ].join('\n');
+        assert.deepEqual(extractCommentRefs(text), [
+            { kind: 'issue-comment', id: 6543538012 },
+            { kind: 'review-comment', id: 2501 },
+            { kind: 'review-comment', id: 2502 },
+            { kind: 'review', id: 777 },
+        ]);
+        assert.deepEqual(extractCommentRefs(''), []);
+        assert.deepEqual(extractCommentRefs(undefined), []);
+    });
+}

@@ -92,6 +92,7 @@ Issue を状態の正とすることで daemon が落ちても現在地が分か
 | Implementing / Creating PR | autopilot-implement | In Progress |
 | Self-Reviewing | autopilot-review | In Progress |
 | Addressing Comments | autopilot-address-review | Review / DoD（NG 差し戻し） |
+| Resolving Conflicts | autopilot-resolve-conflict（base とのコンフリクトを AI が解消。Status は動かさず、解消中だけこの値にして終わったら元に戻す） | 変えない（Review / DoD / Blocked / In Progress のまま） |
 | Running DoD | autopilot-verify（一般 UI は headless Playwright で自己完結・#891）／ 音・autoplay 等は daemon `applyDodHandoffs`（ホスト引き継ぎ生成） | DoD |
 | Awaiting Continuation | 元フェーズ（例 implement）を再 dispatch（協調的チェックポイント・EPIC #906。soft-limit で worker が安全に中断し、常に HITL で継続確認してから再開） | In Progress |
 
@@ -133,8 +134,14 @@ Issue 本文の**行頭**に書くディレクティブで挙動を制御でき�
 | ディレクティブ | 意味 |
 |---|---|
 | `autopilot-base: <branch>` | PR 先・worktree 分岐元のベースブランチ（EPIC サブ Issue を親 epic ブランチに積む等） |
-| `autopilot-after: #N [#M ...]` | 依存宣言。N（と M …）が完了（GitHub closed / Project Close・Done）するまで着手しない。ブロック中は次点候補が繰り上がる。**待ち Issue は Sprint Backlog に置く**（Backlog はそもそも着手候補にならないので先行 Close で自動着手しない）。ゲート中は daemon が `⏳ waiting` ラベルを付け、先行 Close で自動除去 → 次 tick で着手 |
+| `autopilot-after: #N [#M ...]` | 依存宣言。N（と M …）が完了（GitHub closed / Project Close・Done。**N が `🧱 infra` なら GitHub closed のみ**＝prod デプロイ後）するまで着手しない。ブロック中は次点候補が繰り上がる。**待ち Issue は Sprint Backlog に置く**（Backlog はそもそも着手候補にならないので先行 Close で自動着手しない）。ゲート中は daemon が `⏳ waiting` ラベルを付け、先行 Close で自動除去 → 次 tick で着手 |
 | `autopilot-assignee: <login>`（`@login` も可） | 複数 assignee の Issue でオーナー（駆動する担当）を明示指定する（#938）。指定 login が Assignees に含まれていなければ無視して従来どおり辞書順先頭。指定した担当の daemon（`--assignee <login>`）だけが駆動し、他の担当の daemon は駆動しない。共同担当（非オーナー）は自分の monitor で Issue を観察できる（下記「俯瞰ボード」参照） |
+
+本文は 10 分の TTL でキャッシュする。ネット断などで本文を取得できなかったときは
+「ディレクティブが無い」とはみなさない（fail-closed）: 前回取得した値があればそれを使い、
+一度も取得できていない Issue はその tick では dispatch しない（次 tick で取り直す）。
+`autopilot-after` 待ちの Issue が動き出したり、`autopilot-base` 指定の Issue が既定 base で
+作業を始めたりしないため。
 
 ### 🧭 tracking ラベル（分解済み親のトラッカー化）
 
@@ -151,6 +158,49 @@ daemon が **`⏳ waiting` ラベル**を付ける。GitHub Projects の view �
 なく）、先行 Issue が Close された瞬間に自動で外す → 次 tick で着手する。順序付きで分解した
 EPIC の leaf は **全部 Sprint Backlog に入れておけば**、依存順に自動で 1 つずつ流れる（並列
 衝突はゲーティングが防ぐ）。
+
+### 🔬 spike ラベル（要件の相談中の可視化）
+
+技術調査に加え、要件が決まっていないときに人間と決めきる行動も **Spike** とみなし、その間は
+daemon が Issue に **`🔬 spike` ラベル**を付ける。GitHub のラベル絞り込みで「相談中」を探せる。
+⏳ waiting と同じく **状態から毎 tick 導出**する（判定は `phases.js` の `isSpikeItem` →
+`labelActions`）。
+
+- **付ける**: AI Status が `Discussing` のとき（🙋 の有無を問わない）。または triage / understand が
+  質問を出して `🙋 HITL` で止まっているとき（AI Status が `Triaging` / `Understanding` + 🙋）。
+  Status=Blocked で付けるのは understand の質問待ちだけ（triage / discuss が Blocked なのは run 失敗で、
+  障害として 🧱 Blocked に数える）。
+- **外す**: 実装（implement）以降に進んだとき、または閉じた（Close / Done）・Icebox にしたとき。
+  閉じた item でもラベルが残っていれば label healing が外す（item-list の labels だけで判定でき、
+  追加の読み取りは要らない）。
+- **導出が正**: 人間が手で付けたものも、条件を満たさなければ外す（「人間が Spike を始める」は
+  扱わない）。PR には付けない（Issue 面だけ）。
+
+### 🧱 infra ラベル（infra を先に出す・infra-first）
+
+ブランチプレビューは prod の API を見るので、infra と GUI を同じ PR に入れると新しい API を
+使う GUI をプレビューで確認できない。そこで **infra（`infra/**`）の変更は GUI と別の sub-issue に
+分け、`🧱 infra` ラベルを付けて先に develop へ出す**（手順の正準は
+`.claude/rules/infra/development.md` の「infra は別 Issue に分けて先に出す」）。
+
+1. triage は infra とそれ以外の両方に変更が要る Issue を EPIC にし、decompose が infra の leaf
+   （`🧱 infra`・`autopilot-base:` なし＝develop 宛て）と残りの leaf（`autopilot-after: #<infra>`）に分ける。
+2. infra の PR は**後方互換な変更だけ**・本文は `Refs #N`。人間が develop へマージする。
+3. daemon は merge を検知すると Project を Close に進めるが、**GitHub の Issue は閉じない**。
+4. `Deploy Infra` workflow が stg → prod へ出し、**prod に出せたら infra の Issue を閉じる**
+   （削除・置き換えを含む差分は自動では出さず、PR に知らせる）。
+5. `autopilot-after` の相手が 🧱 infra のときは **GitHub で closed になるまで未完了**とみなすので、
+   GUI の leaf はここで初めて `⏳ waiting` が外れて動き出し、プレビューで確認できる。
+
+ラベルは Issue を作る側（decompose / 人間）が付ける。daemon は付け外ししない。
+
+### 💤 later ラベル（「あとでやる」一覧の分離）
+
+難しく使用頻度も低いので後回しにしたい Issue（例: tutorial 改修）に **人間が付ける**ラベル。
+目的は **Web モニタ上の一覧の分離だけ**で、付いていても autopilot の処理（dispatch・ゲート・
+merge 検知）は**一切変わらない**。label healing は外さない・付け直さない（人間の操作だけで
+付け外しする）。モニタの「💤 あとで」/「↩ 今やる」ボタン（`POST /later`）か、GitHub 上で
+直接付け外しする。
 
 ---
 
@@ -175,12 +225,22 @@ HITL は「人間の番」を表す。状態は **`🙋 HITL` ラベル**が唯�
 非対称のルールを持つ。
 
 - **set（人間に渡す）**: daemon が **Issue/PR の両面に一括で `🙋 HITL` ラベルを付与**して整合を保つ。
-- **release（AI に戻す）**: 次の **どちらでも**解除される（固着防止・詳細は
-  [`state-machine.md`](./state-machine.md)）:
-  1. **ラベル解除**: Issue / PR いずれかの `🙋 HITL` ラベルを外す（OR 解除・`isHitlReleased`）
-  2. **発言解除**: ゲート開放中に**人間が最後に発言**した（Issue コメント / PR コメント /
-     レビュー送信。`humanSpokeLast`）。ラベルを触らずレビューコメントだけ出しても止まらない。
-     bot の応答・daemon の処理済み watermark より後の発言にのみ反応するので空回りしない
+- **release（AI に戻す）**: Issue / PR いずれかの `🙋 HITL` ラベルを**外したときだけ**解除される
+  （OR 解除・`isHitlReleased`）。**コメントや Request changes だけでは解除されない**ので、人間は
+  気軽にコメントできる。詳細は [`state-machine.md`](./state-machine.md)。
+
+### 人間レビューの流れ（Request changes で指定して 🙋 を外す）
+
+1. PR が出ると、autopilot が review フェーズで指摘を 1 コメントにまとめる（`[M1]` / `[Q1]` / `[FYI1]` …）。
+2. 人間は自由にコメントしてよい（何も動かない）。
+3. 直してほしいことを **Request changes** で出す。本文に「FYI1 を直して」のように ID を書くか、
+   対象のコメントの URL を貼る（行コメントで指示してもよい）。
+4. PR（か Issue）の `🙋 HITL` を外す → address-review が、**まだ対応していない Request changes で
+   指定されたことだけ**に対応し、再び Review + 🙋 に戻す。言及の無い指摘や、Request changes
+   以外のコメントには対応しない。未対応の Request changes が無ければ何もしない（マージ待ち）。
+
+対応したレビューの ID は、address-review のまとめコメントの先頭のマーカー
+`<!-- autopilot-address-review handled-reviews=<id,id> -->` に残り、同じレビューに二重に対応しない。
 
 人間が判断/レビューに使う HITL ゲート: 実装前ディスカッション・EPIC 理解・分解承認・
 人間レビュー（approve）・DoD・Blocked の対処・merge。
@@ -200,7 +260,7 @@ PR が merge されたら、`🙋 HITL` ラベルが残っていても autopilot
 - **EPIC**: 子 PR の merge では完了しない（後述の EPIC 運用）。
 
 autopilot は **自動 merge しない**。daemon はポーリングのたびに「PR が出た後〜Close 前」の leaf
-（Status が In Progress / Review / DoD）について、`Closes #<issue>` などで紐付く PR が **人間に
+（Status が In Progress / Blocked / Review / DoD）について、`Closes #<issue>` などで紐付く PR が **人間に
 merge 済みか**を GitHub に問い合わせ（`closedByPullRequestsReferences`）、merge 済みなら Status を
 **Close**・AI Status をクリアし、両面の `🙋 HITL` ラベルを除去する。close リンクは PR が
 **非デフォルト base 宛て**（EPIC サブ Issue を親 epic ブランチに積む等）だと登録されないため、
@@ -246,8 +306,7 @@ close した leaf、(B) 統合 PR の `Closes #<epic>` で閉じた EPIC、(C) �
 1. 差分の変更ファイルから `touchedRuleAreas`（`phases.js` の純粋関数）で touch する
    `.claude/rules/<area>/` を機械的に導き、それを読んでからレビューする（プロジェクト固有の
    実装規約・マーカー・不変条件の逸脱を見落とさない）。
-2. 各指摘を **Must / Question / FYI** に分類し、PR コメント本文の先頭に `**[Must]**` 等の
-   マーカーを付ける（`REVIEW_FINDING_MARKER_RE` が検出する形式）:
+2. 各指摘を **Must / Question / FYI** に分類する:
 
    | 分類 | 定義 | autopilot の対応 |
    |---|---|---|
@@ -255,12 +314,37 @@ close した leaf、(B) 統合 PR の `Closes #<epic>` で閉じた EPIC、(C) �
    | **Question** | 直した方がいいが動作する。稀なコーナーケース | 対応コストが小さければ修正、大きければ人間へ（`🙋 HITL` は Review 遷移で既に立つので追加分岐は無い） |
    | **FYI** | 気になるが直すほどではない | 対応しない（コメントのみ） |
 
-3. 件数サマリ（`countReviewFindings` / `renderReviewFindingsSummary`）を PR コメントに残す
-   （「指摘 N 件（Must a / Question b / FYI c）」形式）。#893 で失われた「敵対的レビューの
-   深さの可視性」をこのサマリで回復する。
+3. **1 回のレビューの全指摘を 1 コメントにまとめて**投稿する（`renderReviewFindingsComment`）。
+   先頭に冪等マーカー `<!-- autopilot-review-findings round=N -->`、次の行に件数サマリ
+   （「指摘 N 件（Must a / Question b / FYI c）」形式。別のサマリコメントは出さない）、以降に
+   Must → Question → FYI の見出しごとに `- **[M1]** \`file:line\` 内容 — 対応` を並べる。
+   ID は分類ごとの連番（`M1` / `Q1` / `FYI1` …）で、**同じ PR の再レビュー（round 2 以降）は
+   前回の続きから採番する**（`nextReviewFindingNumbers`）ので、人間の「Q1」が曖昧にならない。
 
-分類・件数集計・対応方針テーブルは `phases.js` の純粋関数（`parseReviewFindingCategory` /
-`countReviewFindings` / `renderReviewFindingsSummary` / `addressReviewPolicyFor`）でテスト済み。
+#### ID での返信（address-review）
+
+人間は `Q1はOK, FYI1は修正して` のように ID で短く返信できる。address-review は
+`planAddressReview`（`parseFindingReferences` + `resolveFindingAction`）で各指摘の対応を決める:
+
+| 人間の返信 | 対応 |
+|---|---|
+| 「OK」「そのままで」「直さなくていい」 | 変更しない（`no-change`） |
+| 「修正して」「直して」 | 修正する（`fix`。**FYI でも人間の明示指示が既定方針より優先**） |
+| それ以外（質問・代案） | 返信し、必要なら修正（`reply`） |
+| 言及なし | 既定方針（Must=修正 / Question=対応可なら修正・困難なら人間へ / FYI=何もしない） |
+
+ID の表記ゆれ（`Q1` / `q1` / `Question1`、`M1` / `Must1`、`FYI1` / `F1`、全角数字）を受け付ける。
+`Q1, Q2は直して` のように ID だけを並べた節は後ろの節の指示を引き継ぐ。引用行（`>`。GitHub の
+Quote reply）は bot の指摘本文なので指示として読まない。
+address-review のまとめコメントも ID で書く（例: 「Q1: 変更なし（人間 OK） / FYI1: 修正済み（`<sha>`）」）。
+
+旧形式（1 コメント 1 指摘で `**[Must]**` 等のマーカーだけ持つコメント）が残る既存 PR も
+`countReviewFindings` が合算し、address-review も従来の既定方針で扱う（後方互換）。
+
+分類・件数集計・対応方針テーブル・採番・ID 参照の解釈は `phases.js` の純粋関数
+（`parseReviewFindingCategory` / `parseReviewFindings` / `countReviewFindings` /
+`renderReviewFindingsSummary` / `renderReviewFindingsComment` / `nextReviewFindingNumbers` /
+`parseFindingReferences` / `planAddressReview` / `addressReviewPolicyFor`）でテスト済み。
 分類の実行（何が Must/Question/FYI か）自体は LLM の判断で、機械的に検証できるのは
 マーカー形式・集計・対応表の整合性のみ。
 
@@ -293,8 +377,9 @@ PR の **diff と全コメント（Issue/レビュー本文/インライン）**
   daemon が両面を atomic に同期する（後述「PR 側の状態可視化」）ので、人間は目の前の
   PR ラベルを外すだけでも、コメントを返すだけでも差し戻せる。
 - address-review は **既存 PR ブランチ**で作業する（daemon が worktree を `--pr` で用意）。
-- **コンフリクトは autopilot で解消しない**（rebase/merge コンフリクトは人間の役割）。プロンプトは
-  解消を試みず HITL で人間に渡す。
+- **base とのコンフリクトは AI が解消する**（#1348）。着手時の base 追従でコンフリクトしたら、
+  daemon が先に `autopilot-resolve-conflict` を走らせ、解消できたら address-review を続ける。
+  解消できなければ Blocked + 🙋 で人間に渡す（後述「base 追従」）。
 
 ---
 
@@ -405,7 +490,7 @@ PR 側は読み取り投影）。実装は daemon の `applyPrProjection`（ポ�
 | `🤖 autopilot` ラベル | autopilot 管理対象（AI 処理対象） | Issue/PR に常時担保 |
 | `🙋 HITL` ラベル | 人間の対応待ち（**HITL の唯一の真実**・#813） | 人間に渡すとき Issue/PR の両面に付与 / release・merge で除去 |
 | Draft ⇄ Ready for review | Draft=AI 作業中 / Ready=人間が見る段階 | **Status 基準**（#815）: `Review`/`DoD`/`Close`/`Blocked`→Ready / それ以外（`In Progress` 等）→Draft |
-| sticky ステータスコメント | bot が1コメントを編集し続け、連携 Issue の Project 状態を投影 | Status / AI Status / HITL（ラベル由来）/ Size をマーカー付き 1 コメントに upsert |
+| sticky ステータスコメント | bot が1コメントを編集し続け、連携 Issue の Project 状態を投影 | Status / AI Status / HITL（ラベル由来）/ Size をマーカー付き 1 コメントに upsert。人間待ちなら「いま: 🔬 Spike・回答待ち — …」のように**何待ちか**を 1 行足す（`humanWaitReason`）。本文が変わったときだけ PATCH |
 
 - 対象は連携 PR を持ちうる post-PR ステータス（In Progress / Review / DoD / Blocked）の leaf。
   EPIC は実装 PR を持たないので除外（`selectPrSyncCandidates`）。
@@ -489,6 +574,34 @@ worker は**非対話**で動くので、許可プロンプトで止まると運
 
 ---
 
+## Claude 使用量の auto-pause と強制再開
+
+Claude の使用量（セッション枠）が 100% に達すると worker はプロンプトを受け付けなくなり、
+watchdog の再起動も効かずに `stalled; restart limit reached` で Blocked になる。そこで
+手前で **auto-pause**（`pausedBy: "usage"`）して新しいタスクを入れないようにする。
+
+- **閾値**: セッション（直近 5 時間）**90%** 以上、または週間（7 日）**95%** 以上。
+  settings の `usagePause` で変更できる（部分指定は既定とマージ。100 より大きくするとその枠では止めない）:
+  ```json
+  { "usagePause": { "sessionPercent": 85, "weeklyPercent": 98 } }
+  ```
+- **止めるのは新規ディスパッチだけ**。実行中の worker はそのまま続ける（既存の pause と同じ）。
+- **判定しないケース**: usage が読めない（ファイル無し・非サブスク）とき、その枠の `resetsAt` を
+  過ぎているとき（枠はリセット済み）、`resetsAt` が無く usage ファイルが枠の長さ以上古いとき。
+  usage は worker 稼働時にしか更新されないが、`resetsAt` を過ぎれば据え置きのままでも**自動で再開**する。
+- **人間 / 認証の pause は上書きしない**。自動再開するのは `pausedBy: "usage"` のときだけ。
+- **強制再開**（`POST /force-resume`・モニタの `⚡ 強制再開…` → `再開する` の 2 段階）: いま閾値を
+  超えている枠に「その枠の次のリセットまで」の override を付けて再開する。override は**枠ごと**で、
+  セッションで強制したあとに週間が閾値を超えたら、週間側で改めて auto-pause する。リセット時刻を
+  過ぎると override は自動で外れて通常の判定に戻る（daemon 再起動でも外れる＝in-memory）。
+- **usage pause 中の `POST /resume` は `409 {forceResumeRequired:true}`** を返し解除しない（次の再評価で
+  即また pause される上、上限に近いことを見落とさせないため）。モニタの ▶ は強制再開の確認段を開く。
+- 判定は `phases.js` の純粋関数（`usagePausePlan` / `usageForceOverrides` / `usagePauseAction`）。
+  daemon は usage を読み直すたび（毎 tick・`GET /board`・worker 完了時）に再評価する。usage は
+  ローカルファイル読みなので GitHub API を消費しない。
+
+---
+
 ## Bot 権限外パス（workflows 等）は個人トークンで push / PR
 
 GitHub App bot は `workflows` 権限を持たないため、`.github/workflows/**` /
@@ -514,6 +627,23 @@ GitHub Projects で行い、モニタは俯瞰・log 閲覧・pause/resume/即�
   `API残`/`実行中` の増減で内容幅が変わってもヘッダーのどの要素も水平位置が動かない。中央 usage も
   内部の可変要素を `min-width` で予約して幅を一定に保つ。狭い幅（≤ 960px）では中央 usage を隠して
   右メタと重ならないようにする
+- **[通常] / [💤 あとでやる] タブ**（#1190）: ボード上部のタブで `💤 later` 付き Issue を
+  通常一覧から分離する。タブには件数バッジ、あとでやる タブには **⚠ 実行中 N・人間の番 M**
+  バッジが付き、通常タブを見ていても あとでやる 側の動きに気付ける。選択タブは localStorage
+  （`autopilot:boardTab`）に記憶する。Now 列の末尾（log の隣）に **「💤 あとで」/「↩ 今やる」**
+  ボタンがあり（Close / Done の行には出さない）、押すと**楽観的更新**で即座に行が移動し、裏で
+  `POST /later` がラベルを付け替える。ボード再取得（GraphQL）は撃たず daemon がキャッシュ上の
+  labels を書き換える。失敗したら最後に確定した状態へ戻してアラート帯にエラーを出す。
+  連打対策: 送信中の Issue はボタンを disabled（⏳ 処理中）にし、daemon 側も Issue 単位で直列化して
+  連続リクエストを**最後の目標状態へ畳み込む**（差分時のみ書き込み）。保留中の Issue はボードの定期
+  更新・🔄 更新で古い labels が返っても pending の状態を優先表示する。Blocked・認証アラートは
+  あとでやる 内の Issue でも上部に通常どおり出し、あとでやる 内の人間の番もアラート帯に出す
+- **コンフリクトの表示と解消**（#1348）: PR チップは GitHub が判定した `mergeable` を見て、
+  base とコンフリクトしている OPEN の PR に赤枠と ⚠️ を付ける。値は俯瞰ボードの PR 取得
+  （`getBoardEnrichment`）に 1 項目足しただけなので、追加の API 呼び出しは無い。GitHub は非同期に
+  判定するので、初回は未確定（印なし）のことがあり、次の 🔄 更新で確定する。コンフリクトしている行の
+  Now 列に **🔀 解消** ボタンが出て、押すと `POST /resolve-conflict` で AI が解消する（後述「base 追従」）。
+  実行中は phase 表示に変わり、終わるとボードのキャッシュ上の印が消える
 - **スティッキーフッター**: **稼働バージョン（`branch @ shortCommit`）** + **⬆️ 更新ありバッジ**。
   常時見えるフッターに置き、押すと更新手順モーダルを表示する（#885）
 - **Claude 使用量（ヘッダー中央）**: Claude アイコン + **セッション使用率**（rolling 5 時間制限）と
@@ -540,12 +670,46 @@ GitHub Projects で行い、モニタは俯瞰・log 閲覧・pause/resume/即�
   **used ≥ 80% は警告色**。Pro/Max サブスク以外や初回 API 応答前は `rate_limits` が無いため
   **「—」表示**にしてレイアウトを崩さない。
 - **アラート帯**: 認証失効（auto-pause 中・再認証手順つき + **「🔐 再接続（SSO ログイン）」
-  ボタン**で device code の URL 自動オープン & コードのコピー）/ Blocked 一覧。
+  ボタン**で device code の URL 自動オープン & コードのコピー）/ Blocked 一覧 /
+  **Claude 使用量の auto-pause**（理由・使用率・閾値・リセット時刻 + `⚡ 強制再開…` → その場で
+  「本当に再開？ [再開する] [やめる]」に置き換わる 2 段階。ブラウザの confirm は使わない）/
+  **強制実行中**（「⚡ 強制実行中（セッション 92% · 〜19:40 まで）」）。状態ピルは
+  usage pause 中 **`USAGE ⏸`**（橙）。詳細は「Claude 使用量の auto-pause と強制再開」。
   各アラートに **`check autopilot (#N)` のコピー用ショートカット**があり、Claude に
   貼ると `.claude/skills/check-autopilot` スキルが診断・復旧支援する
-- **ボード行**: Issue（リンク + タイトル）/ Status pill / AI Status（live）/ 担当 /
-  **複数 PR チップ**（📝 draft / ✅ ready / 🟣 merged / ❌ closed の色・絵文字）/
-  **sub-issue 進捗**（N/M・%・バー）/ Now（実行中フェーズ + 経過分 + **log ボタン → モーダル**）
+- **人間待ちのまとめ**（#1315）: 一覧の上に、人間が何待ちで止まっているかを理由ごとに件数と
+  item でまとめる。理由は `phases.js` の純粋関数 `humanWaitReason` が 1 つに決める
+  （🙋 の item は 🔬 Spike・回答待ち → 👀 レビュー待ち（Review）→ ✅ DoD の確認待ち →
+  🧱 Blocked（障害）→ ⏳ 依存待ち（`autopilot-after` の未完了）→ 🙋 そのほか の順。🙋 が無い item は
+  ⏳ 依存待ちだけを出す）。🔬 Spike の条件は「🔬 spike ラベル」と同じ。daemon が `refreshBoard` で
+  `waitReason` と、人間に開いてほしいページの `waitUrl`（レビュー / DoD は open な PR、それ以外は
+  Issue）を board item に載せる。どちらも取得済みの Project 状態・ラベル・PR から作るので、
+  **新しい読み取りは増えない**（コメント単位のリンクは取得済みデータに無いので出さない）。
+  HTML は `renderHumanWaitsHtml` / `renderHumanWaitCell` をモニタに埋め込んで共有する。
+  Now 欄の 🙋 も理由つき（例: `🔬 Spike・回答待ち`）で出し、押すと `waitUrl` を開く。
+  あとでやる タブの item もまとめに含める
+- **ボード行**: Issue（**📋** + リンク + **PR チップ** + **▼** + タイトル）/ Status pill / Size / AI Status（live）/
+  担当 / **sub-issue 進捗**（N/M・%・バー）/ Now（実行中フェーズ + 経過分 + **log ボタン → モーダル**）
+  - **PR は専用列ではなく Issue 番号のすぐ右**に置く（#1212）。レビュー待ちで見たいのは PR なので、
+    Issue を経由せず 1 クリックで開けるようにする。インラインに並べるのは **open の PR だけ**
+    （📝 draft / ✅ ready。`PR#N` 表記で Issue 番号と区別）。並びは `#Issue` → PR チップ → ▼ →
+    タイトル → 🧭 / ⏳。
+  - **merged / closed（未 merge）の PR が 1 つでもあれば ▼** を出す。押すとその Issue の
+    **全 PR**（open 含む・`✅ PR#N open` / `📝 draft` / `🟣 merged` / `❌ closed`）のメニューを開き、
+    項目は別タブで PR を開く。外側クリック・Esc・項目の選択で閉じ、同時に開くのは 1 つだけ。
+    5 秒ごとの一覧の再描画をまたいでも開いたまま保つ（開いている Issue 番号を覚えて描画のたびに
+    復元する）。open / それ以外の振り分けは `phases.js` の純粋関数 `splitPrsForTitle` を
+    モニタに埋め込んで共有する
+  - 狭い幅でも PR チップと ▼ は折り返さず、タイトルだけを省略表示にする
+  - **Issue 列の左端の 📋**（#1213）で、Issue を人に共有したり Claude に引き継いだりするための
+    文字列をコピーする。押したときだけコピーし（行のクリックではコピーしない）、PR チップの数や
+    タイトルの長さに関係なくどの行でも同じ位置に出る。コピーする文字列は 1 行目
+    `#1199 PR#1220 タイトル全文` と、Issue・PR の URL を 1 行ずつ。PR は画面にインラインで並ぶ
+    **open の PR だけ**（merged / closed は含めない。無ければ `#1199 タイトル` と Issue の URL だけ）。
+    組み立ては `phases.js` の純粋関数 `issueCopyText` をモニタに埋め込んで共有する。
+    コピーできたことは**行を一瞬光らせる**だけで伝える（5 秒ごとの再描画をまたいでも経過分から
+    続ける）。`localhost` 以外（IP 直打ち等）で開いて `navigator.clipboard` が使えないときは
+    `prompt` で文字列を表示し、その場合は光らせない
   - **担当列はオーナー（駆動者）を太字で明示**する（`autopilot-assignee:` ディレクティブが
     あれば反映）。**自分がオーナーでない**共同担当の行には **👁 + オーナー login** の
     「観察中」マーカーを付ける（#938）。観察対象（他人が駆動する item）はこの daemon の
@@ -633,6 +797,18 @@ watchdog が次を処理する:
 再起動回数を数え、上限超で `Blocked` + HITL に escalate。判断ロジックは
 `tools/autopilot/src/phases.js` の `evaluate`（純粋関数・テスト済み）。
 
+**1 回の run の時間**は settings の `watchdog`（分単位）で決める。既定は 60 分で、52 分の時点で
+worker に「まとめに入れ」（協調的チェックポイント）の信号を送る。大きな実装が 1 回に収まらず
+checkpoint を繰り返して上限（3 回）に近づくなら、ここを延ばす:
+
+```json
+{ "watchdog": { "maxMinutes": 60, "softMinutes": 52 } }
+```
+
+- `softMinutes` を省くと `maxMinutes` − 8 分。不正な値（0 以下・`softMinutes` ≥ `maxMinutes`）は既定に戻る。
+- run が無いまま作業中の表示が残った item を Blocked にする猶予（stuck 検知）は `maxMinutes` + 5 分。
+- 解釈は `phases.js` の `watchdogFromSettings`。変えたら daemon の再起動で反映される。
+
 ---
 
 ## 自律コントラクト
@@ -664,15 +840,44 @@ bin/autopilot-worktree list
 `npm install` / `build:dev` 無しで即作業できる（`@smalruby/*` は main の dist に解決される）。
 単一パッケージのソース編集を想定。クロスパッケージのソース編集は `--full`。
 
+**自動の片付け（#1362）**: daemon が PR の merge を検知して Project を Close に進めたとき
+（merge-progression）と、GitHub で閉じた Issue を Close に揃えたとき（closed-reconcile）に、その Issue の
+worktree とローカルブランチを片付ける（🧱 infra の Issue も対象）。リモートブランチは消さない
+（`gh pr merge --delete-branch` に任せる）。ローカルブランチは autopilot が作った `topic/autopilot-*` だけ
+消し、`--pr` で別名のブランチを checkout していた場合は worktree だけ消す。gitignore されたファイル
+（`tmp/` のスクショや結果 JSON など）は worktree ごと消える。次のどれかに当てはまるときは**消さずに**
+daemon ログに理由を残す（残った worktree は `bin/autopilot-worktree remove` で手で消す）:
+
+- その Issue の worker が実行中
+- worktree に未コミットの変更か未追跡ファイルがある（`git status --porcelain` が空でない）
+- ブランチの先端が `origin/<base>`（`autopilot-base:` の値、無ければ develop。fetch 後）に含まれない
+  （merge せずに閉じた Issue はここで残る）
+- detached HEAD でブランチが分からない、または判定中に git がエラーになった
+
+判定は `phases.js` の `shouldCleanupWorktree`（純粋関数）、git の実行は daemon の `cleanupIssueWorktree`。
+片付けに失敗しても Close への前進は止めない。
+
 **base 追従（stale 起点の衝突防止・#950/#953）**: 新ブランチ作業フェーズ（implement 等）**と**
 PR ブランチ作業フェーズ（review / address-review）の**両方**で、着手時に daemon が作業ブランチを
 最新の base（`autopilot-base:` 指定 or develop）へ **merge** して自動追従する（rebase ではなく
 merge = 既に push 済みの Draft PR ブランチでも force push 不要）。長時間・複数日にまたがる作業や、
 PR 作成後に develop が進んで PR が CONFLICTING になる問題を防ぐ。PR フェーズでは worker が必ずしも
 push しないため、clean に追従できたら daemon がその merge を **push** してリモートの PR を mergeable
-に保つ（implement は後で worker が自分の commit ごと push するので push 不要）。コンフリクトは両者とも
-**自動解決せず** `git merge --abort` で元に戻し、Blocked + `🙋 HITL` にサニタイズ理由を出して
-人間へエスカレーションする（勝手に壊さない）。
+に保つ（implement は後で worker が自分の commit ごと push するので push 不要）。
+
+**コンフリクトの解消（#1348）**: base 追従がコンフリクトしたら、daemon は merge を途中のまま残し、
+本来のフェーズの前に **`autopilot-resolve-conflict`**（AI Status `Resolving Conflicts`）を走らせる。
+worker は両側の変更を確かめて解消し（`package-lock.json` は PR 側を採って
+`npm install --package-lock-only --before <3日前>` で作り直す）、lint と関係するテストを通してから
+merge commit を作り、PR があれば push する。daemon は worker の申告だけでなく、merge が完了して base を
+取り込んだこと・PR ブランチのリモートが同じ commit であることを git で確かめる。解消できたら本来の
+フェーズを続け、できなければ merge を中断して元に戻し、コンフリクトしたファイルと理由を添えて
+Blocked + `🙋 HITL` にする。
+
+レビュー待ちなどで着手されない PR は、モニタの **🔀 解消** ボタン（`POST /resolve-conflict`）で
+同じ worker を走らせる。こちらは **Status と 🙋 を動かさない**割り込みで、AI Status だけ解消中に
+`Resolving Conflicts` にして終わったら元に戻す。clean に merge できる（コンフリクトしていない）
+なら worker を起動せず push だけする。解消できなければ理由をコメントし、🙋 を付けて人間に渡す。
 
 ### daemon（常駐・本番運用）
 
@@ -747,6 +952,11 @@ Addressing Comments / Running DoD）なのに worker が生存していない it
   なく異常終了の残渣とみなし再開する（#972 の固着解消）。人間の判断待ち HITL（Triaging /
   Decomposing / Discussing / Awaiting Continuation / EPIC Decomposed）はこの集合に入らないので
   誤って再開されない。
+- 実作業系フェーズ（implement 等）が **意図して** `signal=hitl` で人間に返したとき（nextStatus /
+  nextAiStatus なし）は、`applyResult` が Status を **Blocked** にする。In Progress のまま残すと
+  ここで「止まった worker」とみなされ、返事を待たず毎 tick 起動し直されるため（#1310）。🙋 を外すと
+  Blocked の出口（PR ありは address-review・無ければ triage）で再開する。Blocked の書き込みが
+  一時失敗して In Progress + 🙋 だけ残った場合は、従来どおり上の自動再開に任せる（#972）。
 - 生存中 worker を持つ item・この daemon が所有中の item は触らず完走させる。
 - 毎 tick 走るため Self-Reviewing の happy-path も対象に入るが、**空き容量（`cfg.concurrency -
   running`）の分だけ再開**し溢れは次 tick へ回すので並行上限を跨がない。recovery が tick 冒頭で
@@ -766,16 +976,19 @@ HTTP API（curl からも操作可能）:
 | メソッド・パス | 用途 |
 |---|---|
 | `GET /` | Web モニタ（俯瞰ボード HTML） |
-| `GET /board` | 俯瞰ボードデータ（items + running + history + auth 状態 + `claudeUsage` + `version` + `autopilotUpdate`）を JSON で返す |
-| `GET /status` | `{paused, pausedBy, authError, reauthHint, reauth, assignee, concurrency, claudeUsage, version, autopilotUpdate, running:[{issue,phase}]}` |
+| `GET /board` | 俯瞰ボードデータ（items + running + history + auth 状態 + `claudeUsage` + `usagePause` / `usageOverrides` + `version` + `autopilotUpdate`）を JSON で返す |
+| `GET /status` | `{paused, pausedBy, authError, reauthHint, reauth, assignee, concurrency, claudeUsage, usagePause, usageOverrides, version, autopilotUpdate, running:[{issue,phase}]}`。`pausedBy` は `human` / `auth` / `usage`。`usagePause` は判定結果（`pause, window, percent, threshold, resetsAt, thresholds, forced[]`） |
 | `GET /log?issue=<n>` | 実行中 item の tmux pane キャプチャ（人間観測用） |
 | `POST /tick` | interval を待たず 1 サイクル即実行。`{ran, paused, picked:[...], running:[...]}` を返す。実行中は `409 {busy:true}`、pause 中は `{ran:true, paused:true, picked:[]}` の no-op |
 | `POST /pause` | 新規ディスパッチを止める（実行中はそのまま） |
-| `POST /resume` | ポーリング再開 |
+| `POST /resume` | ポーリング再開（usage の auto-pause 中は `409 {forceResumeRequired:true}`） |
+| `POST /force-resume` | Claude 使用量の auto-pause を強制再開。超過中の枠はその枠の次のリセットまで auto-pause しない。`{paused, pausedBy, overrides}` |
 | `POST /reauth` | SSO 再認証（device code）を daemon 側で起動し、認証 URL と user code を抽出して返す（`{status, url, code, completeUrl}`）。成功で auto-resume |
 | `POST /refresh` | 俯瞰ボードを即時再取得（`listItems`）。モニタの「🔄 更新」ボタン。レート僅少時は `{refreshed:false, skipped:'rate-limited'}` で no-op |
+| `POST /later` | body `{issue, later: boolean}`。`💤 later` を付与 / 除去する（モニタの「💤 あとで」/「↩ 今やる」）。Issue 単位で直列化し連続リクエストは最後の目標へ畳み込む。既に目的の状態なら書き込まない。`{issue, later, changed}` を返す |
 | `POST /stop?issue=<n>` | その item の tmux セッションを kill して force-stop |
 | `POST /inject?issue=<n>&phase=<p>` | 並行上限を超えて 1 フェーズを割り込み投入 |
+| `POST /resolve-conflict?issue=<n>` | PR の base とのコンフリクトを AI に解消させる（モニタの 🔀 解消）。Status と 🙋 は変えない。並行上限の外。実行中なら 409、OPEN の PR が無ければ 409 |
 | `POST /shutdown` | daemon プロセスを安全停止 |
 
 ```bash

@@ -12,7 +12,30 @@
  * - log は実行中の行の「log」クリックでモーダル表示（first view はボードに割く）
  * - 実行履歴はログとしての意味しかないので最下部
  * - Close / Done / Icebox はボードに出さない（溜まると重くなる。操作は GitHub Projects で）
+ * - [通常] / [あとでやる] タブで `💤 later` 付き Issue を分離する（#1190）。唯一の書き込み操作
+ *   「💤 あとで / ↩ 今やる」は `POST /later`。判断ロジックは phases.js の純粋関数を
+ *   `fn.toString()` で埋め込んで共有する（二重定義しない）
+ * - PR は専用列ではなく Issue 番号のすぐ右に open のものだけ並べ、merged / closed があれば
+ *   ▼ メニューに全 PR をまとめる（#1212。振り分けは phases.js の `splitPrsForTitle`）
+ * - 一覧の上に「人間待ち」を理由ごと（🔬 Spike / 👀 レビュー / ✅ DoD / 🧱 Blocked / ⏳ 依存 / 🙋 そのほか）
+ *   にまとめ、Now 欄の 🙋 も理由つきで出す（#1315。理由は daemon が phases.js の `humanWaitReason`
+ *   で決めて /board に載せる。HTML は phases.js の `renderHumanWaitsHtml` / `renderHumanWaitCell`）
+ * - Issue 列の左端（固定位置）の 📋 で「#Issue PR#… タイトル」+ URL をコピーし、行を一瞬光らせる
+ *   （#1213。文字列は phases.js の `issueCopyText`）
  */
+
+const {
+    canToggleLater, effectiveLater, splitLaterBoard, laterPendingReducer, splitPrsForTitle, issueCopyText,
+    canResolveConflict,
+    HUMAN_WAIT_REASONS, humanWaitGroups, renderHumanWaitsHtml, renderHumanWaitCell,
+} = require('./phases');
+
+// ブラウザへ埋め込むクライアント共有の純粋関数（自己完結。later.test.js / spike.test.js で単独評価を担保）
+const SHARED_CLIENT_FNS = [
+    canToggleLater, effectiveLater, splitLaterBoard, laterPendingReducer, splitPrsForTitle, issueCopyText,
+    humanWaitGroups, renderHumanWaitsHtml, renderHumanWaitCell, canResolveConflict,
+]
+    .map(String).join('\n');
 
 const MONITOR_HTML = `<!doctype html>
 <html lang="ja"><head><meta charset="utf-8">
@@ -110,11 +133,21 @@ const MONITOR_HTML = `<!doctype html>
   .pill { display: inline-block; padding: .05rem .5rem; border-radius: 1rem; font-size: .75rem; font-weight: 600; }
   .ok { background: #bbf7d0; color: #14532d; } .paused { background: #fecaca; color: #7f1d1d; }
   .auth { background: #fde047; color: #713f12; }
+  .usagep { background: #fb923c; color: #431407; }
   /* ---- アラート帯 ---- */
   .alert { display: flex; align-items: baseline; gap: .6rem; padding: .45rem .8rem; font-size: .85rem;
            border-bottom: 1px solid var(--border); flex-wrap: wrap; }
   .alert.auth-a { background: #fef9c3; color: #713f12; }
   .alert.block-a { background: #fee2e2; color: #7f1d1d; }
+  .alert.usage-a { background: #ffedd5; color: #7c2d12; }
+  /* ---- 人間待ちのまとめ（#1315） ---- */
+  .human-waits { display: flex; flex-wrap: wrap; gap: .3rem 1rem; align-items: baseline; padding: .4rem .6rem;
+                 margin-bottom: .5rem; background: #fff; border: 1px solid var(--border); border-radius: .35rem;
+                 font-size: .82rem; }
+  .human-waits .hw-title { font-weight: 700; color: #475569; }
+  .human-waits .hw-count { color: var(--muted); font-size: .75rem; }
+  .human-waits a { margin-left: .15rem; }
+  .alert.usage-a .uforce { margin-left: auto; display: inline-flex; gap: .4rem; align-items: baseline; }
   .alert code { background: rgba(0,0,0,.07); padding: 0 .3rem; border-radius: .2rem; }
   .alert button { font-size: .72rem; padding: .05rem .4rem; cursor: pointer; }
   .reauth-info { flex-basis: 100%; margin-top: .35rem; display: flex; gap: .5rem; align-items: center; flex-wrap: wrap;
@@ -130,16 +163,39 @@ const MONITOR_HTML = `<!doctype html>
   tr.blocked-row td { background: #fef2f2; }
   tr.running-row td { background: #fffbeb; }
   td.title-cell { max-width: 34rem; }
+  /* #Issue → PR チップ → ▼ → タイトル を 1 行に並べる。チップ/▼ は縮めず、タイトルだけ省略表示（#1212） */
+  .title-line { display: flex; align-items: center; gap: .25rem; white-space: nowrap; min-width: 0; }
+  .title-line > a, .title-line .prchip, .title-line .prmenu-btn, .title-line .copy-btn { flex: none; }
+  /* 📋（Issue と PR をコピー）#1213。行の先頭に置くのでどの行でも同じ位置に出る */
+  td button.copy-btn { font-size: .72rem; padding: 0 .2rem; line-height: 1.3; border: 1px solid transparent;
+                       background: transparent; border-radius: .3rem; }
+  td button.copy-btn:hover { border-color: #cbd5e1; background: #fff; }
+  /* コピーできた行を一瞬光らせる。再描画で作り直されても animation-delay で経過分から続ける。
+     to を書かないので、blocked-row / running-row の行は元の背景色へ戻る（透明を経由しない） */
+  @keyframes copied-flash { from { background-color: #fde68a; } }
+  #board tr.copied-row > td { animation: copied-flash 1.2s ease-out; animation-delay: var(--flash-delay, 0ms); }
+  .title-line .prchip { margin: 0; }
+  .title-line .t { flex: 0 1 auto; min-width: 0; }
+  td button.prmenu-btn { font-size: .62rem; padding: 0 .3rem; line-height: 1.3; border: 1px solid #cbd5e1;
+                         background: #fff; color: #475569; border-radius: .3rem; }
+  td button.prmenu-btn[aria-expanded="true"] { background: #1e293b; color: #fff; border-color: #1e293b; }
+  /* ▼ のメニュー。.board-wrap の overflow で切れないよう fixed でボタン直下に出す（1 つだけ） */
+  #prmenu { position: fixed; z-index: 40; display: none; min-width: 11rem; background: #fff; border: 1px solid #cbd5e1;
+            border-radius: .35rem; box-shadow: 0 6px 18px rgba(15,23,42,.18); padding: .25rem 0; font-size: .8rem; }
+  #prmenu.open { display: block; }
+  #prmenu a { display: flex; gap: .4rem; align-items: baseline; padding: .25rem .7rem; color: #1e293b; white-space: nowrap; }
+  #prmenu a:hover { background: #f1f5f9; text-decoration: none; }
+  #prmenu .pm-state { margin-left: auto; font-size: .72rem; color: var(--muted); }
   .t { display: inline-block; max-width: 30rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
   /* ---- 狭幅（〜820px 目安）で情報量を落として崩れを防ぐ #936 ----
      モバイル対応は不要（横 640px 程度が最小想定）。nth-child は表示/非表示で
      位置番号がズレないので、Size(3) を隠しても 担当(5) の index は変わらない。
-     colspan="8" のフォールバック行は td が1つなので誤って隠れない。 */
+     colspan="7" のフォールバック行は td が1つなので誤って隠れない。 */
   @media (max-width: 820px) {
     #board th:nth-child(3), #board td:nth-child(3) { display: none; } /* Size */
     #board th:nth-child(5), #board td:nth-child(5) { display: none; } /* 担当 */
-    #board td:nth-child(7) .bar, #board td:nth-child(7) .sub-pct { display: none; } /* Sub-issues: バー/％を隠し件数のみ */
-    #board td:nth-child(8) .subtext { display: none; } /* Now: 「人間の番」「N分」等の subtext を隠しアイコン/phase-pill/log を残す */
+    #board td:nth-child(6) .bar, #board td:nth-child(6) .sub-pct { display: none; } /* Sub-issues: バー/％を隠し件数のみ */
+    #board td:nth-child(7) .subtext { display: none; } /* Now: 「人間の番」「N分」等の subtext を隠しアイコン/phase-pill/log を残す */
     .t { max-width: 15rem; }
     th, td { padding: .3rem .35rem; }
   }
@@ -155,6 +211,9 @@ const MONITOR_HTML = `<!doctype html>
   .muted { color: var(--muted); }
   .prchip { display: inline-block; margin: 0 .15rem .1rem 0; padding: 0 .35rem; border-radius: .3rem;
             font-size: .75rem; white-space: nowrap; border: 1px solid transparent; }
+  .pr-conflict { outline: 2px solid #dc2626; outline-offset: -1px; }
+  td button.resolve-btn { white-space: nowrap; color: #b91c1c; border: 1px solid #fca5a5; background: #fef2f2; }
+  td button.resolve-btn[disabled] { cursor: progress; opacity: .6; }
   .pr-draft { background: #f1f5f9; color: #475569; border-color: #cbd5e1; }
   .pr-ready { background: #dcfce7; color: #14532d; border-color: #86efac; }
   .pr-merged { background: #f3e8ff; color: #6b21a8; border-color: #d8b4fe; }
@@ -164,6 +223,17 @@ const MONITOR_HTML = `<!doctype html>
   .subtext { font-size: .72rem; color: var(--muted); margin-left: .3rem; white-space: nowrap; }
   .phase-pill { background: #fde68a; color: #713f12; padding: .05rem .45rem; border-radius: .3rem; font-size: .75rem; font-weight: 600; white-space: nowrap; }
   td button { font-size: .72rem; padding: .05rem .45rem; cursor: pointer; }
+  /* ---- [通常] / [あとでやる] タブ（#1190） ---- */
+  .tabs { display: flex; gap: .3rem; margin: 0 0 .4rem; }
+  .tabs button { font-size: .8rem; padding: .2rem .7rem; cursor: pointer; border: 1px solid var(--border);
+                 background: #fff; color: #475569; border-radius: .3rem .3rem 0 0; }
+  .tabs button.active { background: #1e293b; color: #fff; border-color: #1e293b; font-weight: 600; }
+  .tabs .tab-count { display: inline-block; min-width: 1.2rem; margin-left: .25rem; padding: 0 .3rem; border-radius: .6rem;
+                     background: rgba(100,116,139,.18); font-size: .72rem; text-align: center; }
+  .tabs .tab-warn { margin-left: .3rem; padding: 0 .35rem; border-radius: .3rem; background: #fef3c7; color: #92400e;
+                    font-size: .72rem; font-weight: 600; }
+  td button.later-btn { white-space: nowrap; }
+  td button.later-btn[disabled] { cursor: progress; opacity: .6; }
   h2 { font-size: .85rem; color: var(--muted); margin: 1.2rem 0 .4rem; }
   /* ---- log モーダル ---- */
   #modal { position: fixed; inset: 0; background: rgba(15,23,42,.55); display: none; align-items: center; justify-content: center; z-index: 50; }
@@ -195,10 +265,12 @@ const MONITOR_HTML = `<!doctype html>
 </header>
 <div id="alerts"></div>
 <main>
+  <div id="humanwaits"></div>
+  <div id="tabs" class="tabs" role="tablist"></div>
   <div class="board-wrap">
   <table id="board"><thead><tr>
-    <th>Issue</th><th>Status</th><th>Size</th><th>AI</th><th>担当</th><th>PR</th><th>Sub-issues</th><th>Now</th>
-  </tr></thead><tbody id="rows"><tr><td colspan="8" class="muted">読み込み中…</td></tr></tbody></table>
+    <th>Issue</th><th>Status</th><th>Size</th><th>AI</th><th>担当</th><th>Sub-issues</th><th>Now</th>
+  </tr></thead><tbody id="rows"><tr><td colspan="7" class="muted">読み込み中…</td></tr></tbody></table>
   </div>
   <h2>実行履歴（最新 100 件・ログ用途のみ）</h2>
   <table id="histt"><thead><tr>
@@ -217,6 +289,7 @@ const MONITOR_HTML = `<!doctype html>
   <div class="body" id="updbody"></div>
 </div></div>
 <div id="usagepop" role="dialog" aria-label="Claude 使用量の詳細" class="usagepop"><div id="usagepopbody"></div></div>
+<div id="prmenu" role="menu"></div>
 <div id="modal"><div class="box">
   <header><h1 id="mtitle">log</h1>
     <button id="mreload">↻ 更新</button>
@@ -263,12 +336,117 @@ const prChip = (p) => {
   if (p.state === 'MERGED') { cls = 'pr-merged'; icon = '🟣'; }
   else if (p.state === 'CLOSED') { cls = 'pr-closed'; icon = '❌'; }
   else if (p.isDraft) { cls = 'pr-draft'; icon = '📝'; }
-  return '<a class="prchip ' + cls + '" target="_blank" rel="noopener" href="' + repoUrl + '/pull/' + p.number + '">'
-    + icon + ' #' + p.number + '</a>';
+  // GitHub が判定したコンフリクト（#1348）。OPEN の PR だけ。UNKNOWN（計算中）は印を付けない
+  const conflict = p.state === 'OPEN' && p.mergeable === 'CONFLICTING';
+  return '<a class="prchip ' + cls + (conflict ? ' pr-conflict' : '') + '" target="_blank" rel="noopener" href="'
+    + repoUrl + '/pull/' + p.number + '"' + (conflict ? ' title="base とコンフリクトしています" data-testid="board-pr-conflict"' : '') + '>'
+    + icon + ' PR#' + p.number + (conflict ? ' ⚠️' : '') + '</a>';
 };
+// ---- 📋 Issue と PR をコピー（#1213） ----
+// 光らせる演出は 5 秒ごとの innerHTML 再描画で行ごと作り直されるため、対象の Issue と開始時刻を
+// 覚えておき、描画のたびに負の animation-delay で経過分から続ける（最初からやり直さない）。
+const COPY_FLASH_MS = 1200;
+let copyFlash = null;    // { issue, at }
+const copyBtn = (it) => '<button type="button" class="copy-btn" data-testid="board-copy-issue" data-issue="' + it.issue + '"'
+  + ' title="Issue と PR をコピー" aria-label="Issue と PR をコピー" onclick="copyIssue(' + it.issue + ')">📋</button>';
+// 光っている途中の行だけ class と経過時間を返す（tr に付ける属性の断片）
+const copyFlashAttrs = (it) => {
+  if (!copyFlash || copyFlash.issue !== it.issue) return '';
+  const elapsed = Date.now() - copyFlash.at;
+  if (elapsed >= COPY_FLASH_MS) return '';
+  return ' copied-row" style="--flash-delay:-' + elapsed + 'ms';
+};
+async function copyIssue(issue) {
+  const it = ((lastBoard && lastBoard.items) || []).find((x) => x.issue === issue);
+  if (!it) return;
+  // fallback（prompt で表示）のときはコピーできたか分からないので光らせない
+  if (!await copyText(issueCopyText(it, repoUrl))) return;
+  copyFlash = { issue, at: Date.now() };
+  for (const tr of document.querySelectorAll('#rows tr[data-issue="' + issue + '"]')) {
+    tr.style.setProperty('--flash-delay', '0ms');
+    tr.classList.remove('copied-row');
+    void tr.offsetWidth; // 連打でもアニメーションを最初から再生する
+    tr.classList.add('copied-row');
+  }
+}
+const PR_KIND_ICON = { open: '✅', draft: '📝', merged: '🟣', closed: '❌' };
+
+// ---- ▼ PR メニュー（#1212） ----
+// 一覧は 5 秒ごとに innerHTML で作り直すので、開いている Issue 番号を状態に持ち、
+// 描画のたびに新しい ▼ ボタンへ付け直す（restorePrMenu）。メニュー要素は 1 つだけ。
+let prMenuIssue = null;
+let prMenuItems = {};    // 直近の描画での issue → splitPrsForTitle(...).menu
+let prMenuHtml = '';     // #prmenu に今入っている HTML（同一内容の再描画を避ける）
+const prMenuBtn = (it, menu) => {
+  prMenuItems[it.issue] = menu;
+  return '<button type="button" class="prmenu-btn" data-issue="' + it.issue + '" aria-haspopup="menu"'
+    + ' aria-expanded="' + (prMenuIssue === it.issue) + '" title="この Issue のすべての PR（merged / closed を含む）"'
+    + ' onclick="togglePrMenu(' + it.issue + ', event)">▼</button>';
+};
+function placePrMenu() {
+  const el = document.getElementById('prmenu');
+  const btn = document.querySelector('.prmenu-btn[data-issue="' + prMenuIssue + '"]');
+  if (!btn) { closePrMenu(); return; }
+  const rect = btn.getBoundingClientRect();
+  el.style.top = Math.round(rect.bottom + 2) + 'px';
+  el.style.left = Math.round(Math.max(4, Math.min(rect.left, window.innerWidth - el.offsetWidth - 4))) + 'px';
+}
+function openPrMenu(issue) {
+  const menu = prMenuItems[issue];
+  if (!menu || !menu.length) { closePrMenu(); return; }
+  prMenuIssue = issue;
+  const el = document.getElementById('prmenu');
+  const html = menu.map((p) => '<a role="menuitem" target="_blank" rel="noopener" href="' + repoUrl + '/pull/' + p.number
+    + '" onclick="setTimeout(closePrMenu, 0)">' + PR_KIND_ICON[p.kind] + ' PR#' + p.number
+    + '<span class="pm-state">' + p.kind + '</span></a>').join('');
+  // 5 秒ごとの復元で中身が同じなら作り直さない（押下中の項目が差し替わってクリックが消えるのを防ぐ）
+  if (html !== prMenuHtml) { el.innerHTML = html; prMenuHtml = html; }
+  el.classList.add('open');
+  document.querySelectorAll('.prmenu-btn').forEach((b) =>
+    b.setAttribute('aria-expanded', String(Number(b.dataset.issue) === issue)));
+  placePrMenu();
+}
+function closePrMenu() {
+  prMenuIssue = null;
+  const el = document.getElementById('prmenu');
+  prMenuHtml = '';
+  if (el) { el.classList.remove('open'); el.innerHTML = ''; }
+  document.querySelectorAll('.prmenu-btn[aria-expanded="true"]').forEach((b) => b.setAttribute('aria-expanded', 'false'));
+}
+function togglePrMenu(issue, ev) {
+  if (ev) ev.stopPropagation();
+  if (prMenuIssue === issue) closePrMenu(); else openPrMenu(issue);
+}
+// 再描画後に開いていたメニューを復元する（行が消えた / ▼ が不要になったら閉じる）
+function restorePrMenu() {
+  if (prMenuIssue != null) openPrMenu(prMenuIssue);
+}
+document.addEventListener('click', (e) => {
+  if (prMenuIssue == null) return;
+  if (e.target.closest && (e.target.closest('#prmenu') || e.target.closest('.prmenu-btn'))) return;
+  closePrMenu();
+});
+window.addEventListener('resize', () => { if (prMenuIssue != null) placePrMenu(); });
+window.addEventListener('scroll', () => { if (prMenuIssue != null) placePrMenu(); }, true);
 const mins = (ms) => Math.max(0, Math.round(ms / 60000));
 let logIssue = null;
 let logTimer = null;
+
+// ---- 💤 あとでやる（#1190） ----
+// 判断ロジック（タブ振り分け・⚠ 集計・ボタン出し分け・楽観的更新/連打対策の状態遷移）は
+// phases.js の純粋関数をそのまま埋め込む（canToggleLater / effectiveLater / splitLaterBoard /
+// laterPendingReducer）。
+${SHARED_CLIENT_FNS}
+// 人間待ちの理由（表示順・文言）。phases.js の HUMAN_WAIT_REASONS をそのまま埋め込む（#1315）
+const HUMAN_WAIT_REASONS = ${JSON.stringify(HUMAN_WAIT_REASONS)};
+const BOARD_TAB_KEY = 'autopilot:boardTab';
+let boardTab = 'normal';
+try { if (localStorage.getItem(BOARD_TAB_KEY) === 'later') boardTab = 'later'; } catch (e) { /* storage 不可でも動く */ }
+let lastBoard = null;    // 直近の /board 応答（クリック時の再描画用）
+let laterPending = {};   // laterPendingReducer の状態（保留中の Issue だけ）
+let laterSeq = 0;
+let laterError = null;   // 直近の失敗（アラート帯に出す）
+let usageForceConfirm = false; // 強制再開の 2 段階目（確認）を表示中か（#1193。confirm ダイアログは使わない）
 
 // Claude アイコン（インライン SVG・自己完結。外部リソース禁止）。
 // クリック/キーボードで使用量詳細ポップオーバーを開くトリガーを兼ねる（#996）。
@@ -443,8 +621,51 @@ function openUpdateModal() {
 }
 function closeUpdateModal() { document.getElementById('updmodal').classList.remove('open'); }
 
+// 使用量枠の表示名（#1193）
+function usageWindowLabel(w) { return w === 'weekly' ? '週間' : 'セッション'; }
+// リセット時刻を短く（JST の HH:MM。今日でなければ M/D HH:MM）。無効値は空文字。
+function resetClock(resetsAt) {
+  if (typeof resetsAt !== 'number' || !Number.isFinite(resetsAt) || resetsAt <= 0) return '';
+  const ms = resetsAt < 1e12 ? resetsAt * 1000 : resetsAt;
+  const day = (t) => new Date(t).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' });
+  const hm = new Date(ms).toLocaleTimeString('ja-JP', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', hour12: false });
+  if (day(ms) === day(Date.now())) return hm;
+  return new Date(ms).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric' }) + ' ' + hm;
+}
+// Claude 使用量の自動 pause（2 段階の強制再開つき）と強制実行中の表示（#1193）
+function usageAlerts(d) {
+  const out = [];
+  const P = d.usagePause;
+  if (d.pausedBy === 'usage' && P && P.pause) {
+    const pct = Math.round(P.percent);
+    const reset = resetClock(P.resetsAt);
+    const ctl = usageForceConfirm
+      ? '本当に再開？ 使用量 ' + pct + '% <button data-testid="usage-force-confirm" onclick="forceResume()">再開する</button>'
+        + '<button data-testid="usage-force-cancel" onclick="usageForceConfirm = false; rerender()">やめる</button>'
+      : '<button data-testid="usage-force-resume" onclick="usageForceConfirm = true; rerender()">⚡ 強制再開…</button>';
+    out.push('<div class="alert usage-a" data-testid="usage-pause-alert">⚠ <b>Claude 使用量が上限に近いため自動 pause 中</b>'
+      + '<span>' + usageWindowLabel(P.window) + ' ' + pct + '%（上限 ' + P.threshold + '%）' + (reset ? ' · リセット ' + esc(reset) : '') + '</span>'
+      + '<span class="subtext">新しいタスクは入りません。実行中の worker は継続</span>'
+      + '<span class="uforce">' + ctl + '</span></div>');
+  } else {
+    usageForceConfirm = false;
+  }
+  for (const f of (P && P.forced) || []) {
+    const reset = resetClock(f.resetsAt);
+    out.push('<div class="alert usage-a" data-testid="usage-forced-alert">⚡ <b>強制実行中</b>（'
+      + usageWindowLabel(f.window) + ' ' + Math.round(f.percent) + '%' + (reset ? ' · 〜' + esc(reset) + ' まで' : '') + '）'
+      + '<span class="subtext">枠のリセットで自動的に通常の判定へ戻ります</span></div>');
+  }
+  return out;
+}
+async function forceResume() {
+  usageForceConfirm = false;
+  try { await fetch('/force-resume', { method: 'POST' }); } catch (e) { /* refresh 側で表示 */ }
+  refresh();
+}
+
 function renderAlerts(d) {
-  const parts = [];
+  const parts = usageAlerts(d);
   if (d.authError) {
     const R = d.reauth;
     let ra = '';
@@ -474,7 +695,107 @@ function renderAlerts(d) {
       + ' <button onclick="copyText(&quot;check autopilot #' + it.issue + '&quot;)">📋 check autopilot #' + it.issue + '</button>').join(' ');
     parts.push('<div class="alert block-a">🚨 <b>Blocked ' + blocked.length + ' 件</b> — コピーして claude に貼ると診断します: ' + chips + '</div>');
   }
+  // あとでやる 内の人間の番も見落とさないよう上部に出す（Blocked は上の共通アラートで出る）#1190
+  const laterHitl = splitLaterBoard(d.items, laterPending, (d.running || []).map((r) => r.issue)).later
+    .filter((it) => it.hitl && it.status !== 'Blocked');
+  if (laterHitl.length) {
+    const links = laterHitl.map((it) => '<a target="_blank" rel="noopener" href="' + esc(it.url) + '">#' + it.issue + '</a>').join(' ');
+    parts.push('<div class="alert auth-a">💤🙋 <b>あとでやる に人間の番 ' + laterHitl.length + ' 件</b> ' + links + '</div>');
+  }
+  if (resolveError) {
+    parts.push('<div class="alert block-a">⚠️ <b>コンフリクト解消の依頼に失敗</b> ' + esc(resolveError)
+      + ' <button onclick="resolveError = null; rerender()">✕</button></div>');
+  }
+  if (laterError) {
+    parts.push('<div class="alert block-a">⚠️ <b>あとでやる の切り替えに失敗</b>（元に戻しました） ' + esc(laterError)
+      + ' <button onclick="laterError = null; rerender()">✕</button></div>');
+  }
   document.getElementById('alerts').innerHTML = parts.join('');
+}
+
+// [通常 N] [あとでやる M ⚠…] タブ（件数バッジ付き）。⚠ は あとでやる 内の実行中・人間の番。
+function renderTabs(split) {
+  const warnParts = [];
+  if (split.laterRunning) warnParts.push('実行中 ' + split.laterRunning);
+  if (split.laterHitl) warnParts.push('人間の番 ' + split.laterHitl);
+  const warn = warnParts.length
+    ? '<span class="tab-warn" title="あとでやる 内の動き">⚠ ' + warnParts.join('・') + '</span>'
+    : '';
+  const tab = (key, label, n, extra) => '<button role="tab" data-tab="' + key + '" aria-selected="' + (boardTab === key)
+    + '" class="' + (boardTab === key ? 'active' : '') + '" onclick="setBoardTab(&quot;' + key + '&quot;)">'
+    + label + '<span class="tab-count">' + n + '</span>' + extra + '</button>';
+  document.getElementById('tabs').innerHTML = tab('normal', '通常', split.normal.length, '')
+    + tab('later', '💤 あとでやる', split.later.length, warn);
+}
+function setBoardTab(t) {
+  boardTab = t === 'later' ? 'later' : 'normal';
+  try { localStorage.setItem(BOARD_TAB_KEY, boardTab); } catch (e) { /* storage 不可でも動く */ }
+  rerender();
+}
+function rerender() {
+  if (!lastBoard) return;
+  renderAlerts(lastBoard);
+  renderBoard(lastBoard);
+}
+// Now 列末尾の [💤 あとで] / [↩ 今やる]。終端 Status には出さない。送信中は disabled（二重送信防止）。
+function laterButton(it) {
+  if (!canToggleLater(it)) return '';
+  const p = laterPending[it.issue];
+  if (p && p.inFlight) return ' <button class="later-btn" data-later-issue="' + it.issue + '" disabled>⏳ 処理中</button>';
+  const isLater = effectiveLater(it, laterPending);
+  return isLater
+    ? ' <button class="later-btn" data-later-issue="' + it.issue + '" title="あとでやる から通常に戻す（💤 later を外す）" onclick="toggleLater(' + it.issue + ', false)">↩ 今やる</button>'
+    : ' <button class="later-btn" data-later-issue="' + it.issue + '" title="あとでやる に移す（💤 later を付ける・autopilot の処理は変わらない）" onclick="toggleLater(' + it.issue + ', true)">💤 あとで</button>';
+}
+// コンフリクト解消ボタン（#1348）。押すと POST /resolve-conflict。daemon は Status と 🙋 を変えずに
+// 解消だけ行う（実行中は running に出るので、ボタンは消えて phase 表示に変わる）。
+let resolveRequested = {}; // { [issue]: true } 送信中
+let resolveError = null;
+function resolveButton(it, runningIssues) {
+  if (!canResolveConflict(it, runningIssues)) return '';
+  if (resolveRequested[it.issue]) return ' <button class="resolve-btn" disabled>⏳ 依頼中</button>';
+  return ' <button class="resolve-btn" data-testid="board-resolve-conflict" data-issue="' + it.issue + '"'
+    + ' title="base とのコンフリクトを AI が解消する（Status と 🙋 は変えない）" onclick="resolveConflict(' + it.issue + ')">🔀 解消</button>';
+}
+async function resolveConflict(issue) {
+  if (resolveRequested[issue]) return;
+  resolveRequested[issue] = true;
+  resolveError = null;
+  rerender();
+  try {
+    const r = await fetch('/resolve-conflict?issue=' + issue, { method: 'POST' });
+    let j = {};
+    try { j = await r.json(); } catch (e) { /* 本文なし */ }
+    if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+  } catch (e) {
+    resolveError = '#' + issue + ': ' + e.message;
+  }
+  delete resolveRequested[issue];
+  await refresh();
+}
+// 楽観的更新: 先に画面上で移動 → 裏で POST /later → 失敗時は最後に確定した状態へ戻す。
+// ボード再取得は撃たない（daemon がキャッシュ上の labels を書き換える）。
+async function toggleLater(issue, later) {
+  const cur = laterPending[issue];
+  if (cur && cur.inFlight) return;
+  const it = ((lastBoard && lastBoard.items) || []).find((x) => x.issue === issue);
+  const seq = ++laterSeq;
+  laterPending = laterPendingReducer(laterPending,
+    { type: 'request', issue, later, current: effectiveLater(it, laterPending), seq });
+  laterError = null;
+  rerender();
+  try {
+    const r = await fetch('/later', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ issue, later }) });
+    let j = {};
+    try { j = await r.json(); } catch (e) { /* 本文なし */ }
+    if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    laterPending = laterPendingReducer(laterPending, { type: 'success', issue, seq, later: Boolean(j.later) });
+  } catch (e) {
+    laterPending = laterPendingReducer(laterPending, { type: 'failure', issue, seq, error: e.message });
+    laterError = '#' + issue + ': ' + e.message;
+  }
+  rerender();
 }
 
 function renderBoard(d) {
@@ -482,10 +803,18 @@ function renderBoard(d) {
   for (const r of d.running || []) runningBy[r.issue] = r;
   // 自分の login（--assignee）。共同担当で自分がオーナーでない行に「観察中」マーカーを出す（#938）。
   const myAssignee = d.assignee || null;
-  const rows = (d.items || []).map((it) => {
+  const split = splitLaterBoard(d.items, laterPending, (d.running || []).map((r) => r.issue));
+  // 人間待ちのまとめはタブに関係なく全 item から作る（あとでやる 内の人間待ちも見落とさない）
+  document.getElementById('humanwaits').innerHTML = renderHumanWaitsHtml(d.items, HUMAN_WAIT_REASONS);
+  renderTabs(split);
+  const shown = boardTab === 'later' ? split.later : split.normal;
+  prMenuItems = {};
+  const rows = shown.map((it) => {
     const r = runningBy[it.issue];
     const cls = it.status === 'Blocked' ? 'blocked-row' : (r ? 'running-row' : '');
-    const prs = (it.prs || []).map(prChip).join('') || '<span class="muted">—</span>';
+    const prSplit = splitPrsForTitle(it.prs);
+    const prInline = prSplit.inline.map(prChip).join('');
+    const prMenu = prSplit.hasMenu ? prMenuBtn(it, prSplit.menu) : '';
     const s = it.subIssues || {};
     // 件数（.sub-count）と %（.sub-pct）を別 span に分割し、狭幅 CSS で % だけ隠せるようにする（#936）
     const sub = s.total
@@ -497,7 +826,8 @@ function renderBoard(d) {
       ? '<span class="phase-pill">' + esc(r.phase) + '</span>'
         + '<span class="subtext">' + mins(Date.now() - r.since) + '分</span> '
         + '<button onclick="openLog(' + it.issue + ')">log</button>'
-      : (it.hitl ? '<span title="人間の番">🙋</span> <span class="subtext">人間の番</span>' : '<span class="muted">—</span>');
+      : (renderHumanWaitCell(it, HUMAN_WAIT_REASONS)
+        || (it.hitl ? '<span title="人間の番">🙋</span> <span class="subtext">人間の番</span>' : '<span class="muted">—</span>'));
     const assignees = it.assignees || [];
     // オーナー（駆動担当）を太字で明示。自分がオーナーでない共同担当行には 👁 + オーナー login
     // を付け、「観察中（他人が駆動）」であることを示す（#938）。
@@ -509,19 +839,22 @@ function renderBoard(d) {
       : '';
     const kindMark = it.tracker ? ' <span class="subtext" title="tracker (分解済み親)">🧭</span>' : '';
     const waitMark = it.waiting ? ' <span class="subtext" title="先行 Issue (autopilot-after) の完了待ち">⏳</span>' : '';
-    return '<tr class="' + cls + '">'
-      + '<td class="title-cell"><a target="_blank" rel="noopener" href="' + esc(it.url) + '">#' + it.issue + '</a> '
-      + '<span class="t" title="' + esc(it.title) + '">' + esc(it.title) + '</span>' + kindMark + waitMark + '</td>'
+    return '<tr class="' + cls + copyFlashAttrs(it) + '" data-issue="' + it.issue + '">'
+      + '<td class="title-cell"><span class="title-line">' + copyBtn(it) + '<a target="_blank" rel="noopener" href="' + esc(it.url) + '">#' + it.issue + '</a>'
+      + prInline + prMenu
+      + '<span class="t" title="' + esc(it.title) + '">' + esc(it.title) + '</span>' + kindMark + waitMark + '</span></td>'
       + '<td>' + statusPill(it.status) + '</td>'
       + '<td>' + sizeBadge(it.size) + '</td>'
       + '<td>' + aiStatusCell(it) + '</td>'
       + '<td>' + who + observing + '</td>'
-      + '<td>' + prs + '</td>'
       + '<td>' + sub + '</td>'
-      + '<td>' + now + '</td></tr>';
+      + '<td>' + now + resolveButton(it, (d.running || []).map((x) => x.issue)) + laterButton(it) + '</td></tr>';
   });
   document.getElementById('rows').innerHTML = rows.join('')
-    || '<tr><td colspan="8" class="muted">（表示対象の Issue はありません）</td></tr>';
+    || '<tr><td colspan="7" class="muted">' + (boardTab === 'later'
+      ? '（あとでやる の Issue はありません。通常タブの「💤 あとで」で移せます）'
+      : '（表示対象の Issue はありません）') + '</td></tr>';
+  restorePrMenu();
 }
 
 function renderHistory(d) {
@@ -539,8 +872,12 @@ function renderHistory(d) {
 async function refresh() {
   try {
     const d = await fetch('/board').then((r) => r.json());
+    lastBoard = d;
+    // ボードが目標状態に追いついた保留だけ解除（古いキャッシュで楽観的に動かした行を戻さない）
+    laterPending = laterPendingReducer(laterPending, { type: 'board', items: d.items || [] });
     const st = document.getElementById('state');
     if (d.authError) { st.className = 'pill auth'; st.textContent = 'AUTH ⚠'; }
+    else if (d.paused && d.pausedBy === 'usage') { st.className = 'pill usagep'; st.textContent = 'USAGE ⏸'; }
     else if (d.paused) { st.className = 'pill paused'; st.textContent = 'PAUSED'; }
     else { st.className = 'pill ok'; st.textContent = 'RUNNING'; }
     document.getElementById('meta').textContent =
@@ -559,7 +896,8 @@ async function refresh() {
   }
 }
 
-async function copyText(t) { try { await navigator.clipboard.writeText(t); } catch (e) { prompt('コピーしてください:', t); } }
+// クリップボードに書けたら true。localhost 以外（IP 直打ち等）では navigator.clipboard が無いので prompt で見せる
+async function copyText(t) { try { await navigator.clipboard.writeText(t); return true; } catch (e) { prompt('コピーしてください:', t); return false; } }
 async function reauth() {
   const btn = document.getElementById('reauthbtn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ SSO 起動中…'; }
@@ -635,9 +973,16 @@ window.addEventListener('resize', () => {
   if (!usagePopOpen) return;
   if (window.innerWidth <= 960) closeUsagePop(); else positionUsagePop();
 });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeModal(); closeUpdateModal(); closeUsagePop(); } });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeModal(); closeUpdateModal(); closeUsagePop(); closePrMenu(); } });
 document.getElementById('pause').onclick = () => fetch('/pause', { method: 'POST' }).then(refresh);
-document.getElementById('resume').onclick = () => fetch('/resume', { method: 'POST' }).then(refresh);
+// usage の auto-pause 中は /resume が 409 を返す → アラート帯の強制再開（確認段）を開く（#1193）
+document.getElementById('resume').onclick = async () => {
+  try {
+    const r = await fetch('/resume', { method: 'POST' });
+    if (r.status === 409) usageForceConfirm = true;
+  } catch (e) { /* refresh 側で表示 */ }
+  refresh();
+};
 document.getElementById('ticknow').onclick = async () => {
   const btn = document.getElementById('ticknow');
   btn.disabled = true; btn.textContent = '⏳';

@@ -49,14 +49,22 @@ CDK のコンテキストキャッシュファイル `cdk.context.json` は **�
 - `cdk.context.json` は `.gitignore` に追加**しない**
 - デプロイ後に生成・更新された場合はコミットする
 
-## デプロイ経路（stg と prod で分ける）
+## デプロイ経路（どちらも GitHub Actions）
 
-**stg = GitHub Actions 経由のみ / prod = 人間の手元から手動のみ**（#1162）。
+**stg も prod も `.github/workflows/deploy-infra-stg.yml`（workflow 名 `Deploy Infra`）だけから出す。**
+ローカルからの `cdk deploy` は、自動デプロイが安全装置で止まったときの人間の手作業に限る。
 
-| 環境 | 経路 | 誰が |
+| 環境 | いつ出るか | 誰が |
 |---|---|---|
-| stg | `.github/workflows/deploy-infra-stg.yml` | PR に **`deploy-stg` ラベル**を付ける / develop へ push / 手動起動 |
-| prod | 手元で `npx cdk deploy --context stage=prod` | **人間**（AI は人間の明示的な指示があるときだけ） |
+| stg | PR に **`deploy-stg` ラベル**を付けたとき / develop への push / 手動起動 | 自動（ラベルは人間か worker が付ける） |
+| prod | **develop へのマージ（push）で、stg が成功したあと**。prod との差分があるプロジェクトだけ | 自動 |
+| prod（例外） | 自動デプロイが「削除・置き換え」を検知して止めたとき | **人間**が内容を確かめて手元から `npx cdk deploy --context stage=prod` |
+
+- prod のジョブは `cdk diff` を取り、**リソースの削除（`[-] AWS::...`）や置き換え（replacement）が
+  含まれていたら出さずに失敗する**。後方互換な変更（追加・設定変更・Lambda のコード更新）だけが
+  自動で出る。差分が無ければ何もしない。
+- prod に出せたら、マージした PR が `Refs #N` で参照している **🧱 infra の Issue を workflow が閉じる**。
+- AI は手元から prod へ出さない（人間の明示的な指示があるときだけ）。
 
 ### なぜ stg をローカルから撃たないか
 
@@ -71,20 +79,38 @@ stg は**共有資源**で、人間と複数の autopilot worker が同時に触
 - **stg は上書きされうる**。DoD をする前に、workflow が PR に残したコメントで
   「いまの stg が自分の SHA か」を確認する。違えばラベルを付け直して再デプロイする。
 - develop への infra push でも stg へデプロイが走るので、**マージ後は stg が develop に収束**する。
+- **同じ infra プロジェクトを変える PR が同時に 2 つあるときは、後の PR を先の PR のブランチから
+  作る**（または 1 つにまとめる）。stg のデプロイはプロジェクト単位でキュー化されるだけなので、
+  別々のブランチから出すと後のデプロイが先の変更を消し、DoD が違うコードに対して通ってしまう。
+  別プロジェクト同士（例: classroom と rubytee-relay）なら互いに上書きしないので、分けたまま
+  並行してよい（`concurrency` の group が `infra-deploy-stg-<project>`）。
 
-### マージ前に infra を出すのは「ジレンマ」ではなく手順（Expand-Contract）
+## infra は別 Issue に分けて先に出す（infra-first）
 
-「UI の DoD には API が必要 → でも API はマージ後にしか出せない」を避けるため、**API を後方互換で
-先に出し、あとから UI をマージする**（Expand-Contract）。順番は:
+ブランチプレビュー（`https://smalruby.jp/smalruby3-editor/<branch>/`）は **prod の API** を見る。
+GUI と infra を 1 つの PR に入れると、新しい API が prod に無いのでプレビューで確認できない。
+そこで **infra の変更は必ず GUI と別の Issue（親 Issue の sub-issue）にし、先に develop へ
+マージして prod に出す**。GUI の Issue はそのあとに動き、プレビューで確認する。
 
-1. **Expand**: API 側の変更を**既存の呼び出しを壊さない形**で作る（ルート追加・任意フィールド追加など）。
-   PR に `deploy-stg` を付けて stg へ出す。
-2. UI / クライアント側を実装し、stg の API に対して DoD を行う。
-3. マージ。develop への push で stg が収束する。prod へは人間が明示的に出す。
-4. **Contract**（必要なら）: 旧経路の削除は、クライアントが全部移行したことを確認してから**別 PR**で行う。
+1. **Issue を分ける**: infra（`infra/**` だけ）を 1 つ、それ以外（GUI など）を 1 つ以上。
+   - infra の Issue には **`🧱 infra` ラベル**を付け、**`autopilot-base:` は書かない**
+     （親が topic ブランチでも、infra は develop へ出す）。
+   - GUI の Issue には `autopilot-after: #<infra の Issue>` を書く（親と同じ `autopilot-base:` でよい）。
+2. **infra は後方互換な変更だけ**（Expand）: ルート・任意フィールド・テーブル・GSI・権限の**追加**、
+   既存の挙動を変えない範囲の修正だけ。**削除・改名・必須化・レスポンス形の変更・既存リソースの
+   置き換えはしない**（いま動いている prod の画面と、まだ古い画面を開いている生徒を壊すため）。
+   GUI がまだ使っていない API が先に prod にあっても害が無い形にする。
+3. infra の PR は **develop 宛て**で、本文は **`Refs #<infra の Issue>`**（`Closes` にしない。
+   マージ時点ではまだ prod に出ていないため）。確認は Lambda の unit test と、必要なら
+   `deploy-stg` ラベルで stg に出して integration test。
+4. **マージ → stg → prod が自動で走り、prod に出たら workflow が infra の Issue を閉じる** →
+   GUI の Issue が動き出す（autopilot は 🧱 infra の依存を「GitHub で closed」になるまで待つ）。
+5. GUI は**ブランチプレビューで確認**する（prod の API がもうある）。
+6. **Contract**（旧経路の削除など）は、GUI が全部移行して prod に出たあと、**別の infra Issue** で
+   行う。これは削除を含むので prod の自動デプロイが止まる → 人間が確認して手元から出す。
 
-後方互換を壊す変更（フィールド削除・レスポンス形の変更など）は、この手順に乗らないので
-**先に出してはいけない**。その場合は stg で壊してよい時間帯を決めてから出す。
+infra と GUI が同じ Issue に混ざっていたら、作業を始める前に分ける（autopilot は triage /
+decompose で分ける。人間が Issue を作るときも同じ）。
 
 ## AWS Credentials
 
@@ -169,9 +195,9 @@ account ID は CDK の `cdk.context.json` コミット方針で既にリポジ�
 | リソース名 suffix | `stageSuffix = stage === 'prod' ? '' : '-' + stage`（**prod は無印**、他は `-stg` 等） |
 | CFN スタック名 | prod は無印、他は `-{stage}`（`MeshV2Stack` / `ClassroomStack` / `SmalrubyApiStack` / `RubyteeRelayStack` / `BugReportStack`） |
 | リージョン | 既定 `ap-northeast-1` |
-| CDK バージョン | `aws-cdk-lib` は全プロジェクトで**同一バージョンにピン留め**（現在 `2.232.1`）。1 つだけ上げない |
+| CDK バージョン | `aws-cdk-lib` は全プロジェクトで**同一バージョンにピン留め**（現在 `2.275.0`）。1 つだけ上げない。lib を上げたら CLI `aws-cdk` も lib の cloud assembly schema を読める版（現在 `2.1147.0`）へそろえる（古い CLI は synth で `Cloud assembly schema version mismatch` になる） |
 | タグ | スタック全体に `Project` / `Stage` / `Service` / `ManagedBy=CDK` |
-| Node Lambda ランタイム | **`NODEJS_22_X` に統一**（例外: mesh-v2 の Ruby Lambda は `RUBY_3_4`）。新しい Lambda も 22 に合わせる |
+| Node Lambda ランタイム | **`NODEJS_22_X` に統一**（例外: mesh-v2 の Ruby Lambda は Ruby 4.0 = `ruby4.0`）。新しい Lambda も 22 に合わせる |
 | Lambda bundling | esbuild: `minify: true`, `sourceMap: stage !== 'prod'`, `externalModules: []`（全同梱） |
 | CloudWatch LogGroup | 明示生成し retention = prod `ONE_MONTH` / 他 `ONE_WEEK`、`removalPolicy: DESTROY` |
 | HTTP API スロットリング | stage-level のスロットリングを必ず設定（値はプロジェクトごと。WAF は使わない） |
@@ -189,11 +215,25 @@ account ID は CDK の `cdk.context.json` コミット方針で既にリポジ�
 - 管理者アクションの `audit()` 構造化ログは **bug-report のみ**が持つ（classroom には無い）。
   「管理系操作は audit ログ」と一般化しないこと。
 
+## 混雑・障害時の劣化（fail-open の方針）
+
+授業中の可用性を優先し、**付随的な機能は混雑時・障害時に一時的に不完全な状態になってよい**（fail-open）。
+本来の機能（答えを返す・課題を提出できる等）を止めないことを優先し、付随する読み書きの失敗では落とさない。
+
+- 例（実装事実）: rubytee-relay のレート制限は DynamoDB 障害時に**許可**する。利用集計の書き込みに失敗しても
+  答えは返す。classroom のメンバー一覧の `aiUsage` は `BatchGetItem` が `UnprocessedKeys` を返すと
+  **再試行せずクラス全体を `null`**（表示なし）にする — 混雑時は一時的に全員分が見えなくなるのを許容する。
+- 新しく付随的な読み書きを足すときも、まずこの方針（再試行やエラー応答で本体を遅らせない）で設計する。
+- **例外**: 認証・認可・不正防止（他人のデータ・枠を使えないこと）は fail-open にしない。
+  劣化を許すのは「表示が一時的に欠ける」「集計が一時的に漏れる」までで、悪用の余地を作る方向には倒さない。
+
 ## データ保持（RemovalPolicy）と secret の互換性
 
-- **`RemovalPolicy.RETAIN` は bug-report の `BugReportAdmins` テーブルのみ**。それ以外の運用
-  テーブル（mesh-v2 / classroom の 4 テーブル / `BugReports` / rate limit）はすべて **DESTROY**
-  — スタック削除・リソース差し替えでデータが消える前提で扱うこと。
+- **`RemovalPolicy.RETAIN` は「消えると取り戻せないデータ」の表だけ**。現在は次の 3 つ:
+  bug-report の `BugReportAdmins`、classroom の `SharedAssignments`（みんなの課題。prod のみ RETAIN）、
+  rubytee-relay の `RubyteeRelayUsage`（利用集計）。それ以外の運用テーブル（mesh-v2 / classroom の
+  クラス・課題系 / `BugReports` / rate limit / `RubyteeJobs`）は **DESTROY** — スタック削除・リソース
+  差し替えでデータが消える前提で扱うこと。RETAIN の表を増やすときはこの一覧も更新する。
 - **互換性クリティカルな secret**: `MESH_ZONE_SECRET_KEY`（smalruby-api）はローテートすると
   全ユーザーの mesh domain (CRC32) が変わる（詳細は `smalruby-api.md`）。mesh-v2 の
   `MESH_SECRET_KEY` は **未設定だと stack 既定の固定弱鍵 `'default-secret-key'` になる**

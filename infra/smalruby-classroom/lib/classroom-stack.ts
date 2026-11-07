@@ -1,5 +1,6 @@
 import * as cdk from 'aws-cdk-lib/core';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as lambdaEventSources from 'aws-cdk-lib/aws-lambda-event-sources';
 import * as lambdaNodejs from 'aws-cdk-lib/aws-lambda-nodejs';
@@ -153,6 +154,8 @@ export class ClassroomStack extends cdk.Stack {
     });
 
     // GSI: sessionToken lookup (for student submission auth)
+    // rubytee relay（別スタック）も、この表名と GSI 名を決め打ちで Query して takeover の席を
+    // 確かめる（#1317・読み取り専用）。表名や GSI 名を変えるときは relay の stack も直す。
     this.membershipsTable.addGlobalSecondaryIndex({
       indexName: 'sessionToken-index',
       partitionKey: {
@@ -471,6 +474,16 @@ export class ClassroomStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
+    // rubytee relay（別スタック）の表。メンバー一覧の aiUsage を読むだけ (#1311)。
+    // relay は SSM（/smalruby/rubytee-relay/<stage>/*-table-arn）にも ARN を出すが、
+    // SSM 参照にするとスタックのデプロイ順に依存する（relay が先に無いと失敗する）ため、
+    // 同じアカウント・リージョンの決まった表名から ARN を組み立てる。表がまだ無くても
+    // Lambda は aiUsage: null を返すだけ（fail-open）。
+    const rubyteeRateLimitTableName = process.env.RUBYTEE_RATE_LIMIT_TABLE_NAME
+      || `RubyteeRelayRateLimit${stageSuffix}`;
+    const rubyteeUsageTableName = process.env.RUBYTEE_USAGE_TABLE_NAME
+      || `RubyteeRelayUsage${stageSuffix}`;
+
     const handlerFn = new lambdaNodejs.NodejsFunction(this, 'ClassroomHandler', {
       functionName: `ClassroomHandler${stageSuffix}`,
       runtime: lambda.Runtime.NODEJS_22_X,
@@ -489,6 +502,8 @@ export class ClassroomStack extends cdk.Stack {
         SHARED_ASSIGNMENTS_TABLE_NAME: this.sharedAssignmentsTable.tableName,
         SHARED_REPORTS_TABLE_NAME: this.sharedReportsTable.tableName,
         NOTIFICATIONS_TABLE_NAME: this.notificationsTable.tableName,
+        RUBYTEE_RATE_LIMIT_TABLE_NAME: rubyteeRateLimitTableName,
+        RUBYTEE_USAGE_TABLE_NAME: rubyteeUsageTableName,
         SUBMISSIONS_BUCKET_NAME: this.submissionsBucket.bucketName,
         SHARED_BUCKET_NAME: this.sharedBucket.bucketName,
         SHARE_DAILY_LIMIT: process.env.SHARE_DAILY_LIMIT || '10',
@@ -537,6 +552,15 @@ export class ClassroomStack extends cdk.Stack {
     // なく必要最小限だけ grant して「エディタからお知らせを偽造できない」を
     // IAM でも担保する（レビュー指摘）。
     this.notificationsTable.grant(handlerFn, 'dynamodb:Query', 'dynamodb:UpdateItem');
+    // relay の表は読み取りだけ（書き込み権限は渡さない）
+    handlerFn.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['dynamodb:GetItem', 'dynamodb:BatchGetItem', 'dynamodb:Query'],
+      resources: [rubyteeRateLimitTableName, rubyteeUsageTableName].map(name => cdk.Stack.of(this).formatArn({
+        service: 'dynamodb',
+        resource: 'table',
+        resourceName: name,
+      })),
+    }));
     this.submissionsBucket.grantPut(handlerFn);
     this.submissionsBucket.grantRead(handlerFn);
     this.sharedBucket.grantPut(handlerFn);
@@ -650,9 +674,21 @@ export class ClassroomStack extends cdk.Stack {
       } : undefined,
     });
 
+    // One invoke permission for the whole API instead of one per route: the
+    // per-route statements pushed the Lambda resource policy past its 20 KB
+    // limit when the peer-submissions route was added (#1239).
+    // The API invokes an alias, not the function: the alias has its own
+    // (empty) resource policy, so the new statement fits even though
+    // CloudFormation creates it before deleting the per-route statements on
+    // the function, whose policy was already full.
+    const handlerAlias = new lambda.Alias(this, 'ClassroomHandlerLive', {
+      aliasName: 'live',
+      version: handlerFn.currentVersion,
+    });
     const integration = new apigatewayv2Integrations.HttpLambdaIntegration(
       'ClassroomIntegration',
-      handlerFn
+      handlerAlias,
+      { scopePermissionToRoute: false },
     );
 
     // Routes
@@ -709,6 +745,14 @@ export class ClassroomStack extends cdk.Stack {
     this.api.addRoutes({
       path: '/classrooms/{classroomId}/members/{memberId}',
       methods: [apigatewayv2.HttpMethod.DELETE],
+      integration,
+    });
+
+    // Pending kick requests across the teacher's assignments — polled by the
+    // GUI while a teacher is logged in (#1200).
+    this.api.addRoutes({
+      path: '/kick-requests/pending',
+      methods: [apigatewayv2.HttpMethod.GET],
       integration,
     });
 
@@ -821,6 +865,16 @@ export class ClassroomStack extends cdk.Stack {
       integration,
     });
 
+    // "Can I post course work to this class's linked Google Classroom course?"
+    // — asked before enabling the share button so a co-teacher who is not a
+    // teacher of that course is told who to ask instead of hitting a Google
+    // error (#1184).
+    this.api.addRoutes({
+      path: '/classroom-groups/{groupId}/google-course-access',
+      methods: [apigatewayv2.HttpMethod.GET],
+      integration,
+    });
+
     // Topic list management (add/remove/rename with cascade to assignments).
     this.api.addRoutes({
       path: '/classroom-groups/{groupId}/topics',
@@ -846,6 +900,22 @@ export class ClassroomStack extends cdk.Stack {
     this.api.addRoutes({
       path: '/classrooms/{classroomId}/submissions',
       methods: [apigatewayv2.HttpMethod.POST, apigatewayv2.HttpMethod.GET],
+      integration,
+    });
+
+    // Student (session token): own submissions to continue from — this
+    // assignment's and the same seat's in the previous assignment (#1201).
+    this.api.addRoutes({
+      path: '/classrooms/{classroomId}/continuable-submissions',
+      methods: [apigatewayv2.HttpMethod.GET],
+      integration,
+    });
+
+    // Student (session token): classmates' submission images in the same
+    // assignment, when the assignment's peerView allows it (#1239).
+    this.api.addRoutes({
+      path: '/classrooms/{classroomId}/peer-submissions',
+      methods: [apigatewayv2.HttpMethod.GET],
       integration,
     });
 

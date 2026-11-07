@@ -11,6 +11,8 @@ paths:
 
 クラス機能（Classroom）は、先生がクラスを作成し、生徒が参加コードで参加して作品を提出する機能。
 
+> **先生の画面を作る・直す・レビューするときは [`classroom-ui.md`](classroom-ui.md) の UI 規約（R1〜R6・お手本は Google Classroom）に従う。**
+
 ## ドキュメント
 
 クラス機能の仕様は `docs/classroom/` 以下のドキュメントに詳しく記載されている:
@@ -20,10 +22,10 @@ paths:
 | `docs/classroom/README.md` | 概要・クイックスタート |
 | `docs/classroom/architecture.md` | API ルート、データモデル、認証フローの確認 |
 | `docs/classroom/user-stories.md` | ユーザーフローの理解 |
-| `docs/classroom/ui-ux.md` | **UI パーツ・data-testid の完全な一覧**（Playwright テストで参照） |
+| `docs/classroom/ui-ux.md` | 各画面のスクリーンショット・UI パーツ・文言・操作 |
 | `docs/classroom/cost-estimate.md` | AWS/GCP 費用 |
 | `docs/classroom/source-code.md` | ファイル・関数の一覧 |
-| `docs/classroom/testing.md` | data-testid 一覧、テスト実行方法 |
+| `docs/classroom/testing.md` | **data-testid の唯一の一覧**（Playwright テストで参照）、テスト実行方法 |
 
 ## 主要ファイル
 
@@ -38,18 +40,18 @@ paths:
 
 ## 機能フラグ
 
-- URL パラメータ `?features=classroom` で有効化
+- 環境変数 `CLASSROOM_API_ENDPOINT` が設定されていれば常に有効（`ClassroomAPI.isConfigured()`。`?features=classroom` は不要）
 - `?classcode=XXXXXX` で参加コード入力をスキップして自動参加
 
 ## UI フェーズ
 
-13 フェーズの詳細は `docs/classroom/ui-ux.md` を参照。各フェーズには `data-testid` が付与されている（例: `classroom-phase-role-select`）。
+13 フェーズの詳細は `docs/classroom/ui-ux.md` を参照。各フェーズのルートには `data-testid` が付与されている（一覧は `docs/classroom/testing.md`）。
 
 ## Playwright テスト
 
-`docs/classroom/ui-ux.md` に各画面のスクリーンショットと全 UI パーツの `data-testid` を記載している。テストを書く際はこのドキュメントを参照すること。
+画面の見た目・操作は `docs/classroom/ui-ux.md`、`data-testid` は `docs/classroom/testing.md` だけに記載している（重複させない。testid を追加・変更したら testing.md だけを更新する）。テストを書く際はこの 2 つを参照すること。
 
 テスト用 URL:
 ```
-http://localhost:8601?no_beforeunload=1&features=classroom
+http://localhost:8601?no_beforeunload=1
 ```

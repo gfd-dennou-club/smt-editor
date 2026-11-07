@@ -17,6 +17,8 @@ import {
     MAX_ASSIGNMENT_PAGES,
     buildAssignmentPayload,
     moveItem,
+    normalizeMeshGroupLimit,
+    normalizePeerView,
     validateEditorPages,
 } from '../lib/classroom-assignment-utils.js';
 import translateError from './classroom-error-utils.js';
@@ -61,6 +63,9 @@ const messages = defineMessages({
  * @param {string} params.phase - current UI phase (drives the auto-load)
  * @param {Function} params.setPhase - phase setter
  * @param {object} params.vm - Scratch VM instance (for "use open project")
+ * @param {Function} [params.setSelectedClassroom] - selected classroom setter
+ *     (reflects a saved meshGroupLimit)
+ * @param {Function} [params.setClassrooms] - classroom list setter
  * @returns {object} assignment editor state and handlers
  */
 const useTeacherAssignment = ({
@@ -74,6 +79,8 @@ const useTeacherAssignment = ({
     phase,
     setPhase,
     vm,
+    setSelectedClassroom,
+    setClassrooms,
 }) => {
     const [editorPages, setEditorPages] = useState([]);
     // 'none' | 'keep' | 'new'
@@ -82,6 +89,16 @@ const useTeacherAssignment = ({
     // {source: 'current-project'} | {source: 'file', blob, name}
     const [starterSource, setStarterSource] = useState(null);
     const [hasExistingStarter, setHasExistingStarter] = useState(false);
+    // "Start from the previous submission" (#1202): students open the same
+    // seat's submission from the previous assignment right after joining.
+    const [startFromPrevious, setStartFromPrevious] = useState(false);
+    // "Peer view" (#1208): 'none' | 'always' | 'afterSubmit'.
+    const [peerView, setPeerView] = useState('none');
+    // Mesh group size limit (#1257): lives on the classroom item (PATCH
+    // /classrooms/{id}), not the assignment content, but is saved with it.
+    const [meshGroupLimit, setMeshGroupLimit] = useState(
+        normalizeMeshGroupLimit(selectedClassroom && selectedClassroom.meshGroupLimit),
+    );
     const [isSaving, setIsSaving] = useState(false);
 
     /** Release blob preview URLs to avoid leaking object URLs. */
@@ -109,6 +126,8 @@ const useTeacherAssignment = ({
             setHasExistingStarter(hasStarter);
             setStarterMode(hasStarter ? 'keep' : 'none');
             setStarterSource(null);
+            setStartFromPrevious(data.startFromPrevious === true);
+            setPeerView(normalizePeerView(data.peerView));
         } catch (err) {
             if (err.status === 401) {
                 handleTeacher401();
@@ -129,6 +148,16 @@ const useTeacherAssignment = ({
         // loadAssignmentEditor identity changes with the classroom — the two
         // deps below are the actual triggers.
     }, [phase === 'teacher-class-detail', selectedClassroom && selectedClassroom.classroomId]);
+
+    // Follow the opened classroom's stored value (also after a save updates
+    // it). Not part of loadAssignmentEditor: its post-save reload closes over
+    // the pre-save classroom and would put the old value back. Re-entering the
+    // detail view also resets it, so an unsaved choice does not come back when
+    // the same assignment is opened again.
+    const storedMeshGroupLimit = normalizeMeshGroupLimit(selectedClassroom && selectedClassroom.meshGroupLimit);
+    useEffect(() => {
+        setMeshGroupLimit(storedMeshGroupLimit);
+    }, [phase === 'teacher-class-detail', selectedClassroom && selectedClassroom.classroomId, storedMeshGroupLimit]);
 
     const handleAddPage = useCallback(() => {
         setEditorPages((pages) => (pages.length >= MAX_ASSIGNMENT_PAGES ? pages : [...pages, { text: '' }]));
@@ -223,6 +252,18 @@ const useTeacherAssignment = ({
         [clearError],
     );
 
+    const handleChangeStartFromPrevious = useCallback((value) => {
+        setStartFromPrevious(!!value);
+    }, []);
+
+    const handleChangePeerView = useCallback((value) => {
+        setPeerView(normalizePeerView(value));
+    }, []);
+
+    const handleChangeMeshGroupLimit = useCallback((value) => {
+        setMeshGroupLimit(normalizeMeshGroupLimit(value));
+    }, []);
+
     const handleRemoveStarter = useCallback(() => {
         setStarterMode('none');
         setStarterSource(null);
@@ -258,7 +299,7 @@ const useTeacherAssignment = ({
                 }
             }
 
-            const payload = buildAssignmentPayload(editorPages, starterMode);
+            const payload = buildAssignmentPayload(editorPages, starterMode, startFromPrevious, peerView);
             const result = await classroomAPI.setAssignment(idToken, selectedClassroom.classroomId, payload);
 
             // Upload newly attached images / starter to the presigned URLs.
@@ -285,6 +326,14 @@ const useTeacherAssignment = ({
             }
             await Promise.all(uploads);
 
+            if (meshGroupLimit !== normalizeMeshGroupLimit(selectedClassroom.meshGroupLimit)) {
+                const { classroomId } = selectedClassroom;
+                await classroomAPI.updateClassroom(idToken, classroomId, { meshGroupLimit });
+                const apply = (c) => (c && c.classroomId === classroomId ? { ...c, meshGroupLimit } : c);
+                if (setSelectedClassroom) setSelectedClassroom(apply);
+                if (setClassrooms) setClassrooms((prev) => prev.map(apply));
+            }
+
             releasePreviews(editorPages);
             setStarterSource(null);
             // Embedded in the description tab: reload the saved content so
@@ -305,6 +354,9 @@ const useTeacherAssignment = ({
         editorPages,
         starterMode,
         starterSource,
+        startFromPrevious,
+        peerView,
+        meshGroupLimit,
         vm,
         clearError,
         showError,
@@ -312,6 +364,8 @@ const useTeacherAssignment = ({
         setPhase,
         handleTeacher401,
         releasePreviews,
+        setSelectedClassroom,
+        setClassrooms,
     ]);
 
     const handleCancelAssignmentEdit = useCallback(() => {
@@ -328,6 +382,9 @@ const useTeacherAssignment = ({
         starterSource,
         hasExistingStarter,
         isSaving,
+        startFromPrevious,
+        peerView,
+        meshGroupLimit,
         loadAssignmentEditor,
         handleAddPage,
         handleRemovePage,
@@ -338,6 +395,9 @@ const useTeacherAssignment = ({
         handleUseCurrentProjectAsStarter,
         handleUseFileAsStarter,
         handleRemoveStarter,
+        handleChangeStartFromPrevious,
+        handleChangePeerView,
+        handleChangeMeshGroupLimit,
         handleSaveAssignment,
         handleCancelAssignmentEdit,
         handleApplyTemplate,

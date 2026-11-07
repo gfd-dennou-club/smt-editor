@@ -3,13 +3,17 @@ import PropTypes from 'prop-types';
 import React from 'react';
 
 import ErrorDisplay from './error-display.jsx';
+import StudentContinueChoice from './student-continue-choice.jsx';
+import StudentPeerViewButton from './student-peer-view-button.jsx';
 
 import { formatStudentClassName } from '../../lib/classroom-class-label.js';
 import styles from './classroom-modal.css';
 
 const StudentStatusView = ({
     classroomState,
+    continueOptions,
     hasAssignment,
+    loadedChoice,
     teacherComment,
     isLoading,
     error,
@@ -19,6 +23,7 @@ const StudentStatusView = ({
     onOpenAssignment,
     onRefreshStudentStatus,
     onLeaveClassroom,
+    onLoadSubmission,
     onStartSubmit,
 }) => (
     <div data-testid="classroom-phase-student-status">
@@ -183,6 +188,14 @@ const StudentStatusView = ({
                 />
             </div>
         )}
+        {/* Load a submitted project later on (#1201); the starter lives in "View Assignment". */}
+        <StudentContinueChoice
+            continueOptions={continueOptions}
+            isLoading={isLoading}
+            loadedChoice={loadedChoice}
+            titleKind="load"
+            onLoadSubmission={onLoadSubmission}
+        />
         <div className={styles.statusFooter}>
             <button
                 className={styles.secondaryButton}
@@ -210,6 +223,7 @@ const StudentStatusView = ({
                     />
                 </button>
             )}
+            <StudentPeerViewButton disabled={isLoading} />
             <button
                 className={styles.primaryButton}
                 data-testid="classroom-submit-button"
@@ -242,13 +256,16 @@ const StudentStatusView = ({
 
 StudentStatusView.propTypes = {
     classroomState: PropTypes.object.isRequired,
+    continueOptions: PropTypes.object,
     error: PropTypes.string,
     errorActionHandler: PropTypes.func,
     errorActionLabel: PropTypes.string,
     errorTitle: PropTypes.string,
     hasAssignment: PropTypes.bool,
     isLoading: PropTypes.bool,
+    loadedChoice: PropTypes.string,
     onLeaveClassroom: PropTypes.func.isRequired,
+    onLoadSubmission: PropTypes.func,
     onOpenAssignment: PropTypes.func,
     onRefreshStudentStatus: PropTypes.func.isRequired,
     onStartSubmit: PropTypes.func.isRequired,

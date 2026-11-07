@@ -9,6 +9,26 @@ import reducer, {
     clearSubmissionThumbnail,
     setTeacherSelection,
     clearTeacherSelection,
+    setTeacherLoggedIn,
+    setTeacherUnreadCount,
+    setTeacherLastSelection,
+    requestTeacherNavigation,
+    clearTeacherNavigation,
+    setTeacherKickRequests,
+    removeTeacherKickRequest,
+    openTeacherKickList,
+    closeTeacherKickList,
+    openTeacherPanel,
+    closeTeacherPanel,
+    setStudentPeerView,
+    openStudentPeerPanel,
+    closeStudentPeerPanel,
+    requestMeshConnect,
+    clearMeshConnectRequest,
+    setStudentGenai,
+    setRubyteeEnabled,
+    selectRubyteeAvailable,
+    selectRubyteeUsage,
 } from '../../../src/reducers/classroom';
 
 const STORAGE_KEY = 'smalruby:classroom';
@@ -366,6 +386,305 @@ describe('classroom reducer', () => {
             // Malformed legacy data should still be cleared so it stops surfacing.
             expect(window.sessionStorage.getItem(STORAGE_KEY)).toBeNull();
             expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
+        });
+    });
+
+    describe('teacher kick requests (#1200)', () => {
+        test('stores, removes and resets pending kick requests', () => {
+            let state = reducer(classroomInitialState, setTeacherLoggedIn(true));
+            state = reducer(state, setTeacherKickRequests([{ requestId: 'a' }, { requestId: 'b' }]));
+            state = reducer(state, removeTeacherKickRequest('a'));
+            expect(state.teacherKickRequests).toEqual([{ requestId: 'b' }]);
+            state = reducer(state, openTeacherKickList());
+            expect(state.teacherKickListOpen).toBe(true);
+            state = reducer(state, closeTeacherKickList());
+            expect(state.teacherKickListOpen).toBe(false);
+            state = reducer(reducer(state, openTeacherKickList()), setTeacherLoggedIn(false));
+            expect(state.teacherKickRequests).toEqual([]);
+            expect(state.teacherKickListOpen).toBe(false);
+        });
+
+        test('approving a request also drops the other requests for the same seat', () => {
+            let state = reducer(
+                classroomInitialState,
+                setTeacherKickRequests([
+                    { requestId: 'a', classroomId: 'c1', seatNumber: 3 },
+                    { requestId: 'b', classroomId: 'c1', seatNumber: 3 },
+                    { requestId: 'c', classroomId: 'c1', seatNumber: 4 },
+                    { requestId: 'd', classroomId: 'c2', seatNumber: 3 },
+                ]),
+            );
+            state = reducer(state, removeTeacherKickRequest('a', { classroomId: 'c1', seatNumber: 3 }));
+            expect(state.teacherKickRequests.map((r) => r.requestId)).toEqual(['c', 'd']);
+        });
+    });
+
+    describe('student peer view (#1210)', () => {
+        const session = (classroomId) =>
+            setClassroomSession({
+                role: 'student',
+                classroomId,
+                className: 'A',
+                assignmentName: 'X',
+                joinCode: 'ABC123',
+                seatNumber: 3,
+                memberId: 'seat-03',
+                sessionToken: 'st',
+            });
+
+        test('remembers the setting and opens / closes the panel', () => {
+            let state = reducer(classroomInitialState, session('c1'));
+            expect(state.studentPeerView).toBeNull();
+            state = reducer(state, setStudentPeerView('afterSubmit'));
+            expect(state.studentPeerView).toBe('afterSubmit');
+            state = reducer(state, openStudentPeerPanel());
+            expect(state.studentPeerPanelOpen).toBe(true);
+            state = reducer(state, closeStudentPeerPanel());
+            expect(state.studentPeerPanelOpen).toBe(false);
+        });
+
+        test('forgets the setting and closes the panel on leaving or joining another class', () => {
+            let state = reducer(classroomInitialState, session('c1'));
+            state = reducer(reducer(state, setStudentPeerView('always')), openStudentPeerPanel());
+            const moved = reducer(state, session('c2'));
+            expect(moved.studentPeerView).toBeNull();
+            expect(moved.studentPeerPanelOpen).toBe(false);
+            const same = reducer(state, session('c1'));
+            expect(same.studentPeerView).toBe('always');
+            const left = reducer(state, clearClassroomSession());
+            expect(left.studentPeerView).toBeNull();
+            expect(left.studentPeerPanelOpen).toBe(false);
+        });
+
+        test('does not persist the setting', () => {
+            const state = reducer(reducer(classroomInitialState, session('c1')), setStudentPeerView('always'));
+            expect(state.studentPeerView).toBe('always');
+            expect(window.localStorage.getItem(STORAGE_KEY)).not.toContain('peerView');
+        });
+    });
+
+    describe('teacher status panel (#1203)', () => {
+        test('opens, closes and resets on logout', () => {
+            let state = reducer(classroomInitialState, setTeacherLoggedIn(true));
+            expect(state.teacherPanelOpen).toBe(false);
+            state = reducer(state, openTeacherPanel());
+            expect(state.teacherPanelOpen).toBe(true);
+            state = reducer(state, closeTeacherPanel());
+            expect(state.teacherPanelOpen).toBe(false);
+            state = reducer(reducer(state, openTeacherPanel()), setTeacherLoggedIn(false));
+            expect(state.teacherPanelOpen).toBe(false);
+        });
+
+        test('a navigation request can carry the member to show', () => {
+            let state = reducer(classroomInitialState, requestTeacherNavigation('current-assignment', 'seat-03'));
+            expect(state.teacherNavTarget).toBe('current-assignment');
+            expect(state.teacherNavMemberId).toBe('seat-03');
+            state = reducer(state, clearTeacherNavigation());
+            expect(state.teacherNavMemberId).toBeNull();
+            state = reducer(state, requestTeacherNavigation('class-list'));
+            expect(state.teacherNavMemberId).toBeNull();
+        });
+    });
+
+    describe('teacher login state (#1199)', () => {
+        test('starts logged out', () => {
+            expect(classroomInitialState.teacherLoggedIn).toBe(false);
+            expect(classroomInitialState.teacherUnreadCount).toBe(0);
+            expect(classroomInitialState.teacherNavTarget).toBeNull();
+        });
+
+        test('records login, unread count and last selection', () => {
+            let state = reducer(classroomInitialState, setTeacherLoggedIn(true));
+            state = reducer(state, setTeacherUnreadCount(2));
+            state = reducer(state, setTeacherLastSelection({ classroomId: 'c1', groupId: 'g1' }));
+            expect(state.teacherLoggedIn).toBe(true);
+            expect(state.teacherUnreadCount).toBe(2);
+            expect(state.teacherLastSelection).toEqual({ classroomId: 'c1', groupId: 'g1' });
+        });
+
+        test('logging out resets the teacher-only state', () => {
+            const loggedIn = {
+                ...classroomInitialState,
+                teacherLoggedIn: true,
+                teacherUnreadCount: 3,
+                teacherLastSelection: { classroomId: 'c1', groupId: 'g1' },
+                teacherNavTarget: 'class-list',
+            };
+            const state = reducer(loggedIn, setTeacherLoggedIn(false));
+            expect(state.teacherLoggedIn).toBe(false);
+            expect(state.teacherUnreadCount).toBe(0);
+            expect(state.teacherLastSelection).toBeNull();
+            expect(state.teacherNavTarget).toBeNull();
+        });
+
+        test('a navigation request opens the teacher modal until handled', () => {
+            let state = reducer(classroomInitialState, requestTeacherNavigation('current-assignment'));
+            expect(state.teacherModalVisible).toBe(true);
+            expect(state.teacherNavTarget).toBe('current-assignment');
+            state = reducer(state, clearTeacherNavigation());
+            expect(state.teacherNavTarget).toBeNull();
+            expect(state.teacherModalVisible).toBe(true);
+        });
+
+        test('loads the last selection from the persisted teacher login', () => {
+            jest.resetModules();
+            window.localStorage.setItem(
+                'smalruby:classroomTeacher',
+                JSON.stringify({ provider: 'google', classroomId: 'c9', groupId: 'g9' }),
+            );
+            const { classroomInitialState: fresh } = require('../../../src/reducers/classroom');
+            expect(fresh.teacherLastSelection).toEqual({ classroomId: 'c9', groupId: 'g9' });
+            expect(fresh.teacherLoggedIn).toBe(false);
+        });
+    });
+
+    describe('mesh connect request (#1251)', () => {
+        test('initial state has no pending request', () => {
+            expect(classroomInitialState.meshConnectPending).toBe(false);
+        });
+
+        test('should request and clear the mesh connection modal', () => {
+            const requested = reducer(classroomInitialState, requestMeshConnect());
+            expect(requested.meshConnectPending).toBe(true);
+            expect(reducer(requested, clearMeshConnectRequest()).meshConnectPending).toBe(false);
+        });
+
+        test('should drop the request when leaving the class', () => {
+            const requested = reducer(classroomInitialState, requestMeshConnect());
+            expect(reducer(requested, clearClassroomSession()).meshConnectPending).toBe(false);
+        });
+    });
+    describe('student generative AI setting (#1279)', () => {
+        const session = {
+            role: 'student',
+            classroomId: 'class-123',
+            className: '2年A組',
+            assignmentName: '宿題1',
+            joinCode: 'abc234',
+            seatNumber: 5,
+            memberId: 'seat-05',
+            sessionToken: 'token-abc',
+        };
+        const gemini = { enabled: true, service: 'gemini', url: 'https://gemini.google.com/app' };
+
+        test('initial state is disabled', () => {
+            expect(classroomInitialState.studentGenai).toEqual({ enabled: false, service: null, url: null });
+        });
+
+        test('should set the class setting and persist it with the session', () => {
+            const joined = reducer(classroomInitialState, setClassroomSession(session));
+            const state = reducer(joined, setStudentGenai(gemini));
+            expect(state.studentGenai).toEqual(gemini);
+            expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY)).studentGenai).toEqual(gemini);
+        });
+
+        test('should read a URL that is not https as disabled', () => {
+            const state = reducer(
+                classroomInitialState,
+                setStudentGenai({ enabled: true, service: 'other', url: 'http://x.example/' }),
+            );
+            expect(state.studentGenai.enabled).toBe(false);
+        });
+
+        test('should keep the setting when the session of the same class is set again', () => {
+            const joined = reducer(classroomInitialState, setClassroomSession(session));
+            const enabled = reducer(joined, setStudentGenai(gemini));
+            const again = reducer(enabled, setClassroomSession(session));
+            expect(again.studentGenai).toEqual(gemini);
+            expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY)).studentGenai).toEqual(gemini);
+        });
+
+        test('should drop the setting when moving to another class or leaving', () => {
+            const enabled = reducer(
+                reducer(classroomInitialState, setClassroomSession(session)),
+                setStudentGenai(gemini),
+            );
+            const other = reducer(enabled, setClassroomSession({ ...session, classroomId: 'class-999' }));
+            expect(other.studentGenai.enabled).toBe(false);
+            expect(reducer(enabled, clearClassroomSession()).studentGenai.enabled).toBe(false);
+        });
+    });
+
+    describe('rubytee per class (#1278)', () => {
+        const join = (extra = {}) =>
+            setClassroomSession({
+                role: 'student',
+                classroomId: 'class-123',
+                className: '2年A組',
+                seatNumber: 5,
+                memberId: 'seat-05',
+                sessionToken: 'token-abc',
+                ...extra,
+            });
+        const asRoot = (classroom) => ({ scratchGui: { classroom } });
+
+        test('initial state has rubytee off', () => {
+            expect(classroomInitialState.rubyteeEnabled).toBe(false);
+        });
+
+        test('takes the setting from the join and persists it', () => {
+            const state = reducer(classroomInitialState, join({ rubyteeEnabled: true }));
+            expect(state.rubyteeEnabled).toBe(true);
+            expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY)).rubyteeEnabled).toBe(true);
+        });
+
+        test('treats a join without the setting as off', () => {
+            const state = reducer({ ...classroomInitialState, rubyteeEnabled: true }, join());
+            expect(state.rubyteeEnabled).toBe(false);
+        });
+
+        test('follows a changed setting from verify-session and persists it', () => {
+            const joined = reducer(classroomInitialState, join({ rubyteeEnabled: true }));
+            const state = reducer(joined, setRubyteeEnabled(false));
+            expect(state.rubyteeEnabled).toBe(false);
+            expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY)).rubyteeEnabled).toBe(false);
+        });
+
+        test('restores the setting from a stored session', () => {
+            jest.resetModules();
+            window.localStorage.setItem(
+                STORAGE_KEY,
+                JSON.stringify({ sessionToken: 't', classroomId: 'c1', seatNumber: 3, rubyteeEnabled: true }),
+            );
+            const { classroomInitialState: fresh } = require('../../../src/reducers/classroom');
+            expect(fresh.rubyteeEnabled).toBe(true);
+        });
+
+        test('turns off when leaving the class', () => {
+            const joined = reducer(classroomInitialState, join({ rubyteeEnabled: true }));
+            expect(reducer(joined, clearClassroomSession()).rubyteeEnabled).toBe(false);
+        });
+
+        test('is available only to a joined student of an enabled class', () => {
+            expect(selectRubyteeAvailable(asRoot(classroomInitialState))).toBe(false);
+            const off = reducer(classroomInitialState, join({ rubyteeEnabled: false }));
+            expect(selectRubyteeAvailable(asRoot(off))).toBe(false);
+            const on = reducer(classroomInitialState, join({ rubyteeEnabled: true }));
+            expect(selectRubyteeAvailable(asRoot(on))).toBe(true);
+        });
+
+        test('is not available to a teacher who has a class open', () => {
+            const teacher = reducer(
+                classroomInitialState,
+                setTeacherSelection({ classroomId: 'class-123', joinCode: 'ABC234' }),
+            );
+            expect(selectRubyteeAvailable(asRoot({ ...teacher, rubyteeEnabled: true }))).toBe(false);
+        });
+
+        test('gives the class and seat to record with each request', () => {
+            const on = reducer(classroomInitialState, join({ rubyteeEnabled: true }));
+            expect(selectRubyteeUsage(asRoot(on))).toEqual({ classroom: 'class-123', seat: '5' });
+            expect(selectRubyteeUsage(asRoot(classroomInitialState))).toBeNull();
+        });
+
+        test('gives back the same usage object while the class and seat stay the same', () => {
+            const on = reducer(classroomInitialState, join({ rubyteeEnabled: true }));
+            const first = selectRubyteeUsage(asRoot(on));
+            expect(selectRubyteeUsage(asRoot({ ...on, studentPeerView: null }))).toBe(first);
+            expect(selectRubyteeUsage(asRoot({ ...on, seatNumber: 6 }))).toEqual({
+                classroom: 'class-123',
+                seat: '6',
+            });
         });
     });
 });

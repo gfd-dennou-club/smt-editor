@@ -2,6 +2,9 @@ import { FormattedMessage } from 'react-intl';
 import PropTypes from 'prop-types';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { isMemberSeated } from '../../lib/classroom-presence.js';
+import ClassroomStatusIcon from './classroom-status-icon.jsx';
+
 import styles from './classroom-modal.css';
 
 const TeacherMemberDetail = ({
@@ -12,6 +15,7 @@ const TeacherMemberDetail = ({
     onDeleteMember,
     onOpenSubmission,
     onReturnSubmission,
+    onSetHiddenFromPeers,
     kickRequestsForSelectedSeat,
     onApproveKickRequest,
     onRejectKickRequest,
@@ -56,6 +60,16 @@ const TeacherMemberDetail = ({
         );
     }, [selectedMember, memberMap, commentText, onReturnSubmission]);
 
+    const handleHideFromPeersChange = useCallback(
+        (e) => {
+            const submissionId = memberMap[selectedMember]?.submissionId;
+            if (submissionId && onSetHiddenFromPeers) {
+                onSetHiddenFromPeers(submissionId, e.target.checked);
+            }
+        },
+        [selectedMember, memberMap, onSetHiddenFromPeers],
+    );
+
     const handleCommentChange = useCallback((e) => {
         setCommentText(e.target.value);
     }, []);
@@ -92,12 +106,7 @@ const TeacherMemberDetail = ({
         });
     }, [memberMap, selectedMember]);
 
-    const isSeated = useCallback((member) => {
-        if (!member || !member.lastActiveAt) return false;
-        const elapsed =
-            Date.now() - new Date(member.lastActiveAt).getTime();
-        return elapsed < 60 * 60 * 1000; // 1 hour
-    }, []);
+    const isSeated = useCallback((member) => isMemberSeated(member), []);
 
     // Clamp image index if images changed (e.g. re-submission with fewer screenshots)
     useEffect(() => {
@@ -159,12 +168,29 @@ const TeacherMemberDetail = ({
                             }
                             data-testid="classroom-member-detail-submitted"
                         >
-                            {selectedMemberData.isReturned
-                                ? '↩ '
-                                : '✓ '}
+                            <ClassroomStatusIcon
+                                status={
+                                    selectedMemberData.isReturned
+                                        ? 'returned'
+                                        : 'submitted'
+                                }
+                            />{' '}
                             {new Date(
                                 selectedMemberData.submittedAt,
                             ).toLocaleTimeString()}
+                        </span>
+                    )}
+                    {!selectedMemberData.hasSubmission && (
+                        <span
+                            className={styles.notSubmittedBadge}
+                            data-testid="classroom-member-detail-not-submitted"
+                        >
+                            <ClassroomStatusIcon status="notSubmitted" />{' '}
+                            <FormattedMessage
+                                defaultMessage="Not submitted"
+                                description="Student has not submitted yet (member detail)"
+                                id="gui.classroom.teacherDetail.notSubmitted"
+                            />
                         </span>
                     )}
                     <span
@@ -175,6 +201,13 @@ const TeacherMemberDetail = ({
                         }
                         data-testid="classroom-member-detail-seated"
                     >
+                        <ClassroomStatusIcon
+                            status={
+                                selectedMemberData.isSeated
+                                    ? 'seated'
+                                    : 'notSeated'
+                            }
+                        />{' '}
                         {selectedMemberData.isSeated ? (
                             <FormattedMessage
                                 defaultMessage="Seated"
@@ -208,6 +241,7 @@ const TeacherMemberDetail = ({
                         data-testid="classroom-member-kick-request-panel"
                     >
                         <div className={styles.kickRequestPanelTitle}>
+                            <ClassroomStatusIcon status="kickRequested" />{' '}
                             <FormattedMessage
                                 defaultMessage="{count, plural, one {# kick request from a student} other {# kick requests from students}}"
                                 description="Header in the member-detail panel listing pending kick requests"
@@ -361,6 +395,24 @@ const TeacherMemberDetail = ({
                                 />
                             </button>
                         )}
+                        {/* Peer view (#1208): keep an inappropriate submission
+                            out of what classmates can see. */}
+                        {onSetHiddenFromPeers && selectedMemberData.submissionId && (
+                            <label className={styles.hideFromPeers}>
+                                <input
+                                    checked={!!selectedMemberData.hiddenFromPeers}
+                                    data-testid="classroom-member-detail-hide-from-peers"
+                                    disabled={isLoading}
+                                    type="checkbox"
+                                    onChange={handleHideFromPeersChange}
+                                />
+                                <FormattedMessage
+                                    defaultMessage="Don't show to other students"
+                                    description="Member detail: exclude this submission from peer view"
+                                    id="gui.classroom.teacherDetail.hideFromPeers"
+                                />
+                            </label>
+                        )}
                         {/* Comment + Return */}
                         <div className={styles.commentSection}>
                             <textarea
@@ -472,6 +524,7 @@ TeacherMemberDetail.propTypes = {
     onOpenSubmission: PropTypes.func.isRequired,
     onRejectKickRequest: PropTypes.func,
     onReturnSubmission: PropTypes.func.isRequired,
+    onSetHiddenFromPeers: PropTypes.func,
     selectedMember: PropTypes.string,
 };
 

@@ -82,6 +82,137 @@ describe('TeacherClassDetail — Google Classroom post button', () => {
     });
 });
 
+// Sharing posts course work with the pressing teacher's own Google account, so
+// a class co-teacher who is not a teacher of the linked course cannot share —
+// and one on a personal Google account never can. Blocked by default, with a
+// check the genuine Google Classroom co-teacher can run themselves.
+describe('TeacherClassDetail — Google Classroom share gate (issue #1184)', () => {
+    const linkedProps = (googleCourseAccess, groupOver = {}) => ({
+        selectedClassroom: classroom({ googleClassroomCourseId: null }),
+        group: { groupId: 'g1', googleClassroomCourseId: 'course-123', ...groupOver },
+        googleCourseAccess: googleCourseAccess && { groupId: 'g1', ...googleCourseAccess },
+        onVerifyGoogleCourseAccess: jest.fn(),
+    });
+    const postButton = () => document.querySelector('[data-testid="classroom-post-assignment"]');
+    const blockedNote = () => document.querySelector('[data-testid="classroom-post-assignment-blocked"]');
+    const verifyButton = () => document.querySelector('[data-testid="classroom-post-assignment-verify"]');
+
+    // The teacher in the bug report had never granted Google access, so the
+    // probe could not run at all: this is the state they open the class in.
+    test('disables the share button from the start for a teacher who did not link the course', () => {
+        renderDetail(linkedProps(null, { googleClassroomLinkedByEmail: 'owner@example.com' }));
+        expect(postButton()).toBeDisabled();
+        expect(blockedNote()).toBeInTheDocument();
+        expect(blockedNote().textContent).toContain('owner@example.com');
+        expect(verifyButton()).toBeInTheDocument();
+    });
+
+    test('keeps it disabled when the silent check could not tell', () => {
+        renderDetail(linkedProps({ status: 'unknown', linkedByEmail: 'owner@example.com' }));
+        expect(postButton()).toBeDisabled();
+        expect(verifyButton()).toBeInTheDocument();
+    });
+
+    test('stays generic rather than guessing when the linking teacher is unknown', () => {
+        renderDetail(linkedProps({ status: 'notTeacher', linkedByEmail: null }));
+        expect(postButton()).toBeDisabled();
+        expect(blockedNote().textContent).toContain('another teacher');
+    });
+
+    test('keeps the share button usable for the teacher who linked the course', () => {
+        renderDetail(linkedProps(null, { googleClassroomLinkedByMe: true }));
+        expect(postButton()).not.toBeDisabled();
+        expect(blockedNote()).not.toBeInTheDocument();
+    });
+
+    test('keeps the share button usable for a proven teacher of the course', () => {
+        renderDetail(linkedProps({ status: 'teacher', linkedByEmail: 'owner@example.com' }));
+        expect(postButton()).not.toBeDisabled();
+        expect(blockedNote()).not.toBeInTheDocument();
+    });
+
+    test('the check asks the container to verify this class', () => {
+        const props = linkedProps(null);
+        renderDetail(props);
+        fireEvent.click(verifyButton());
+        expect(props.onVerifyGoogleCourseAccess).toHaveBeenCalledWith(props.group);
+    });
+
+    // A check that came back negative must read as a result, and must not
+    // offer the same popup again — Google's answer will not change.
+    test('reports a failed check in place and stops offering it', () => {
+        renderDetail(linkedProps({ status: 'notTeacher', linkedByEmail: 'owner@example.com', verifyFailed: true }));
+        expect(blockedNote().textContent).toContain('could not confirm');
+        expect(blockedNote().textContent).toContain('owner@example.com');
+        expect(verifyButton()).not.toBeInTheDocument();
+    });
+
+    // Consent dismissed / Google unreachable: still blocked, still retryable,
+    // and reported here rather than in an error banner.
+    test('keeps the check available when it failed without an answer', () => {
+        renderDetail(linkedProps({ status: 'unknown', linkedByEmail: null, verifyFailed: true }));
+        expect(blockedNote().textContent).toContain('could not confirm');
+        expect(verifyButton()).toBeInTheDocument();
+    });
+
+    test('shows the check as running while it is in flight', () => {
+        renderDetail({ ...linkedProps(null), isVerifyingGoogleCourseAccess: true });
+        expect(verifyButton()).toBeDisabled();
+        expect(verifyButton().textContent).toContain('Checking');
+    });
+
+    test('falls back to the class attribution when the probe carries no email', () => {
+        renderDetail(
+            linkedProps(
+                { status: 'notTeacher', linkedByEmail: null },
+                {
+                    googleClassroomLinkedByEmail: 'linker@example.com',
+                },
+            ),
+        );
+        expect(blockedNote().textContent).toContain('linker@example.com');
+    });
+
+    // The probe is async, so switching classes leaves the previous class's
+    // verdict in state until the new answer lands (and answers can arrive out
+    // of order). It must not decide anything about a class it was not about —
+    // including lifting the block.
+    test('ignores a verdict that was about a different class', () => {
+        renderDetail({
+            selectedClassroom: classroom({ googleClassroomCourseId: null }),
+            group: { groupId: 'gB', googleClassroomCourseId: 'course-B' },
+            googleCourseAccess: { groupId: 'gA', status: 'teacher', linkedByEmail: 'a@example.com' },
+        });
+        expect(postButton()).toBeDisabled();
+    });
+
+    // Pre-v2 classes link Google Classroom on the assignment with nobody
+    // recorded as the linker, so the default block would lock out the owner.
+    test('keeps the old proof-only rule when only the assignment is linked', () => {
+        renderDetail({
+            selectedClassroom: classroom({ googleClassroomCourseId: 'course-123' }),
+            group: { groupId: 'g1', googleClassroomCourseId: null },
+        });
+        expect(postButton()).not.toBeDisabled();
+        expect(blockedNote()).not.toBeInTheDocument();
+    });
+
+    // Once the assignment is posted the share button becomes an "open it"
+    // link, so "ask someone to share it" would be telling the teacher to
+    // redo something that is already done.
+    test('does not explain how to share an assignment that is already shared', () => {
+        renderDetail({
+            selectedClassroom: classroom({
+                googleClassroomAlternateLink: 'https://classroom.google.com/c/x/a/y',
+            }),
+            group: { groupId: 'g1', googleClassroomCourseId: 'course-123' },
+            googleCourseAccess: { groupId: 'g1', status: 'notTeacher', linkedByEmail: 'owner@example.com' },
+        });
+        expect(document.querySelector('[data-testid="classroom-view-assignment"]')).toBeInTheDocument();
+        expect(blockedNote()).not.toBeInTheDocument();
+    });
+});
+
 describe('TeacherClassDetail — retention banner (issue #1052)', () => {
     const DAY = 24 * 60 * 60 * 1000;
     const inDays = (days) => new Date(Date.now() + days * DAY).toISOString();
@@ -135,5 +266,221 @@ describe('TeacherClassDetail — retention banner (issue #1052)', () => {
             onOpenShareSuggestion,
         });
         expect(byTestId('classroom-share-suggestion-banner')).not.toBeInTheDocument();
+    });
+});
+
+describe('TeacherClassDetail — member grid status icons (#1196)', () => {
+    const recent = () => new Date(Date.now() - 60 * 1000).toISOString();
+    const old = () => new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+
+    const cellStatuses = (seat) =>
+        Array.from(document.querySelectorAll(`[data-testid="classroom-member-seat-0${seat}"] [role="img"]`)).map(
+            (el) => el.dataset.status,
+        );
+
+    test('shows presence + submission icons per seat and a leave-request icon', () => {
+        renderDetail({
+            selectedClassroom: classroom({ studentCount: 3 }),
+            members: [
+                { memberId: 'seat-01', lastActiveAt: recent(), hasSubmission: true, submissionStatus: 'submitted' },
+                { memberId: 'seat-02', lastActiveAt: old(), hasSubmission: true, submissionStatus: 'returned' },
+            ],
+            kickRequestsBySeat: { 2: [{ requestId: 'r1' }] },
+        });
+        fireEvent.click(document.querySelector('[data-testid="classroom-tab-members"]'));
+        expect(cellStatuses(1)).toEqual(['seated', 'submitted']);
+        expect(cellStatuses(2)).toEqual(['notSeated', 'returned', 'kickRequested']);
+        expect(cellStatuses(3)).toEqual(['notJoined']);
+        expect(document.querySelector('[data-testid="classroom-seat-kick-request-2"]')).toBeInTheDocument();
+    });
+
+    test('renders the icon legend', () => {
+        renderDetail({ members: [] });
+        fireEvent.click(document.querySelector('[data-testid="classroom-tab-members"]'));
+        const legend = document.querySelector('[data-testid="classroom-status-legend"]');
+        expect(legend).toBeInTheDocument();
+        expect(legend.querySelectorAll('[role="img"]')).toHaveLength(7);
+    });
+});
+
+describe('TeacherClassDetail — entry tab (teacher review on #1199)', () => {
+    // CSS modules are mocked out, so the visible tab is observed through the
+    // tab reported to the container (it drives the members polling).
+    test('opens on the members tab by default', () => {
+        const onDetailTabChange = jest.fn();
+        renderDetail({ onDetailTabChange });
+        expect(onDetailTabChange).toHaveBeenLastCalledWith('members');
+    });
+
+    test('opens on the description tab when asked (just-created assignment)', () => {
+        const onDetailTabChange = jest.fn();
+        renderDetail({ onDetailTabChange, detailEntry: { tab: 'description', seq: 1 } });
+        expect(onDetailTabChange).toHaveBeenLastCalledWith('description');
+    });
+
+    test('reopening the assignment on screen resets the tab', () => {
+        const onDetailTabChange = jest.fn();
+        const props = { ...defaultProps(), onDetailTabChange, detailEntry: { tab: 'description', seq: 1 } };
+        const { rerender } = render(
+            <IntlProvider locale="en">
+                <TeacherClassDetail {...props} />
+            </IntlProvider>,
+        );
+        expect(onDetailTabChange).toHaveBeenLastCalledWith('description');
+        rerender(
+            <IntlProvider locale="en">
+                <TeacherClassDetail {...props} detailEntry={{ tab: 'members', seq: 2 }} />
+            </IntlProvider>,
+        );
+        expect(onDetailTabChange).toHaveBeenLastCalledWith('members');
+    });
+});
+
+describe('TeacherClassDetail — 前回の提出物から始めさせる (#1202)', () => {
+    const editor = (over = {}) => ({
+        editorPages: [{ text: '続きを作ろう' }],
+        starterMode: 'keep',
+        starterSource: null,
+        hasExistingStarter: true,
+        isSaving: false,
+        startFromPrevious: false,
+        onAddPage: jest.fn(),
+        onAttachPageImage: jest.fn(),
+        onChangePageText: jest.fn(),
+        onChangeStartFromPrevious: jest.fn(),
+        onMovePage: jest.fn(),
+        onRemovePage: jest.fn(),
+        onRemovePageImage: jest.fn(),
+        onRemoveStarter: jest.fn(),
+        onSave: jest.fn(),
+        onUseCurrentProject: jest.fn(),
+        onUseFile: jest.fn(),
+        ...over,
+    });
+    const renderDescription = (over) =>
+        renderDetail({ assignmentEditor: editor(over), detailEntry: { tab: 'description', seq: 1 } });
+    const byTestId = (id) => document.querySelector(`[data-testid="${id}"]`);
+
+    test('説明タブに設定のチェックボックス (既定 OFF) を出し、切り替えを伝える', () => {
+        const onChangeStartFromPrevious = jest.fn();
+        renderDescription({ onChangeStartFromPrevious });
+        const checkbox = byTestId('classroom-assignment-start-from-previous');
+        expect(checkbox).not.toBeChecked();
+        fireEvent.click(checkbox);
+        expect(onChangeStartFromPrevious).toHaveBeenCalledWith(true);
+    });
+
+    test('ON のときはチェックされ、生徒視点プレビューに「前回の提出物から続けるのがおすすめ」と出す', () => {
+        renderDescription({ startFromPrevious: true });
+        expect(byTestId('classroom-assignment-start-from-previous')).toBeChecked();
+        expect(byTestId('classroom-description-preview-start')).toHaveTextContent(
+            "continuing from last time's submission is recommended",
+        );
+    });
+
+    test('OFF のときプレビューはスターター (無ければいまの作品) で始まると出す', () => {
+        renderDescription();
+        expect(byTestId('classroom-description-preview-start')).toHaveTextContent(
+            'start from the starter with a button',
+        );
+        document.body.innerHTML = '';
+        renderDescription({ starterMode: 'none' });
+        expect(byTestId('classroom-description-preview-start')).toHaveTextContent('start with the open project');
+    });
+});
+
+describe('TeacherClassDetail — 他者参照 (#1208)', () => {
+    const editor = (over = {}) => ({
+        editorPages: [{ text: 'みんなの作品を見よう' }],
+        starterMode: 'none',
+        starterSource: null,
+        hasExistingStarter: false,
+        isSaving: false,
+        startFromPrevious: false,
+        peerView: 'none',
+        onAddPage: jest.fn(),
+        onAttachPageImage: jest.fn(),
+        onChangePageText: jest.fn(),
+        onChangeStartFromPrevious: jest.fn(),
+        onChangePeerView: jest.fn(),
+        onMovePage: jest.fn(),
+        onRemovePage: jest.fn(),
+        onRemovePageImage: jest.fn(),
+        onRemoveStarter: jest.fn(),
+        onSave: jest.fn(),
+        onUseCurrentProject: jest.fn(),
+        onUseFile: jest.fn(),
+        ...over,
+    });
+    const byTestId = (id) => document.querySelector(`[data-testid="${id}"]`);
+
+    test('説明タブに 3 択の設定 (既定「しない」) を出し、変更を伝える', () => {
+        const onChangePeerView = jest.fn();
+        renderDetail({
+            assignmentEditor: editor({ onChangePeerView }),
+            detailEntry: { tab: 'description', seq: 1 },
+        });
+        const select = byTestId('classroom-assignment-peer-view');
+        expect(select).toHaveValue('none');
+        expect(Array.from(select.options).map((o) => o.value)).toEqual(['none', 'always', 'afterSubmit']);
+        fireEvent.change(select, { target: { value: 'afterSubmit' } });
+        expect(onChangePeerView).toHaveBeenCalledWith('afterSubmit');
+    });
+
+    test('保存済みの値を選択状態にする', () => {
+        renderDetail({
+            assignmentEditor: editor({ peerView: 'always' }),
+            detailEntry: { tab: 'description', seq: 1 },
+        });
+        expect(byTestId('classroom-assignment-peer-view')).toHaveValue('always');
+    });
+});
+
+describe('TeacherClassDetail — メッシュのグループの人数 (#1257)', () => {
+    const editor = (over = {}) => ({
+        editorPages: [{ text: 'みんなの作品を見よう' }],
+        starterMode: 'none',
+        starterSource: null,
+        hasExistingStarter: false,
+        isSaving: false,
+        startFromPrevious: false,
+        peerView: 'none',
+        meshGroupLimit: 0,
+        onChangeMeshGroupLimit: jest.fn(),
+        onAddPage: jest.fn(),
+        onAttachPageImage: jest.fn(),
+        onChangePageText: jest.fn(),
+        onChangeStartFromPrevious: jest.fn(),
+        onChangePeerView: jest.fn(),
+        onMovePage: jest.fn(),
+        onRemovePage: jest.fn(),
+        onRemovePageImage: jest.fn(),
+        onRemoveStarter: jest.fn(),
+        onSave: jest.fn(),
+        onUseCurrentProject: jest.fn(),
+        onUseFile: jest.fn(),
+        ...over,
+    });
+    const byTestId = (id) => document.querySelector(`[data-testid="${id}"]`);
+
+    test('この機能より前の課題 (0) は「制限なし」と表示し、変更を数値で伝える', () => {
+        const onChangeMeshGroupLimit = jest.fn();
+        renderDetail({
+            assignmentEditor: editor({ onChangeMeshGroupLimit }),
+            detailEntry: { tab: 'description', seq: 1 },
+        });
+        const select = byTestId('classroom-assignment-mesh-group-limit');
+        expect(select).toHaveValue('0');
+        expect(Array.from(select.options).map((o) => o.value)).toEqual(['6', '0']);
+        fireEvent.change(select, { target: { value: '6' } });
+        expect(onChangeMeshGroupLimit).toHaveBeenCalledWith(6);
+    });
+
+    test('保存済みの「6人まで」を選択状態にする', () => {
+        renderDetail({
+            assignmentEditor: editor({ meshGroupLimit: 6 }),
+            detailEntry: { tab: 'description', seq: 1 },
+        });
+        expect(byTestId('classroom-assignment-mesh-group-limit')).toHaveValue('6');
     });
 });

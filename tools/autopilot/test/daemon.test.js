@@ -9,14 +9,14 @@ const {
     parseSsoDeviceOutput, startReauth,
     updateClaudeUsage, boardResponse, statusResponse,
     checkForUpdate, startUpdateChecks,
-    patchBoardCache,
+    patchBoardCache, patchLaterCache, setLaterLabel,
     ensureCheckpointCommit, readContinuationFromWorktree, applyCheckpointHandling,
     collectContinuationContexts, checkpointEscalationBody,
     applyTrackerStickies, refreshBoardAndProjectTrackers,
     followBaseBranch,
 } = require('../src/daemon');
 const { EventEmitter } = require('node:events');
-const { HITL_LABEL, AUTOPILOT_LABEL, continuationMarker, TRACKER_STICKY_MARKER } = require('../src/phases');
+const { HITL_LABEL, AUTOPILOT_LABEL, LATER_LABEL, continuationMarker, TRACKER_STICKY_MARKER, directivesBlockDispatch } = require('../src/phases');
 
 /** Build an injectable double for markBlocked/detectStuck that records side effects. */
 function makeBlockDeps() {
@@ -62,6 +62,7 @@ test('applyMergeProgression: closes leaf with merged PR; skips not-merged/EPIC/t
     const state = { running: new Map() };
     await applyMergeProgression(items, makeCfg(), state, () => {}, {
         token: 't',
+        cleanupWorktree: async () => {},
         hasMergedPullRequest: (repo, issue) => mergedMap[issue],
         applyIntents: (ctx, itemId, intents) => {
             applied.push({ itemId, intents });
@@ -77,6 +78,34 @@ test('applyMergeProgression: closes leaf with merged PR; skips not-merged/EPIC/t
     assert.equal(m['AI Status'], null);
 });
 
+test('applyMergeProgression: Blocked + 🙋 の leaf も merge で Close へ進み 🙋 を外す（#1351）', async () => {
+    // PR 本文に Closes が無い（GitHub が Issue を閉じない）ケース: merge-progression だけが出口
+    const items = [{ issue: 1, itemId: 'i1', status: 'Blocked', kind: 'Issue', hitlLabel: true, aiStatus: 'Implementing' }];
+    const applied = [];
+    const closed = [];
+    const synced = [];
+    await applyMergeProgression(items, makeCfg(), { running: new Map() }, () => {}, {
+        token: 't',
+        cleanupWorktree: async () => {},
+        hasMergedPullRequest: () => true,
+        applyIntents: (ctx, itemId, intents) => {
+            applied.push({ itemId, intents });
+            return intents.map((i) => `${i.field}=${i.value}`);
+        },
+        closeIssue: (repo, issue) => closed.push(issue),
+        findItemId: () => 'x',
+        syncFaces: (item) => synced.push(item),
+    });
+    assert.equal(applied.length, 1);
+    const m = Object.fromEntries(applied[0].intents.map((i) => [i.field, i.value]));
+    assert.equal(m.Status, 'Close');
+    assert.equal(m['AI Status'], null);
+    assert.deepEqual(closed, [1]);
+    assert.equal(synced.length, 1);
+    assert.equal(synced[0].hitlLabel, false);
+    assert.equal(items[0].status, 'Close');
+});
+
 test('applyMergeProgression: also closes the GitHub issue (Fix A, #843)', async () => {
     // 非デフォルト base 宛て PR では GitHub の `Closes #N` 自動 close が効かないので、
     // leaf を Close へ前進させたら GitHub issue も明示 close する（冪等）。
@@ -89,6 +118,7 @@ test('applyMergeProgression: also closes the GitHub issue (Fix A, #843)', async 
     const state = { running: new Map() };
     await applyMergeProgression(items, makeCfg(), state, () => {}, {
         token: 't',
+        cleanupWorktree: async () => {},
         hasMergedPullRequest: (repo, issue) => mergedMap[issue],
         applyIntents: (ctx, itemId, intents) => intents.map((i) => `${i.field}=${i.value}`),
         findItemId: () => 'x',
@@ -96,6 +126,31 @@ test('applyMergeProgression: also closes the GitHub issue (Fix A, #843)', async 
         syncFaces: () => {},
     });
     assert.deepEqual(closed, [1]);
+});
+
+test('applyMergeProgression: 🧱 infra Issue は merge では閉じない（prod デプロイ後に workflow が閉じる）', async () => {
+    const items = [
+        { issue: 1, itemId: 'i1', status: 'Review', kind: 'Issue', labels: ['🧱 infra'] },
+        { issue: 2, itemId: 'i2', status: 'Review', kind: 'Issue', labels: [] },
+    ];
+    const closed = [];
+    const applied = [];
+    const state = { running: new Map() };
+    await applyMergeProgression(items, makeCfg(), state, () => {}, {
+        token: 't',
+        cleanupWorktree: async () => {},
+        hasMergedPullRequest: () => true,
+        applyIntents: (ctx, itemId, intents) => {
+            applied.push(itemId);
+            return intents.map((i) => `${i.field}=${i.value}`);
+        },
+        findItemId: () => 'x',
+        closeIssue: (repo, issue) => closed.push(issue),
+        syncFaces: () => {},
+    });
+    // Project はどちらも Close へ進めるが、GitHub の Issue を閉じるのは infra 以外だけ
+    assert.deepEqual(applied, ['i1', 'i2']);
+    assert.deepEqual(closed, [2]);
 });
 
 test('applyMergeProgression: a failing gh close does not abort the loop (#843)', async () => {
@@ -107,6 +162,7 @@ test('applyMergeProgression: a failing gh close does not abort the loop (#843)',
     const state = { running: new Map() };
     await applyMergeProgression(items, makeCfg(), state, () => {}, {
         token: 't',
+        cleanupWorktree: async () => {},
         hasMergedPullRequest: () => true,
         applyIntents: (ctx, itemId) => { applied.push(itemId); return []; },
         findItemId: () => 'x',
@@ -128,6 +184,7 @@ test('applyClosedReconcile: closed non-terminal items -> Status=Close + clear AI
     const state = { running: new Map() };
     await applyClosedReconcile(items, makeCfg(), state, () => {}, {
         token: 't',
+        cleanupWorktree: async () => {},
         listClosedIssueNumbers: () => new Set([738, 839, 900]),
         applyIntents: (ctx, itemId, intents) => { applied.push({ itemId, intents }); return []; },
         findItemId: () => 'x',
@@ -148,6 +205,7 @@ test('applyClosedReconcile: skips running items (does not fight a live phase)', 
     const state = { running: new Map([[839, { phase: 'review' }]]) };
     await applyClosedReconcile(items, makeCfg(), state, () => {}, {
         token: 't',
+        cleanupWorktree: async () => {},
         listClosedIssueNumbers: () => new Set([839]),
         applyIntents: (ctx, itemId) => { applied.push(itemId); return []; },
         findItemId: () => 'x',
@@ -179,6 +237,7 @@ test('applyClosedReconcile: one failing item does not block others', async () =>
     const state = { running: new Map() };
     await applyClosedReconcile(items, makeCfg(), state, () => {}, {
         token: 't',
+        cleanupWorktree: async () => {},
         listClosedIssueNumbers: () => new Set([1, 2]),
         applyIntents: (ctx, itemId) => {
             if (itemId === 'i1') throw new Error('boom');
@@ -197,6 +256,7 @@ test('applyMergeProgression: skips items currently running (does not fight a liv
     const state = { running: new Map([[1, { phase: 'review' }]]) };
     await applyMergeProgression(items, makeCfg(), state, () => {}, {
         token: 't',
+        cleanupWorktree: async () => {},
         hasMergedPullRequest: () => true,
         applyIntents: (ctx, itemId, intents) => {
             applied.push(intents);
@@ -217,6 +277,7 @@ test('applyMergeProgression: a failing merge check on one item does not block ot
     const state = { running: new Map() };
     await applyMergeProgression(items, makeCfg(), state, () => {}, {
         token: 't',
+        cleanupWorktree: async () => {},
         hasMergedPullRequest: (repo, issue) => {
             if (issue === 1) throw new Error('boom');
             return true;
@@ -250,6 +311,23 @@ test('applyPrProjection: Review handoff (HITL=Yes) -> ensure HITL label + Ready 
     assert.ok(issueEdit.add.includes(HITL_LABEL));
     // sticky upserted with marker
     assert.deepEqual(deps.calls.sticky, [{ prNumber: 100, hasMarker: true }]);
+});
+
+test('applyPrProjection: 🔬 spike は Issue 面だけに付け、PR 面には付けない（#1315）', async () => {
+    const { SPIKE_LABEL } = require('../src/phases');
+    // understand の質問 HITL（Blocked/Understanding + 🙋）。address-review 後の再理解などで PR がある場合
+    const items = [{ issue: 1, itemId: 'i1', status: 'Blocked', kind: 'Issue', hitlLabel: true, aiStatus: 'Understanding' }];
+    const deps = makeProjectionDeps({
+        prByIssue: { 1: { number: 100 } },
+        prInfo: { 100: { isDraft: true, labels: [AUTOPILOT_LABEL, HITL_LABEL] } },
+        issueLabels: { 1: [AUTOPILOT_LABEL, HITL_LABEL] },
+    });
+    await applyPrProjection(items, makeCfg(), { running: new Map() }, () => {}, deps);
+    const issueEdit = deps.calls.editLabels.find((e) => e.type === 'issue');
+    assert.ok(issueEdit.add.includes(SPIKE_LABEL));
+    for (const e of deps.calls.editLabels.filter((x) => x.type === 'pr')) {
+        assert.ok(!(e.add || []).includes(SPIKE_LABEL));
+    }
 });
 
 test('applyPrProjection: per-tick on Review does NOT re-add a human-removed HITL label', async () => {
@@ -690,6 +768,27 @@ test('applyLabelHealing: 非終端 item に 🤖 を、分解済み EPIC には 
     ]);
 });
 
+test('applyLabelHealing: 🔬 spike を状態から付け外しし、閉じた item からは外す（#1315）', async () => {
+    const { SPIKE_LABEL } = require('../src/phases');
+    const items = [
+        { issue: 1, status: 'Backlog', aiStatus: 'Discussing', hitlLabel: true, kind: 'Issue', labels: [AUTOPILOT_LABEL] },
+        { issue: 2, status: 'In Progress', aiStatus: 'Implementing', kind: 'Issue', labels: [AUTOPILOT_LABEL, SPIKE_LABEL] },
+        { issue: 3, status: 'Close', aiStatus: 'Discussing', kind: 'Issue', labels: [AUTOPILOT_LABEL, SPIKE_LABEL] },
+        { issue: 4, status: 'Close', kind: 'Issue', labels: [] }, // 終端・spike なし → 触らない
+    ];
+    const edits = [];
+    await applyLabelHealing(items, makeCfg(), { running: new Map() }, () => {}, {
+        token: 't',
+        readToken: 'r',
+        editLabels: (repo, number, type, diff) => edits.push({ number, ...diff }),
+    });
+    assert.deepEqual(edits, [
+        { number: 1, add: [SPIKE_LABEL] },
+        { number: 2, remove: [SPIKE_LABEL] },
+        { number: 3, remove: [SPIKE_LABEL] },
+    ]);
+});
+
 test('applyLabelHealing: 未分解 EPIC に 🧭 tracking を付けない（decompose デッドロック回帰・#1130）', async () => {
     const { TRACKING_LABEL, AUTOPILOT_LABEL } = require('../src/phases');
     // #1129 の状況: decompose が分解案 HITL で停止中（sub-issue はまだ 0 件）
@@ -947,6 +1046,36 @@ test('refreshBoard: 非終端 item を Board 順で enrich し state.board に�
     const r5 = state.board.items.find((i) => i.issue === 5);
     assert.equal(r5.subIssues.percent, 50);
     assert.equal(r5.tracker, true);
+});
+
+test('refreshBoard: 人間待ちの理由とリンク（waitReason / waitUrl）を board item に載せる（#1315）', async () => {
+    const { refreshBoard } = require('../src/daemon');
+    const { WAITING_LABEL } = require('../src/phases');
+    const cfg = { ...makeCfg(), now: () => 0, statusOrder: [] };
+    const state = { running: new Map() };
+    let enrichCalls = 0;
+    await refreshBoard(cfg, state, () => {}, {
+        token: 't',
+        listItems: () => [
+            { issue: 1, status: 'Backlog', aiStatus: 'Discussing', hitlLabel: true, kind: 'Issue', title: 'a', labels: [] },
+            { issue: 2, status: 'Review', hitlLabel: true, kind: 'Issue', title: 'b', labels: [] },
+            { issue: 3, status: 'Sprint Backlog', kind: 'Issue', title: 'c', labels: [WAITING_LABEL] },
+            { issue: 4, status: 'In Progress', aiStatus: 'Implementing', kind: 'Issue', title: 'd', labels: [] },
+        ],
+        getBoardEnrichment: () => {
+            enrichCalls += 1;
+            return { 2: { subIssues: { total: 0, completed: 0, percent: 0 }, prs: [{ number: 20, state: 'OPEN', isDraft: false }] } };
+        },
+        listHeadPrs: () => [],
+    });
+    const by = Object.fromEntries(state.board.items.map((i) => [i.issue, i]));
+    const base = 'https://github.com/smalruby/smalruby3-editor';
+    assert.deepEqual([by[1].waitReason, by[1].waitUrl], ['spike', `${base}/issues/1`]);
+    assert.deepEqual([by[2].waitReason, by[2].waitUrl], ['review', `${base}/pull/20`]);
+    assert.deepEqual([by[3].waitReason, by[3].waitUrl], ['waiting', `${base}/issues/3`]);
+    assert.deepEqual([by[4].waitReason, by[4].waitUrl], [null, null]);
+    // 理由のために読み取りを増やさない（enrichment は従来どおり 1 回）
+    assert.equal(enrichCalls, 1);
 });
 
 test('refreshBoard: close リンクに PR が無い post-PR item は head ブランチで補完', async () => {
@@ -1247,106 +1376,51 @@ test('checkAuthHealth: 機密はサニタイズして surface する', async () 
     assert.match(state.authError, /rejected/);
 });
 
-// === 人間ゲート: collectGateContexts（コメント解除 + watermark） ===
+// === 人間ゲート: collectGateContexts（ラベル解除のみ） ===
 
-test('collectGateContexts: 発言アクティビティから humanSpokeLast を導く（コメント解除の配線）', async () => {
+test('collectGateContexts: 自分のゲート item だけ 🙋 シグナルと PR を集める', async () => {
     const { isGateItem } = require('../src/daemon');
     const items = [
-        { issue: 1, status: 'Review', kind: 'Issue', hitlLabel: true }, // 人間が最後に発言 → 解除
-        { issue: 2, status: 'DoD', kind: 'Issue', hitlLabel: true }, // bot が最後 → 待ち
-        { issue: 3, status: 'Blocked', kind: 'Issue', hitlLabel: true }, // PR 無しゲートも収集
-        { issue: 4, status: 'Backlog', aiStatus: 'Discussing', kind: 'Issue', hitlLabel: true }, // 議論ゲート
-        { issue: 5, status: 'Sprint Backlog', kind: 'Issue' }, // ゲートではない
+        { issue: 1, status: 'Review', kind: 'Issue', hitlLabel: true },
+        { issue: 2, status: 'Blocked', kind: 'Issue', hitlLabel: true }, // PR 無しゲートも収集
+        { issue: 3, status: 'Backlog', aiStatus: 'Discussing', kind: 'Issue', hitlLabel: true }, // 議論ゲート
+        { issue: 4, status: 'Sprint Backlog', kind: 'Issue' }, // ゲートではない
+        { issue: 5, status: 'Review', kind: 'Issue', hitlLabel: true }, // 実行中
     ];
-    assert.equal(isGateItem(items[4]), false);
+    assert.equal(isGateItem(items[3]), false);
     const gateCtx = {
-        1: { hitlSignals: { issueLabel: true, prLabel: true }, review: {}, pr: 10, activity: { lastHumanAt: 200, lastBotAt: 100 } },
-        2: { hitlSignals: { issueLabel: true, prLabel: true }, review: {}, pr: 20, activity: { lastHumanAt: 100, lastBotAt: 200 } },
-        3: { hitlSignals: { issueLabel: true }, review: null, pr: null, activity: { lastHumanAt: 300, lastBotAt: 100 } },
-        4: { hitlSignals: { issueLabel: true }, review: null, pr: null, activity: { lastHumanAt: 400, lastBotAt: 100 } },
+        1: { hitlSignals: { issueLabel: true, prLabel: false }, pr: 10 },
+        2: { hitlSignals: { issueLabel: true }, pr: null },
+        3: { hitlSignals: { issueLabel: false }, pr: null },
+        5: { hitlSignals: { issueLabel: false, prLabel: false }, pr: 50 },
     };
-    const state = { running: new Map() };
-    const contexts = await collectGateContexts(makeCfg(), items, new Set(), state, () => {}, {
+    const contexts = await collectGateContexts(makeCfg(), items, new Set([5]), { running: new Map() }, () => {}, {
         token: 't',
         getGateContext: (repo, issue) => gateCtx[issue],
     });
-    assert.equal(contexts[1].humanSpokeLast, true);
-    assert.equal(contexts[2].humanSpokeLast, false);
-    assert.equal(contexts[3].humanSpokeLast, true);
-    assert.equal(contexts[4].humanSpokeLast, true);
-    assert.ok(!(5 in contexts));
+    assert.deepEqual(contexts[1], gateCtx[1]);
+    assert.deepEqual(contexts[2], gateCtx[2]);
+    assert.deepEqual(contexts[3], gateCtx[3]);
+    assert.ok(!(4 in contexts));
+    assert.ok(!(5 in contexts), '実行中の item は集めない');
 });
 
-test('collectGateContexts: watermark（gateHandled）より古い発言では再発火しない', async () => {
-    const items = [{ issue: 1, status: 'Review', kind: 'Issue', hitlLabel: true }];
-    const state = { running: new Map(), gateHandled: new Map([[1, 250]]) };
-    const deps = {
+test('collectGateContexts: 1 件の取得失敗はログして他を続ける', async () => {
+    const items = [
+        { issue: 1, status: 'Review', kind: 'Issue', hitlLabel: true },
+        { issue: 2, status: 'DoD', kind: 'Issue', hitlLabel: true },
+    ];
+    const logs = [];
+    const contexts = await collectGateContexts(makeCfg(), items, new Set(), { running: new Map() }, (m) => logs.push(m), {
         token: 't',
-        getGateContext: () => ({
-            hitlSignals: { issueLabel: true, prLabel: true }, review: {}, pr: 10,
-            activity: { lastHumanAt: 200, lastBotAt: 100 },
-        }),
-    };
-    const contexts = await collectGateContexts(makeCfg(), items, new Set(), state, () => {}, deps);
-    assert.equal(contexts[1].humanSpokeLast, false); // 200 < watermark 250
-    // watermark 後に人間がさらに発言 → 再度解除
-    deps.getGateContext = () => ({
-        hitlSignals: { issueLabel: true, prLabel: true }, review: {}, pr: 10,
-        activity: { lastHumanAt: 300, lastBotAt: 100 },
+        getGateContext: (repo, issue) => {
+            if (issue === 1) throw new Error('boom');
+            return { hitlSignals: { issueLabel: false, prLabel: true }, pr: 20 };
+        },
     });
-    const contexts2 = await collectGateContexts(makeCfg(), items, new Set(), state, () => {}, deps);
-    assert.equal(contexts2[1].humanSpokeLast, true);
-});
-
-test('collectGateContexts: 未処理 changesRequested を構造化シグナルとして導く (#894)', async () => {
-    // approve 後の Request changes: bot sticky が lastBotAt を now に更新し humanSpokeLast が
-    // false でも、changesRequested の submittedAt が review watermark より新しければ解除する。
-    const items = [{ issue: 1, status: 'Review', kind: 'Issue', hitlLabel: true }];
-    const state = { running: new Map() };
-    const deps = {
-        token: 't',
-        getGateContext: () => ({
-            hitlSignals: { issueLabel: true, prLabel: true },
-            review: { approved: false, changesRequested: true, changesRequestedAt: 300 },
-            pr: 10,
-            // bot sticky が leapfrog: lastBotAt > lastHumanAt → humanSpokeLast は false
-            activity: { lastHumanAt: 300, lastBotAt: 999 },
-        }),
-    };
-    const contexts = await collectGateContexts(makeCfg(), items, new Set(), state, () => {}, deps);
-    assert.equal(contexts[1].humanSpokeLast, false, 'sticky leapfrog で発言解除は効かない');
-    assert.equal(contexts[1].unhandledChangesRequested, true, '構造化シグナルで解除される');
-
-    // watermark を進める（dispatch 済み相当）と同じ changesRequested では再発火しない
-    state.gateReviewHandled = new Map([[1, 300]]);
-    const contexts2 = await collectGateContexts(makeCfg(), items, new Set(), state, () => {}, deps);
-    assert.equal(contexts2[1].unhandledChangesRequested, false, '同じレビューでは再発火しない');
-
-    // さらに新しい Request changes（submittedAt=400）が来たら再度解除
-    deps.getGateContext = () => ({
-        hitlSignals: { issueLabel: true, prLabel: true },
-        review: { approved: false, changesRequested: true, changesRequestedAt: 400 },
-        pr: 10,
-        activity: { lastHumanAt: 400, lastBotAt: 999 },
-    });
-    const contexts3 = await collectGateContexts(makeCfg(), items, new Set(), state, () => {}, deps);
-    assert.equal(contexts3[1].unhandledChangesRequested, true, '新しい changesRequested で再度解除');
-});
-
-test('collectGateContexts: approve 単独（changesRequested 無し）は解除しない (#894)', async () => {
-    const items = [{ issue: 1, status: 'Review', kind: 'Issue', hitlLabel: true }];
-    const state = { running: new Map() };
-    const deps = {
-        token: 't',
-        getGateContext: () => ({
-            hitlSignals: { issueLabel: true, prLabel: true },
-            review: { approved: true, changesRequested: false, changesRequestedAt: null },
-            pr: 10,
-            activity: { lastHumanAt: 100, lastBotAt: 999 },
-        }),
-    };
-    const contexts = await collectGateContexts(makeCfg(), items, new Set(), state, () => {}, deps);
-    assert.equal(contexts[1].unhandledChangesRequested, false);
+    assert.ok(!(1 in contexts));
+    assert.equal(contexts[2].pr, 20);
+    assert.match(logs.join('\n'), /#1: gate context error boom/);
 });
 
 // === directives: getDirectives（autopilot-base / autopilot-after の TTL キャッシュ） ===
@@ -1374,7 +1448,7 @@ test('getDirectives: 本文から base/after を導き TTL 内はキャッシュ
     assert.equal(fetches, 2);
 });
 
-test('getDirectives: 取得失敗は空ディレクティブへフォールバックし次回再取得', async () => {
+test('getDirectives: 取得失敗でキャッシュが無ければ unavailable（dispatch 不可）にし次回再取得（#1309）', async () => {
     let calls = 0;
     const cfg = { ...makeCfg(), now: () => 0, directiveTtlMs: 1000 };
     const state = {};
@@ -1383,12 +1457,41 @@ test('getDirectives: 取得失敗は空ディレクティブへフォールバ�
         getIssueBody: () => { calls += 1; if (calls === 1) throw new Error('boom'); return 'autopilot-after: #3'; },
     };
     const d1 = await getDirectives(cfg, state, 5, () => {}, deps);
+    assert.equal(d1.unavailable, true);
+    assert.equal(directivesBlockDispatch(d1), true);
     assert.equal(d1.base, null);
     assert.deepEqual(d1.after, []);
     assert.equal(d1.assignee, null);
     // 失敗エントリは TTL 切れ扱い → 次回すぐ再取得して成功する
     const d2 = await getDirectives(cfg, state, 5, () => {}, deps);
     assert.deepEqual(d2.after, [3]);
+    assert.equal(directivesBlockDispatch(d2), false);
+});
+
+test('getDirectives: 取得失敗でも前回のキャッシュがあれば after/base を保つ（#1309）', async () => {
+    let calls = 0;
+    let now = 0;
+    const cfg = { ...makeCfg(), now: () => now, directiveTtlMs: 1000 };
+    const state = {};
+    const deps = {
+        token: 't',
+        getIssueBody: () => {
+            calls += 1;
+            if (calls >= 2) throw new Error('network down');
+            return 'autopilot-base: topic/x\nautopilot-after: #964';
+        },
+    };
+    await getDirectives(cfg, state, 965, () => {}, deps);
+    now = 5000; // TTL 超過 → 取り直すがネットが切れている
+    const d = await getDirectives(cfg, state, 965, () => {}, deps);
+    assert.deepEqual(d.after, [964]);
+    assert.equal(d.base, 'topic/x');
+    assert.equal(directivesBlockDispatch(d), false);
+    // 次の参照でもまた取りに行く（stale を TTL 内として固定しない）
+    await getDirectives(cfg, state, 965, () => {}, deps);
+    assert.equal(calls, 3);
+    // 失敗が続いても内容は保たれる
+    assert.deepEqual(state.directives.get(965).after, [964]);
 });
 
 test('getDirectives: 本文の autopilot-assignee ディレクティブも解決する（#938）', async () => {
@@ -1916,7 +2019,7 @@ test('tick: 毎 tick で Claude 使用量を読み直す（pause 中でも・#10
 // ---- HTTP: usage をライブ読取（GET /board・POST /refresh・#1027） ----------
 
 /** テスト用: 起動済み server に対して method/path でリクエストし JSON を返す小ヘルパー */
-function httpRequestJson(port, method, pathname) {
+function httpRequestJson(port, method, pathname, payload) {
     const http = require('node:http');
     return new Promise((resolve, reject) => {
         const req = http.request({ host: '127.0.0.1', port, method, path: pathname }, (res) => {
@@ -1927,7 +2030,7 @@ function httpRequestJson(port, method, pathname) {
             });
         });
         req.on('error', reject);
-        req.end();
+        req.end(payload);
     });
 }
 
@@ -2126,4 +2229,220 @@ test('patchBoardCache: does not mutate the original cached item object (replaces
     assert.strictEqual(original.aiStatus, 'Implementing');
     assert.notStrictEqual(state.board.items[0], original);
     assert.strictEqual(state.board.items[0].aiStatus, 'Self-Reviewing');
+});
+
+// ---- 💤 later（「あとでやる」一覧・#1190） --------------------------------
+
+function makeLaterDeps(initial = []) {
+    const calls = { get: 0, edit: [] };
+    let labels = [...initial];
+    return {
+        calls,
+        get labels() { return labels; },
+        deps: {
+            token: 'bot', readToken: 'read',
+            getIssueLabels: async () => { calls.get += 1; return [...labels]; },
+            editLabels: async (repo, n, type, diff) => {
+                calls.edit.push({ n, type, diff });
+                // 書き込み中に後続リクエストが割り込めるよう 1 tick 譲る
+                await new Promise((r) => setImmediate(r));
+                labels = labels.filter((l) => !(diff.remove || []).includes(l)).concat(diff.add || []);
+            },
+        },
+    };
+}
+
+test('setLaterLabel: ラベルを付与し、board / items キャッシュの labels を書き換える（再取得しない）', async () => {
+    const d = makeLaterDeps([AUTOPILOT_LABEL]);
+    const state = {
+        board: { items: [{ issue: 5, labels: [AUTOPILOT_LABEL], later: false }] },
+        itemsCache: { at: 1, items: [{ issue: 5, labels: [AUTOPILOT_LABEL] }] },
+    };
+    const r = await setLaterLabel(makeCfg(), state, () => {}, 5, true, d.deps);
+    assert.deepStrictEqual(r, { issue: 5, later: true, changed: true });
+    assert.deepStrictEqual(d.calls.edit, [{ n: 5, type: 'issue', diff: { add: [LATER_LABEL], remove: [] } }]);
+    assert.strictEqual(state.board.items[0].later, true);
+    assert.deepStrictEqual(state.board.items[0].labels, [AUTOPILOT_LABEL, LATER_LABEL]);
+    assert.deepStrictEqual(state.itemsCache.items[0].labels, [AUTOPILOT_LABEL, LATER_LABEL]);
+    assert.strictEqual(state.laterOps.size, 0);
+});
+
+test('setLaterLabel: 既に目的の状態なら書き込まない（冪等）', async () => {
+    const d = makeLaterDeps([LATER_LABEL]);
+    const r = await setLaterLabel(makeCfg(), {}, () => {}, 5, true, d.deps);
+    assert.deepStrictEqual(r, { issue: 5, later: true, changed: false });
+    assert.strictEqual(d.calls.edit.length, 0);
+});
+
+test('setLaterLabel: 同一 Issue の同時リクエストは並走させず、最後の意図へ畳み込む', async () => {
+    const d = makeLaterDeps([]);
+    const state = {};
+    const log = () => {};
+    // あとで → 今やる → あとで → 今やる を連打（1 本目の処理中に残りが来る）
+    const ps = [true, false, true, false].map((v) => setLaterLabel(makeCfg(), state, log, 5, v, d.deps));
+    const rs = await Promise.all(ps);
+    // 全員が同じ最終状態（最後に押した向き）を受け取る
+    for (const r of rs) assert.strictEqual(r.later, false);
+    assert.deepStrictEqual(d.labels, []);
+    // 1 周目（付与）+ 畳み込み後の 2 周目（除去）だけ。途中の true/false は書き込まない
+    assert.strictEqual(d.calls.edit.length, 2);
+    assert.strictEqual(d.calls.get, 2);
+    assert.strictEqual(state.laterOps.size, 0);
+});
+
+test('setLaterLabel: 別 Issue は独立に処理する', async () => {
+    const d = makeLaterDeps([]);
+    const state = {};
+    const [a, b] = await Promise.all([
+        setLaterLabel(makeCfg(), state, () => {}, 5, true, d.deps),
+        setLaterLabel(makeCfg(), state, () => {}, 6, true, d.deps),
+    ]);
+    assert.strictEqual(a.issue, 5);
+    assert.strictEqual(b.issue, 6);
+    assert.deepStrictEqual(d.calls.edit.map((c) => c.n).sort(), [5, 6]);
+});
+
+test('setLaterLabel: 失敗は reject し、次のリクエストを妨げない', async () => {
+    const state = {};
+    const failing = {
+        token: 'bot', readToken: 'read',
+        getIssueLabels: async () => [],
+        editLabels: async () => { throw new Error('boom'); },
+    };
+    await assert.rejects(setLaterLabel(makeCfg(), state, () => {}, 5, true, failing), /boom/);
+    assert.strictEqual(state.laterOps.size, 0);
+    const d = makeLaterDeps([]);
+    const r = await setLaterLabel(makeCfg(), state, () => {}, 5, true, d.deps);
+    assert.strictEqual(r.changed, true);
+});
+
+test('patchLaterCache: キャッシュが無い / 対象が無い場合は何もしない', () => {
+    const state = { board: { items: [{ issue: 1, labels: [] }] } };
+    patchLaterCache({}, 1, true);
+    patchLaterCache(state, 2, true);
+    assert.deepStrictEqual(state.board.items, [{ issue: 1, labels: [] }]);
+});
+
+test('startHttp POST /later: 入力検証（issue / later 必須）', async () => {
+    const cfg = { ...makeCfg(), port: 0, assignee: null, concurrency: 1 };
+    const state = { paused: false, running: new Map(), board: null };
+    const { server, port } = await startTestHttp(cfg, state);
+    try {
+        let r = await httpRequestJson(port, 'POST', '/later', JSON.stringify({ issue: 5 }));
+        assert.strictEqual(r.status, 400);
+        r = await httpRequestJson(port, 'POST', '/later', JSON.stringify({ issue: 'x', later: true }));
+        assert.strictEqual(r.status, 400);
+        r = await httpRequestJson(port, 'POST', '/later', '{not json');
+        assert.strictEqual(r.status, 400);
+    } finally {
+        await new Promise((r) => server.close(r));
+    }
+});
+
+// ---- Claude 使用量による自動 pause / 強制再開（#1193） ----------------------
+
+const USAGE_NOW = Date.parse('2026-10-25T10:00:00Z');
+function usageState(session, weekly, extra = {}) {
+    return {
+        paused: false, pausedBy: null, running: new Map(), usageOverrides: {},
+        claudeUsage: {
+            session: { percent: session, resetsAt: USAGE_NOW + 3600_000 },
+            weekly: { percent: weekly, resetsAt: USAGE_NOW + 72 * 3600_000 },
+            updatedAt: USAGE_NOW,
+        },
+        ...extra,
+    };
+}
+
+test('applyUsagePause: セッション 90% で pausedBy=usage、閾値割れで自動再開', () => {
+    const { applyUsagePause } = require('../src/daemon');
+    const cfg = { now: () => USAGE_NOW };
+    const state = usageState(92, 10);
+    applyUsagePause(state, cfg, () => {});
+    assert.strictEqual(state.paused, true);
+    assert.strictEqual(state.pausedBy, 'usage');
+    assert.strictEqual(state.usagePause.window, 'session');
+    // 枠リセット後（resetsAt 経過）は usage ファイルが据え置きでも自動再開
+    applyUsagePause(state, { now: () => USAGE_NOW + 3600_000 }, () => {});
+    assert.strictEqual(state.paused, false);
+    assert.strictEqual(state.pausedBy, null);
+});
+
+test('applyUsagePause: 人間の pause は上書きせず、自動で外さない', () => {
+    const { applyUsagePause } = require('../src/daemon');
+    const state = usageState(99, 99, { paused: true, pausedBy: 'human' });
+    applyUsagePause(state, { now: () => USAGE_NOW }, () => {});
+    assert.strictEqual(state.pausedBy, 'human');
+    state.claudeUsage.session.percent = 1;
+    state.claudeUsage.weekly.percent = 1;
+    applyUsagePause(state, { now: () => USAGE_NOW }, () => {});
+    assert.deepStrictEqual([state.paused, state.pausedBy], [true, 'human']);
+});
+
+test('applyUsagePause: settings の閾値を使う', () => {
+    const { applyUsagePause } = require('../src/daemon');
+    const state = usageState(80, 10);
+    applyUsagePause(state, { now: () => USAGE_NOW, settings: { usagePause: { sessionPercent: 75 } } }, () => {});
+    assert.strictEqual(state.pausedBy, 'usage');
+});
+
+test('forceResumeUsage: 超過枠を次のリセットまで強制し、期限で外れて再び pause', () => {
+    const { applyUsagePause, forceResumeUsage } = require('../src/daemon');
+    const state = usageState(92, 10);
+    applyUsagePause(state, { now: () => USAGE_NOW }, () => {});
+    const r = forceResumeUsage(state, { now: () => USAGE_NOW }, () => {});
+    assert.strictEqual(r.paused, false);
+    assert.deepStrictEqual(Object.keys(state.usageOverrides), ['session']);
+    assert.strictEqual(state.usagePause.forced[0].resetsAt, USAGE_NOW + 3600_000);
+    // 強制中に週間が超えたら週間側で pause
+    state.claudeUsage.weekly.percent = 96;
+    applyUsagePause(state, { now: () => USAGE_NOW + 60_000 }, () => {});
+    assert.deepStrictEqual([state.pausedBy, state.usagePause.window], ['usage', 'weekly']);
+    // 週間も強制 → 次のセッション枠（新しい resetsAt）で再び 91% なら、期限切れ後に再 pause
+    forceResumeUsage(state, { now: () => USAGE_NOW + 60_000 }, () => {});
+    assert.strictEqual(state.paused, false);
+    state.claudeUsage.session = { percent: 91, resetsAt: USAGE_NOW + 6 * 3600_000 };
+    applyUsagePause(state, { now: () => USAGE_NOW + 2 * 3600_000 }, () => {});
+    assert.deepStrictEqual([state.pausedBy, state.usagePause.window], ['usage', 'session']);
+    assert.deepStrictEqual(Object.keys(state.usageOverrides), ['weekly']);
+});
+
+test('tick: usage 超過なら dispatch せず pause で早期 return（#1193）', async () => {
+    const { tick } = require('../src/daemon');
+    const fs = require('node:fs');
+    const os = require('node:os');
+    const path = require('node:path');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'daemon-tick-usage-pause-'));
+    const usageFile = path.join(dir, 'claude-usage.json');
+    fs.writeFileSync(usageFile, JSON.stringify({
+        rate_limits: { five_hour: { used_percentage: 95 }, seven_day: { used_percentage: 10 } },
+    }) + '\n');
+    const state = { paused: false, pausedBy: null, running: new Map(), claudeUsage: null };
+    // resetsAt なし → updatedAt（mtime）から 5 時間以内は有効
+    const res = await tick({ usageFile, now: () => 1000, statSync: () => ({ mtimeMs: 900 }) }, state, () => {});
+    assert.deepStrictEqual(res, { paused: true, picked: [] });
+    assert.strictEqual(state.pausedBy, 'usage');
+});
+
+test('startHttp: usage pause 中の /resume は 409 で /force-resume へ誘導し、/force-resume で再開', async () => {
+    const cfg = { ...makeCfg(), port: 0, assignee: null, concurrency: 1, now: () => USAGE_NOW, usageFile: '/no/such/usage.json' };
+    const state = usageState(92, 10);
+    const { server, port } = await startTestHttp(cfg, state);
+    try {
+        const b = await httpRequestJson(port, 'GET', '/board');
+        assert.strictEqual(b.body.pausedBy, 'usage');
+        assert.strictEqual(b.body.usagePause.window, 'session');
+        const r = await httpRequestJson(port, 'POST', '/resume');
+        assert.strictEqual(r.status, 409);
+        assert.strictEqual(r.body.forceResumeRequired, true);
+        assert.strictEqual(state.pausedBy, 'usage');
+        const f = await httpRequestJson(port, 'POST', '/force-resume');
+        assert.strictEqual(f.status, 200);
+        assert.strictEqual(f.body.paused, false);
+        const s = await httpRequestJson(port, 'GET', '/status');
+        assert.strictEqual(s.body.usagePause.forced[0].window, 'session');
+        assert.ok(s.body.usageOverrides.session);
+    } finally {
+        server.close();
+    }
 });

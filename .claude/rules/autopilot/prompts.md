@@ -37,11 +37,15 @@ review / verify などのプロンプトから **`/code-review` / `/security-rev
 
 `.claude/rules` 準拠は「読んだつもり」にならないよう、変更ファイルから `phases.js` の
 `touchedRuleAreas`（純粋関数）で touch する `.claude/rules/<area>/` を機械的に導いてから読む
-（#921）。指摘は本文先頭に `**[Must]**` / `**[Question]**` / `**[FYI]**` マーカーを付けて
-3 分類し、`countReviewFindings` / `renderReviewFindingsSummary` で件数サマリを PR に残す
-（対応方針は Must=修正 / Question=対応可なら修正・困難なら人間へ / FYI=無視。
-`addressReviewPolicyFor` が唯一の真実）。`autopilot-address-review.md` も同じ分類・対応表を
-未対応の bot コメントに適用する。
+（#921）。指摘は Must / Question / FYI に 3 分類し、**1 回のレビューの全指摘を 1 コメントに
+まとめる**（`renderReviewFindingsComment`。先頭マーカー `<!-- autopilot-review-findings round=N -->`・
+2 行目に件数サマリ・各指摘に `**[M1]**` / `**[Q1]**` / `**[FYI1]**` の連番 ID。再レビューは
+`nextReviewFindingNumbers` で連番を継続・#1248）。指摘ごとの別コメントや別のサマリコメントを
+出すのは逸脱。対応方針は Must=修正 / Question=対応可なら修正・困難なら人間へ / FYI=無視
+（`addressReviewPolicyFor` が既定方針の唯一の真実）。`autopilot-address-review.md` は人間の ID 返信
+（「Q1はOK, FYI1は修正して」）を `planAddressReview` で解釈し、**人間の明示指示を既定方針より優先**
+する（FYI でも「直して」なら直す）。旧形式（1 コメント 1 マーカーの `**[Must]**` 等）も
+`countReviewFindings` が合算する（後方互換）。
 
 ## コミット・push の規約
 
@@ -53,6 +57,19 @@ review / verify などのプロンプトから **`/code-review` / `/security-rev
 - **対規約**: Bot 権限外パスのパターンは 2 箇所で二重定義されている —
   `bin/autopilot-push` の `PROTECTED_RE` と `phases.js` の `PROTECTED_PATH_PATTERNS`
   （現在 `^.github/workflows/` と `^.github/actions/`）。**変更時は必ず両方を更新**する。
+
+## コンフリクトの解消は resolve-conflict だけが行う（#1348）
+
+- base とのコンフリクトを解消するのは **`autopilot-resolve-conflict`** だけ。ほかのフェーズのプロンプトに
+  解消手順を書かない（着手時の base 追従でコンフリクトしたら、daemon が先に resolve-conflict を走らせて
+  から本来のフェーズを起動する）。
+- resolve-conflict は **Status を動かさない割り込み**。結果の `nextStatus` / `nextAiStatus` は null にし、
+  daemon も `applyResult` を通さない（AI Status は daemon が解消前の値に戻す）。新しい割り込み型の
+  フェーズを足すときも、`phaseForItem` に遷移を足さず、同じ形（daemon の専用 dispatch）にする。
+- 解消は **merge で行う**（rebase・force push をしない）。lock ファイルは手で編集せず、PR 側を採って
+  `npm install --package-lock-only --before <3日前>` で作り直す。
+- daemon は worker の申告を信じきらず、merge の完了・base の取り込み・PR ブランチへの push を git で
+  確かめる（`runConflictResolver`）。確かめられなければ merge を中断して人間へ渡す。
 
 ## 本文ディレクティブの記法（行頭マーカー）
 
@@ -119,8 +136,33 @@ worker は **`cdk deploy` を実行しない**（stg / prod とも）。stg は�
 ラベルは **1 回きりの操作**で、run の完了時に workflow が自動で外す。**外す処理を自分で書かない**
 （二重に外そうとして 404 になる）。再度載せたいときは付け直す。
 
-prod への反映は**人間の作業**。結果ファイルや PR 本文に「prod は人間が実施」と明記して終える
-（`.claude/rules/infra/development.md` の「デプロイ経路」）。
+prod へは **develop へのマージで workflow が自動で出す**（削除・置き換えを含む差分は止まり、
+人間が出す）。worker は prod について何もしない（`.claude/rules/infra/development.md`）。
+
+## infra と GUI を分ける（infra-first）
+
+ブランチプレビューは prod の API を見るので、infra と GUI を同じ PR に入れると新しい API を
+使う GUI をプレビューで確認できない。手順の正準は `.claude/rules/infra/development.md` の
+「infra は別 Issue に分けて先に出す」。プロンプト側の規約は次のとおり（定数は `phases.js` の
+`INFRA_LABEL` = `🧱 infra`）:
+
+- **triage / understand**: `infra/**` とそれ以外の両方に変更が要る Issue は、1 PR の大きさでも
+  **Kind=EPIC** にして decompose へ回す（分割理由の 1 つ）。
+- **decompose**: infra の sub-issue を 1 つ作り、`🧱 infra` ラベルを付け、**`autopilot-base:` を
+  書かない**（develop 宛て）。GUI など残りの sub-issue には `autopilot-after: #<infra>` を付ける。
+  infra の sub-issue の本文に「後方互換な変更だけ」「PR は `Refs #N`」を明記する。
+- **implement（🧱 infra の Issue）**: 変更は `infra/**`（と関連 docs）だけ。**後方互換な変更だけ**
+  （追加・既存挙動を変えない修正）。PR は develop 宛て、本文は **`Refs #N`**（`Closes` /
+  `Fixes` を書かない。マージ時点ではまだ prod に無いので、prod デプロイの成功で workflow が閉じる）。
+- **implement（🧱 infra でない Issue）**: `infra/**` を変えない。infra の変更が要ると分かったら
+  実装せず、何が要るかをコメントして HITL で人間に返す（infra の sub-issue を作るかは人間が決める）。
+- **review**: 上の 2 つに反する PR は **[Must]**（infra の PR に `Closes #N`・非互換な変更、
+  非 infra の PR に `infra/**` の変更）。
+- **verify**: 🧱 infra を待っていた GUI の Issue は、**ブランチプレビュー**（prod API）で確認する。
+
+daemon 側: 🧱 infra の Issue は、PR の merge で Project は Close に進めるが **GitHub の Issue は
+閉じない**（`shouldCloseIssueOnMerge`）。`autopilot-after` の相手が 🧱 infra のときは、
+**GitHub で closed になるまで未完了**とみなす（`unresolvedAfterIssues` の `closedOnly`）。
 
 ## UI 確認（pw-check）
 

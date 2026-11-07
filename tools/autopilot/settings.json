@@ -1,4 +1,5 @@
 {
+  "watchdog": { "maxMinutes": 60, "softMinutes": 52 },
   "phases": {
     "default": { "model": "opus", "effort": "medium" },
     "triage": { "model": "opus", "effort": "medium" },
@@ -8,6 +9,7 @@
     "implement": { "model": "opus", "effort": "medium" },
     "review": { "model": "opus", "effort": "high" },
     "address-review": { "model": "opus", "effort": "high" },
-    "verify": { "model": "opus", "effort": "medium" }
+    "verify": { "model": "opus", "effort": "medium" },
+    "resolve-conflict": { "model": "opus", "effort": "medium" }
   }
 }

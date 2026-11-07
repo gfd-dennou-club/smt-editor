@@ -5,9 +5,19 @@ import classNames from 'classnames';
 import PropTypes from 'prop-types';
 import React from 'react';
 import { defineMessages, FormattedMessage, useIntl } from 'react-intl';
+import {
+    describeSeatStatuses,
+    findInvitingGroup,
+    groupHostSeat,
+    groupSeats,
+} from '../../lib/mesh-v2-seat-connect.js';
+import { useSeatSnapshot } from '../../lib/mesh-v2-seat-snapshot.js';
 import Box from '../box/box.jsx';
 import styles from './connection-modal.css';
+import MeshV2ClassicMethods from './mesh-v2-classic-methods.jsx';
 import initialStepStyles from './mesh-v2-initial-step.css';
+import MeshV2SeatEntry from './mesh-v2-seat-entry.jsx';
+import MeshV2SeatInviteStep from './mesh-v2-seat-invite-step.jsx';
 import createGroupImage from './mesh_v2_create_group.png';
 import joinGroupImage from './mesh_v2_join_group.png';
 
@@ -69,59 +79,111 @@ const MeshV2InitialStep = (props) => {
         [validate, props],
     );
 
+    const seat = props.meshV2Seat && !props.meshV2Seat.teacher ? props.meshV2Seat.seat : null;
+    // A student in a class connects by seat number; the classic buttons are folded away.
+    const seatMode = !!(seat && props.onSeatConnect);
+    const { classSeats, groups } = useSeatSnapshot({
+        vm: props.vm,
+        joinCode: seatMode ? props.classroomJoinCode : null,
+    });
+    // A group that chose this seat and waits for it is shown first (it can be skipped).
+    const [inviteSkipped, setInviteSkipped] = React.useState(false);
+    const invitingGroup = seatMode && groups && !inviteSkipped ? findInvitingGroup({ groups, mySeat: seat }) : null;
+    const handleJoinInvite = React.useCallback(() => {
+        if (invitingGroup) props.onJoinSeatGroup(invitingGroup.id);
+    }, [invitingGroup, props.onJoinSeatGroup]);
+    const handleSkipInvite = React.useCallback(() => setInviteSkipped(true), []);
+
+    if (invitingGroup) {
+        return (
+            <MeshV2SeatInviteStep
+                hostSeat={groupHostSeat(invitingGroup)}
+                mySeat={seat}
+                statuses={describeSeatStatuses({
+                    groups,
+                    groupId: invitingGroup.id,
+                    chosenSeats: groupSeats(invitingGroup),
+                    presentSeats: classSeats ? classSeats.presentSeats : [],
+                    mySeat: seat,
+                })}
+                onJoin={handleJoinInvite}
+                onSkip={handleSkipInvite}
+            />
+        );
+    }
+
     return (
         <Box className={styles.body}>
             <Box className={styles.bottomArea}>
-                <Box className={classNames(styles.bottomAreaItem, initialStepStyles.buttonContainer)}>
-                    <button
-                        className={initialStepStyles.actionButton}
-                        data-testid="meshV2-create-group"
-                        onClick={props.onCreateGroup}
-                    >
-                        <img className={initialStepStyles.buttonImage} src={createGroupImage} alt="" />
-                        <div className={initialStepStyles.buttonTextContainer}>
-                            <div className={initialStepStyles.buttonTitle}>
-                                <FormattedMessage
-                                    defaultMessage="Become Mesh Host"
-                                    description="Button to create a mesh group"
-                                    id="gui.connection.meshV2Initial.createGroup"
-                                />
+                {seatMode && (
+                    <MeshV2SeatEntry
+                        classSeats={classSeats}
+                        classroomName={props.classroomName}
+                        groups={groups}
+                        seat={seat}
+                        onJoinGroup={props.onJoinSeatGroup}
+                        onSeatConnect={props.onSeatConnect}
+                    />
+                )}
+                {seatMode && (
+                    <MeshV2ClassicMethods onCreateGroup={props.onCreateGroup} onJoinGroup={props.onJoinGroup} />
+                )}
+                {!seatMode && (
+                    <Box className={classNames(styles.bottomAreaItem, initialStepStyles.buttonContainer)}>
+                        <button
+                            className={initialStepStyles.actionButton}
+                            data-testid="meshV2-create-group"
+                            onClick={props.onCreateGroup}
+                        >
+                            <img className={initialStepStyles.buttonImage} src={createGroupImage} alt="" />
+                            <div className={initialStepStyles.buttonTextContainer}>
+                                <div className={initialStepStyles.buttonTitle}>
+                                    <FormattedMessage
+                                        defaultMessage="Become Mesh Host"
+                                        description="Button to create a mesh group"
+                                        id="gui.connection.meshV2Initial.createGroup"
+                                    />
+                                </div>
+                                <div className={initialStepStyles.buttonDescription}>
+                                    <FormattedMessage
+                                        defaultMessage="Create Group"
+                                        description="Description for creating a mesh group"
+                                        id="gui.connection.meshV2Initial.createGroupDescription"
+                                    />
+                                </div>
                             </div>
-                            <div className={initialStepStyles.buttonDescription}>
-                                <FormattedMessage
-                                    defaultMessage="Create Group"
-                                    description="Description for creating a mesh group"
-                                    id="gui.connection.meshV2Initial.createGroupDescription"
-                                />
+                        </button>
+                        <button
+                            className={initialStepStyles.actionButton}
+                            data-testid="meshV2-join-group"
+                            onClick={props.onJoinGroup}
+                        >
+                            <img className={initialStepStyles.buttonImage} src={joinGroupImage} alt="" />
+                            <div className={initialStepStyles.buttonTextContainer}>
+                                <div className={initialStepStyles.buttonTitle}>
+                                    <FormattedMessage
+                                        defaultMessage="Join Mesh"
+                                        description="Button to join an existing mesh group"
+                                        id="gui.connection.meshV2Initial.joinGroup"
+                                    />
+                                </div>
+                                <div className={initialStepStyles.buttonDescription}>
+                                    <FormattedMessage
+                                        defaultMessage="Join Group"
+                                        description="Description for joining a mesh group"
+                                        id="gui.connection.meshV2Initial.joinGroupDescription"
+                                    />
+                                </div>
                             </div>
-                        </div>
-                    </button>
-                    <button
-                        className={initialStepStyles.actionButton}
-                        data-testid="meshV2-join-group"
-                        onClick={props.onJoinGroup}
-                    >
-                        <img className={initialStepStyles.buttonImage} src={joinGroupImage} alt="" />
-                        <div className={initialStepStyles.buttonTextContainer}>
-                            <div className={initialStepStyles.buttonTitle}>
-                                <FormattedMessage
-                                    defaultMessage="Join Mesh"
-                                    description="Button to join an existing mesh group"
-                                    id="gui.connection.meshV2Initial.joinGroup"
-                                />
-                            </div>
-                            <div className={initialStepStyles.buttonDescription}>
-                                <FormattedMessage
-                                    defaultMessage="Join Group"
-                                    description="Description for joining a mesh group"
-                                    id="gui.connection.meshV2Initial.joinGroupDescription"
-                                />
-                            </div>
-                        </div>
-                    </button>
-                </Box>
+                        </button>
+                    </Box>
+                )}
 
-                <Box className={classNames(styles.bottomAreaItem, initialStepStyles.domainSection)}>
+                <Box
+                    className={classNames(styles.bottomAreaItem, initialStepStyles.domainSection, {
+                        [initialStepStyles.fullWidth]: seatMode,
+                    })}
+                >
                     <input
                         className={classNames(initialStepStyles.domainInput, {
                             [initialStepStyles.inputError]: error,
@@ -176,11 +238,20 @@ const MeshV2InitialStep = (props) => {
 };
 
 MeshV2InitialStep.propTypes = {
+    classroomJoinCode: PropTypes.string,
+    classroomName: PropTypes.string,
     domain: PropTypes.string,
     domainReadOnly: PropTypes.bool,
+    meshV2Seat: PropTypes.shape({
+        seat: PropTypes.number,
+        teacher: PropTypes.bool,
+    }),
     onCreateGroup: PropTypes.func.isRequired,
     onDomainChange: PropTypes.func.isRequired,
     onJoinGroup: PropTypes.func.isRequired,
+    onJoinSeatGroup: PropTypes.func,
+    onSeatConnect: PropTypes.func,
+    vm: PropTypes.object,
 };
 
 export default MeshV2InitialStep;

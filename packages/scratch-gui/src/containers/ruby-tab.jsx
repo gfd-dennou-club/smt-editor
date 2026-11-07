@@ -12,7 +12,8 @@ import RubyToolbar from '../components/ruby-toolbar/ruby-toolbar.jsx';
 import analytics from '../lib/analytics';
 import { autoCorrect, defaultSettings as defaultAutoCorrectSettings } from '../lib/auto-correct';
 import collectMetadata from '../lib/collect-metadata.js';
-import { DnclSourceMap } from '../lib/dncl/dncl-source-map';
+import { findArrayIndexHints } from '../lib/dncl/dncl-array-index-hint';
+import { tidyPastedDncl, withDoubleSlashHint } from '../lib/dncl/dncl-paste-tidy';
 import { dnclToRuby } from '../lib/dncl/dncl-to-ruby';
 import { rubyToDncl } from '../lib/dncl/ruby-to-dncl';
 import FuriganaAnnotator from '../lib/furigana-annotator';
@@ -52,10 +53,12 @@ import {
     AUTO_CORRECT_ENABLED_KEY,
     AUTO_CORRECT_SETTINGS_KEY,
     DNCL_MODE_KEY,
+    DNCL_INDEX_HINT_OWNER,
 } from './ruby-tab/constants';
 import updateDebugGlobals from './ruby-tab/debug-globals';
 import {
     registerCustomPasteAction,
+    setupPasteTransform,
     setupPasteDuplicateHider,
     registerLanguageAndProviders,
 } from './ruby-tab/editor-setup';
@@ -185,6 +188,7 @@ const RubyTab = (props) => {
     const contentChangeListenerRef = useRef(null);
     const configChangeListenerRef = useRef(null);
     const pasteMutationObserverRef = useRef(null);
+    const removePasteTransformRef = useRef(null);
     const bodyMutationObserverRef = useRef(null);
     const bubbleElRef = useRef(null);
     const quickFixProviderRef = useRef(null);
@@ -238,8 +242,24 @@ const RubyTab = (props) => {
         onDismissAlert('rubyVersionChangeFailed');
     };
 
-    const showErrors = (errors) => {
+    const showErrors = (rawErrors) => {
         if (editorRef.current && monacoRef.current) {
+            // Conversion errors point at Ruby lines. In DNCL mode the editor
+            // shows DNCL, whose lines do not match the Ruby ones 1:1, so move
+            // each error to its DNCL line. Ruby columns have no DNCL
+            // counterpart, so the whole DNCL line is marked.
+            const sourceMap = dnclModeRef.current ? dnclSourceMapRef.current : null;
+            let errors = sourceMap ? sourceMap.rubyErrorsToDncl(rawErrors) : rawErrors;
+            if (dnclModeRef.current) {
+                // `//` is integer division in Smalruby DNCL, never a comment,
+                // so a 共通テスト style `//` comment fails to convert. Tell
+                // the user to use `#` on such lines (Issue #1192).
+                const hint = intlRef.current.formatMessage({
+                    id: 'gui.rubyTab.dnclDoubleSlashHint',
+                    defaultMessage: 'In Smalruby, // is not a comment (it is integer division). Use # for comments.',
+                });
+                errors = withDoubleSlashHint(errors, editorRef.current.getModel().getLinesContent(), hint);
+            }
             const markers = errors.map((err) => ({
                 startLineNumber: err.row + 1,
                 startColumn: err.column + 1,
@@ -370,7 +390,7 @@ const RubyTab = (props) => {
                 dnclSourceMapRef.current = null;
                 return;
             }
-            dnclSourceMapRef.current = new DnclSourceMap(code, result.ruby);
+            dnclSourceMapRef.current = result.sourceMap;
             onChangeRef.current(result.ruby);
         } else {
             onChangeRef.current(code);
@@ -419,7 +439,11 @@ const RubyTab = (props) => {
             id: 'gui.rubyTab.paste',
             defaultMessage: 'Paste',
         });
-        registerCustomPasteAction(editor, pasteLabel);
+        // Japanese (DNCL) mode tidies pasted 共通テスト code: line numbers
+        // and `//` comments (Issue #1192).
+        const transformPastedText = (text) => (dnclModeRef.current ? tidyPastedDncl(text, editor.getValue()) : text);
+        registerCustomPasteAction(editor, pasteLabel, transformPastedText);
+        removePasteTransformRef.current = setupPasteTransform(editor, transformPastedText);
         const observers = setupPasteDuplicateHider();
         pasteMutationObserverRef.current = observers.pasteMutationObserver;
         bodyMutationObserverRef.current = observers.bodyMutationObserver;
@@ -582,6 +606,8 @@ const RubyTab = (props) => {
 
         // Validate before switching TO DNCL mode:
         // Dry-run Ruby → DNCL → Ruby → Blocks to check for unsupported code.
+        // The conversions are kept so the switch below can reuse them.
+        let dryRun = null;
         if (enabling && editorRef.current && monacoRef.current) {
             setDnclValidating(true);
             try {
@@ -613,6 +639,7 @@ const RubyTab = (props) => {
                     showErrors(errors);
                     return;
                 }
+                dryRun = { ruby: currentRuby, dncl: dnclResult.dncl, sourceMap: rubyResult.sourceMap };
             } finally {
                 setDnclValidating(false);
             }
@@ -635,11 +662,19 @@ const RubyTab = (props) => {
             if (enabling) {
                 // Switching to DNCL: convert Ruby → DNCL
                 const currentRuby = model.getValue();
-                const result = rubyToDncl(currentRuby);
-                dnclSourceMapRef.current = new DnclSourceMap(result.dncl, currentRuby);
+                // Reuse the dry-run conversions unless the code was edited
+                // while the blocks conversion was being checked.
+                let dncl;
+                if (dryRun && dryRun.ruby === currentRuby) {
+                    dncl = dryRun.dncl;
+                    dnclSourceMapRef.current = dryRun.sourceMap;
+                } else {
+                    dncl = rubyToDncl(currentRuby).dncl;
+                    dnclSourceMapRef.current = dnclToRuby(dncl).sourceMap;
+                }
                 monacoRef.current.editor.setModelLanguage(model, 'dncl');
-                model.setValue(result.dncl);
-                setDnclDisplayCode(result.dncl);
+                model.setValue(dncl);
+                setDnclDisplayCode(dncl);
             } else {
                 // Switching to Ruby: convert DNCL → Ruby
                 const currentDncl = model.getValue();
@@ -965,6 +1000,10 @@ const RubyTab = (props) => {
                 configChangeListenerRef.current.dispose();
                 configChangeListenerRef.current = null;
             }
+            if (removePasteTransformRef.current) {
+                removePasteTransformRef.current();
+                removePasteTransformRef.current = null;
+            }
             if (pasteMutationObserverRef.current) {
                 pasteMutationObserverRef.current.disconnect();
                 pasteMutationObserverRef.current = null;
@@ -1038,6 +1077,38 @@ const RubyTab = (props) => {
             setDnclDisplayCode(result.dncl);
         }
     }, [rubyCodeStr, dnclMode]);
+
+    // Smalruby DNCL arrays start at index 0. A program written with 1-based
+    // indices reads past the end of an array, where the VM silently returns
+    // an empty value, so warn about such accesses in the editor. The markers
+    // use their own owner so clearing conversion errors keeps them (Issue #1357).
+    useEffect(() => {
+        if (!editorRef.current || !monacoRef.current) return;
+        const lines = dnclMode ? dnclDisplayCode.split('\n') : [];
+        const hints = dnclMode ? findArrayIndexHints(dnclDisplayCode) : [];
+        const markers = hints
+            .filter((hint) => hint.line <= lines.length)
+            .map((hint) => {
+                const text = lines[hint.line - 1];
+                const column = text.indexOf(hint.access);
+                return {
+                    startLineNumber: hint.line,
+                    startColumn: column >= 0 ? column + 1 : 1,
+                    endLineNumber: hint.line,
+                    endColumn: column >= 0 ? column + hint.access.length + 1 : text.length + 1,
+                    message: intl.formatMessage(
+                        {
+                            id: 'gui.rubyTab.dnclArrayIndexHint',
+                            defaultMessage:
+                                '{access} reads past the end of the array. In Smalruby Japanese mode, array indices start at 0 (the first element is {array}[0] and the last is {array}[{last}]). If the problem counts from 1, shift the index by 1, like {fixed}.',
+                        },
+                        hint,
+                    ),
+                    severity: monacoRef.current.MarkerSeverity.Warning,
+                };
+            });
+        monacoRef.current.editor.setModelMarkers(editorRef.current.getModel(), DNCL_INDEX_HINT_OWNER, markers);
+    }, [dnclMode, dnclDisplayCode, intl]);
 
     // componentDidUpdate equivalent
     const prevPropsRef = useRef(null);

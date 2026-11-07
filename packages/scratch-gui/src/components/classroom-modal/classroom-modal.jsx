@@ -60,11 +60,16 @@ const ClassroomModal = ({
     classroomState,
     assignment,
     assignmentPageIndex,
+    continueOptions,
     hasAssignment,
+    loadedChoice,
+    startChoice,
+    onLoadSubmission,
     onOpenAssignment,
     onAssignmentPrevPage,
     onAssignmentNextPage,
     onReloadStarter,
+    onChooseStarter,
 }) => {
     const intl = useIntl();
 
@@ -75,7 +80,10 @@ const ClassroomModal = ({
             id="classroomModal"
             onRequestClose={onClose}
         >
-            <Box className={styles.body} data-testid="classroom-modal">
+            <Box
+                className={`${styles.body} ${styles.studentBody}`}
+                data-testid="classroom-modal"
+            >
                 {/* Phase: student-join */}
                 {phase === 'student-join' && (
                     <StudentJoinForm
@@ -118,8 +126,16 @@ const ClassroomModal = ({
                 {/* Phase: student-joined */}
                 {phase === 'student-joined' && joinedInfo && (
                     <StudentJoinedConfirmation
+                        continueOptions={continueOptions}
+                        error={error}
+                        errorTitle={errorTitle}
+                        isLoading={isLoading}
                         joinedInfo={joinedInfo}
+                        loadedChoice={loadedChoice}
+                        startChoice={startChoice}
                         onClose={onClose}
+                        onLoadStarter={onChooseStarter}
+                        onLoadSubmission={onLoadSubmission}
                     />
                 )}
 
@@ -127,12 +143,17 @@ const ClassroomModal = ({
                 {phase === 'student-assignment' && (
                     <StudentAssignmentPanel
                         assignment={assignment}
+                        continueOptions={continueOptions}
                         error={error}
                         errorTitle={errorTitle}
                         isLoading={isLoading}
                         joinedInfo={joinedInfo}
+                        loadedChoice={loadedChoice}
                         pageIndex={assignmentPageIndex}
+                        startChoice={startChoice}
+                        onChooseStarter={onChooseStarter}
                         onClose={onClose}
+                        onLoadSubmission={onLoadSubmission}
                         onNextPage={onAssignmentNextPage}
                         onPrevPage={onAssignmentPrevPage}
                         onReloadStarter={onReloadStarter}
@@ -143,14 +164,17 @@ const ClassroomModal = ({
                 {phase === 'student-status' && classroomState && (
                     <StudentStatusView
                         classroomState={classroomState}
+                        continueOptions={continueOptions}
                         error={error}
                         errorActionHandler={errorActionHandler}
                         errorActionLabel={errorActionLabel}
                         errorTitle={errorTitle}
                         hasAssignment={hasAssignment}
                         isLoading={isLoading}
+                        loadedChoice={loadedChoice}
                         teacherComment={teacherComment}
                         onLeaveClassroom={onLeaveClassroom}
+                        onLoadSubmission={onLoadSubmission}
                         onOpenAssignment={onOpenAssignment}
                         onRefreshStudentStatus={onRefreshStudentStatus}
                         onStartSubmit={onStartSubmit}
@@ -177,12 +201,22 @@ const ClassroomModal = ({
 ClassroomModal.propTypes = {
     assignment: PropTypes.object,
     assignmentPageIndex: PropTypes.number,
+    continueOptions: PropTypes.object,
+    loadedChoice: PropTypes.string,
+    startChoice: PropTypes.shape({
+        showStarter: PropTypes.bool,
+        recommend: PropTypes.string,
+        notice: PropTypes.string,
+    }),
+    onLoadSubmission: PropTypes.func,
     classroomState: PropTypes.object,
     hasAssignment: PropTypes.bool,
     onAssignmentNextPage: PropTypes.func,
     onAssignmentPrevPage: PropTypes.func,
     onOpenAssignment: PropTypes.func,
     onReloadStarter: PropTypes.func,
+    // choice row: open the starter and start (closes the modal)
+    onChooseStarter: PropTypes.func,
     error: PropTypes.string,
     errorActionHandler: PropTypes.func,
     errorActionLabel: PropTypes.string,

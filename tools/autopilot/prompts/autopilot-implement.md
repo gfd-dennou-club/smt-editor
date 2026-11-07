@@ -18,18 +18,32 @@ GH_TOKEN="$(bin/bot-token)" gh issue view "$AUTOPILOT_ISSUE" --repo "${AUTOPILOT
 
 - プロジェクト規約（`CLAUDE.md` / `.claude/rules`）に従う。**[RED] テストを先に書き失敗を確認 → [GREEN] 実装 → [PASS]**。
 - 関連する直接のテスト + lint をローカルで実行（フル CI は push 時）。
+- **翻訳キーを足したら `en.js` / `ja.js` / `ja-Hira.js` の 3 ファイルすべてに入れる**
+  （`packages/scratch-gui/src/locales/`。`en.js` も省略しない・`.claude/rules/scratch-gui/development.md`
+  の i18n 節）。コミット前に `git diff -U0 -- packages/scratch-gui/src/locales/` で同じキーが
+  3 ファイルに揃っているか確かめる。
 - 仕様が割れる/設計判断が要るなら **実装に踏み込まず**、bug コメント + `AUTOPILOT_HITL` で確認（understand と同様）。
+- **infra と GUI を同じ PR に入れない**（infra-first・`.claude/rules/infra/development.md`）。Issue の
+  ラベルに `🧱 infra` があるかで分ける:
+  - **🧱 infra の Issue**: 変更は `infra/**`（と関連 docs）だけ。**後方互換な変更だけ**（ルート・
+    任意フィールド・リソース・権限の追加、既存の挙動を変えない修正）。削除・改名・必須化・
+    レスポンス形の変更・既存リソースの置き換えが要るなら実装せず、コメント + `AUTOPILOT_HITL`。
+    確認は Lambda の unit test（と必要なら `deploy-stg` ラベルで stg の integration test）。
+  - **それ以外の Issue**: `infra/**` を変えない。infra の変更が要ると分かったら実装に踏み込まず、
+    何がなぜ要るかをコメントして `AUTOPILOT_HITL`（infra の sub-issue を作るかは人間が決める）。
+    先行の 🧱 infra Issue（`autopilot-after`）があるなら、その API はもう prod にある。
 - **`tmp/autopilot-continuation-$AUTOPILOT_ISSUE.md` があれば checkpoint からの再開**。存在すれば
   まず読み、「完了済み / 残タスク / 次の一手」を踏まえて続きから実装する（詳細は 1.5）。
 
-### 1.5 時間契約（実行上限 約30分・soft-limit 22分）
+### 1.5 時間契約（実行上限 約60分・soft-limit 52分）
 
-このフェーズの**実行上限は約30分**。soft-limit（22分）を超えると runner が tmux 経由で
+このフェーズの**実行上限は約60分**。soft-limit（52分）を超えると runner が tmux 経由で
 「⏰ 残り約8分。新しい大きな作業を始めず、安全な区切りで停止して checkpoint 手順を実行して」
 という信号を **1 回だけ**送る。この信号を受け取ったら（または自分で残り時間が僅かと判断
 したら）、新しい大きな作業を始めず、安全な区切りで停止すること。まだ完了できる見込みが
 あれば通常どおり最後まで実装してよい（checkpoint は強制ではない。完了できた場合は 4 の
 通常完了を返す）。
+（どちらも `tools/autopilot/settings.json` の `watchdog` で変えられる。値を変えたときは信号の「残り約N分」も変わる。）
 
 停止する場合の手順（詳細・JSON スキーマは `docs/autopilot/autonomous-contract.md` §2.5）:
 
@@ -89,6 +103,10 @@ GH_TOKEN="$(bin/bot-token)" gh pr create --repo "$AUTOPILOT_REPO" --draft --base
   `autopilot-base:` ディレクティブや「## ベースブランチ」宣言を読み、worktree もこの base から分岐させて渡す。
   EPIC のサブ Issue を親 epic ブランチに積むケースで使う。宣言が無ければ develop。
 - 本文に **`Closes #<issue>`**（merge で leaf を自動 Close = merge-progression）。
+  **ただし 🧱 infra の Issue は `Refs #<issue>`**（`Closes` / `Fixes` を書かない）。develop への
+  merge では閉じず、prod デプロイの成功で `Deploy Infra` workflow が閉じる（閉じた時点で後続の
+  GUI Issue が動き出すので、prod に API が無いうちに閉じてはいけない）。infra の PR は
+  `--base develop`（Issue に `autopilot-base:` が無いので既定どおり）。
 - **Draft で作成**（AI 作業中の合図）。Ready 化と `🙋 HITL` は人間レビューに渡すフェーズで行う（daemon が反映）。
 
 ### 4. 結果を返す（自己レビューへ）

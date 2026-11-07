@@ -22,6 +22,15 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { OAuth2Client } from 'google-auth-library';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import * as crypto from 'crypto';
+import {
+  AiUsage,
+  buildAiUsage,
+  jstDate,
+  seatFromMemberId,
+  seatStatusKey,
+  todayCountsBySeat,
+  usagePk,
+} from './ai-usage-lib';
 
 // --- Configuration ---
 
@@ -39,6 +48,9 @@ const SHARED_REPORTS_TABLE = process.env.SHARED_REPORTS_TABLE_NAME || 'SharedAss
 // お知らせ (notification center, EPIC #1111) — admin → teacher notices. The
 // admin stack writes items; this API lists/marks-read for the teacher.
 const NOTIFICATIONS_TABLE = process.env.NOTIFICATIONS_TABLE_NAME || 'ClassroomNotifications';
+// rubytee relay の表（読み取りだけ・#1311）。未設定ならメンバー一覧の aiUsage は null
+const RUBYTEE_RATE_LIMIT_TABLE = process.env.RUBYTEE_RATE_LIMIT_TABLE_NAME || '';
+const RUBYTEE_USAGE_TABLE = process.env.RUBYTEE_USAGE_TABLE_NAME || '';
 const SHARED_BUCKET = process.env.SHARED_BUCKET_NAME || 'smalruby-shared-assignments';
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const MICROSOFT_CLIENT_ID = process.env.MICROSOFT_CLIENT_ID || '';
@@ -75,6 +87,8 @@ const PRESIGNED_URL_UPLOAD_EXPIRY = parseInt(process.env.PRESIGNED_URL_UPLOAD_EX
 const PRESIGNED_URL_DOWNLOAD_EXPIRY = parseInt(process.env.PRESIGNED_URL_DOWNLOAD_EXPIRY || '3600', 10); // default 1 hour
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 const MAX_SCREENSHOT_COUNT = 20;
+// Sprite names are short; this only stops an oversized payload (#1239).
+const MAX_SCREENSHOT_LABEL_LENGTH = 100;
 const MAX_TEACHER_COMMENT_LENGTH = 500;
 // Kick request TTL: short-lived (1h) since the student is actively waiting
 // for the teacher to act. Expired requests are removed by DynamoDB TTL.
@@ -348,10 +362,35 @@ class ConflictError extends Error {
 
 class GoogleAPIError extends Error {
   statusCode: number;
-  constructor(statusCode: number, message: string) {
+  // Google's own error envelope (`error.status` / `error.message`), kept so the
+  // response and the CloudWatch log can name the actual cause instead of the
+  // opaque "Google Classroom API error" the teacher used to see (issue #1175).
+  googleStatus: string;
+  googleMessage: string;
+  // Which of our calls failed, so the same HTTP status can be mapped to
+  // different reasons (see googleApiErrorResponse).
+  operation: string;
+  constructor(statusCode: number, message: string, googleStatus = '', googleMessage = '', operation = '') {
     super(message);
     this.name = 'GoogleAPIError';
     this.statusCode = statusCode;
+    this.googleStatus = googleStatus;
+    this.googleMessage = googleMessage;
+    this.operation = operation;
+  }
+}
+
+// A student may not see classmates' submissions (#1239). `reason` tells the
+// GUI which message to show: the assignment has peer view off, or it opens
+// only after the student's own submission.
+class PeerViewForbiddenError extends Error {
+  reason: 'peer-view-off' | 'not-submitted';
+  constructor(reason: 'peer-view-off' | 'not-submitted') {
+    super(reason === 'peer-view-off'
+      ? 'Peer view is off for this assignment'
+      : 'Submit your own work to see classmates\' submissions');
+    this.name = 'PeerViewForbiddenError';
+    this.reason = reason;
   }
 }
 
@@ -380,11 +419,106 @@ const KICK_TOMBSTONE_TTL_SECONDS = parseInt(process.env.KICK_TOMBSTONE_TTL_SECON
 
 // --- Google Classroom API proxy ---
 
+/** Max length of a Google error message we keep (logs + API response). */
+const GOOGLE_ERROR_MESSAGE_MAX = 300;
+
+/**
+ * Pull `status` / `message` out of a Google API error envelope:
+ * `{"error":{"code":404,"message":"...","status":"NOT_FOUND"}}`.
+ *
+ * Google also answers with HTML (front-end proxies, 5xx) and with bodies that
+ * carry no envelope, so every failure mode degrades to empty strings instead of
+ * throwing — this runs inside an error path and must never mask the original
+ * failure.
+ */
+export function parseGoogleApiErrorBody(raw: string): { googleStatus: string; googleMessage: string } {
+  const empty = { googleStatus: '', googleMessage: '' };
+  if (!raw) return empty;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return empty;
+  }
+  const error = (parsed as { error?: unknown } | null)?.error;
+  if (!error || typeof error !== 'object') return empty;
+  const { status, message } = error as { status?: unknown; message?: unknown };
+  return {
+    googleStatus: typeof status === 'string' ? status : '',
+    googleMessage: typeof message === 'string' ? message.slice(0, GOOGLE_ERROR_MESSAGE_MAX) : '',
+  };
+}
+
+/**
+ * Map a Google Classroom failure onto our API response.
+ *
+ * Before issue #1175 everything that was not 401/403 collapsed into a bare 502
+ * "Google Classroom API error", which told the teacher nothing and left no way
+ * to tell "the linked course is gone / you are not a teacher of it" (404) apart
+ * from a malformed request (400). The Google-provided status and message are
+ * passed through so the UI can show an actionable message, and `reason` gives
+ * the UI a stable key to translate.
+ *
+ * `operation` names the call that failed. Google hides a course the caller is
+ * not in behind a 404, so a 404 from `courseWork` creation does not mean "the
+ * course is gone" — it means the teacher who pressed the button is not a
+ * teacher of that course (issue #1184). That case gets its own reason so the
+ * UI can say who to ask instead of blaming the link. The teacher who linked
+ * the course is the exception (`postCourseWorkAsLinker`): they are a teacher of
+ * it, so their 404 really is a missing/unreachable course and falls through to
+ * `googleCourseNotFound`, which tells them to link it again.
+ */
+export function googleApiErrorResponse(
+  statusCode: number,
+  googleStatus: string,
+  googleMessage: string,
+  operation = '',
+): { statusCode: number; body: string } {
+  let httpStatus: number;
+  let reason: string;
+  let error: string;
+  if (statusCode === 404 && operation === 'postCourseWork') {
+    httpStatus = 404;
+    reason = 'googleNotCourseTeacher';
+    error = 'You are not a teacher of the linked Google Classroom course.';
+  } else if (statusCode === 401) {
+    httpStatus = 401;
+    reason = 'googleTokenExpired';
+    error = 'Google access token expired. Please re-authorize.';
+  } else if (statusCode === 403) {
+    httpStatus = 403;
+    reason = 'googlePermissionDenied';
+    error = 'Insufficient Google Classroom permissions.';
+  } else if (statusCode === 404) {
+    httpStatus = 404;
+    reason = 'googleCourseNotFound';
+    error = 'Google Classroom course not found, or you are not a teacher of it.';
+  } else if (statusCode === 400) {
+    httpStatus = 400;
+    reason = 'googleInvalidRequest';
+    error = 'Google Classroom rejected the request.';
+  } else {
+    httpStatus = 502;
+    reason = 'googleApiError';
+    error = 'Google Classroom API error';
+  }
+  return {
+    statusCode: httpStatus,
+    body: JSON.stringify({
+      error,
+      reason,
+      ...(googleStatus ? { googleStatus } : {}),
+      ...(googleMessage ? { googleMessage } : {}),
+    }),
+  };
+}
+
 async function callGoogleClassroomAPI(
   accessToken: string,
   path: string,
   method: string = 'GET',
   body?: unknown,
+  operation = '',
 ): Promise<unknown> {
   const url = `https://classroom.googleapis.com/v1/${path}`;
   const response = await fetch(url, {
@@ -396,7 +530,24 @@ async function callGoogleClassroomAPI(
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!response.ok) {
-    throw new GoogleAPIError(response.status, `Google Classroom API error: ${response.status}`);
+    const raw = await response.text().catch(() => '');
+    const { googleStatus, googleMessage } = parseGoogleApiErrorBody(raw);
+    // Logged (never the access token) so a teacher report like issue #1175 can
+    // be diagnosed from CloudWatch without reproducing it.
+    console.error('Google Classroom API error', {
+      method,
+      path,
+      httpStatus: response.status,
+      googleStatus,
+      googleMessage,
+    });
+    throw new GoogleAPIError(
+      response.status,
+      `Google Classroom API error: ${response.status}`,
+      googleStatus,
+      googleMessage,
+      operation,
+    );
   }
   return response.json();
 }
@@ -632,6 +783,7 @@ async function handleCreateClassroom(identity: TeacherIdentity, body: Record<str
     await ensureGroupTopic(groupId, group, topic);
   }
   const sortDate = body.sortDate !== undefined ? validateSortDate(body.sortDate) : undefined;
+  const meshGroupLimit = validateMeshGroupLimit(body.meshGroupLimit) ?? DEFAULT_MESH_GROUP_LIMIT;
 
   // Auto-number duplicate assignment names within the same class. Inside a
   // class (組) the siblings are enumerated by groupId so a co-teacher's
@@ -696,6 +848,7 @@ async function handleCreateClassroom(identity: TeacherIdentity, body: Record<str
       groupId,
       topic,
       sortDate: sortDate || now,
+      meshGroupLimit,
       status: 'active',
       createdAt: now,
       updatedAt: now,
@@ -705,7 +858,7 @@ async function handleCreateClassroom(identity: TeacherIdentity, body: Record<str
 
   return {
     statusCode: 201,
-    body: JSON.stringify({ classroomId, className, assignmentName, joinCode, studentCount, googleClassroomCourseId: googleClassroomCourseId || null, groupId: groupId || null, topic: topic || null, sortDate: sortDate || now, status: 'active', createdAt: now, expiresAt }),
+    body: JSON.stringify({ classroomId, className, assignmentName, joinCode, studentCount, googleClassroomCourseId: googleClassroomCourseId || null, groupId: groupId || null, topic: topic || null, sortDate: sortDate || now, meshGroupLimit, status: 'active', createdAt: now, expiresAt }),
   };
 }
 
@@ -918,6 +1071,27 @@ function seatCountFor(
 }
 
 /**
+ * When an assignment was archived, for the class stream (#1298). Only archived
+ * items have one; items archived before archivedAt existed fall back to
+ * updatedAt (no backfill — archiving was their last write in practice).
+ */
+function archivedAtOf(item: Record<string, unknown> | undefined): string | null {
+  if (!item || item.status !== 'archived') return null;
+  return (item.archivedAt || item.updatedAt || null) as string | null;
+}
+
+/**
+ * The updatedAt that stands in for archivedAt on an item archived before
+ * archivedAt existed (see archivedAtOf), or undefined. A write that bumps
+ * updatedAt on such an item must pin this as archivedAt first, or the
+ * stream's archive time would jump to the time of that unrelated edit.
+ */
+function legacyArchivedAt(item: Record<string, unknown> | undefined): string | undefined {
+  if (!item || item.status !== 'archived' || item.archivedAt || !item.updatedAt) return undefined;
+  return item.updatedAt as string;
+}
+
+/**
  * Shape a classroom item for the teacher-facing list/detail responses, adding
  * the co-teacher list and the requesting teacher's role (owner vs co-teacher).
  */
@@ -937,15 +1111,28 @@ function mapClassroomSummary(item: Record<string, unknown>, identity: TeacherIde
     topic: item.topic || null,
     sortDate: item.sortDate || item.createdAt || null,
     hasAssignment: hasAssignmentContent(item),
+    meshGroupLimit: meshGroupLimitOf(item),
     // 共有推奨 (#1106): 書き込みは admin スタックのみ。boolean へ投影する
     // （recommendedForSharingBy = admin email は内部情報）。
     recommendedForSharing: !!item.recommendedForSharingAt,
     status: item.status,
+    archivedAt: archivedAtOf(item),
     role: item.teacherSub === identity.sub ? 'owner' : 'co-teacher',
   };
 }
 
-async function handleListClassrooms(identity: TeacherIdentity, includeArchived = false): Promise<APIGatewayProxyStructuredResultV2> {
+/**
+ * Every assignment the teacher may see (owned, co-taught, or inside a class
+ * they manage), merged by classroomId with owned rows winning. Shared by the
+ * assignment list and the pending kick-request poll (#1200) so both agree on
+ * what "this teacher's assignments" means.
+ * @param identity - verified teacher
+ * @param includeArchived - also return archived assignments
+ */
+async function listVisibleAssignments(
+  identity: TeacherIdentity,
+  includeArchived = false,
+): Promise<Record<string, unknown>[]> {
   // Assignments the teacher owns — fast GSI query on teacherSub.
   const owned = await queryAll({
     TableName: CLASSROOMS_TABLE,
@@ -985,8 +1172,12 @@ async function handleListClassrooms(identity: TeacherIdentity, includeArchived =
       byId.set(id, item);
     }
   }
+  return Array.from(byId.values());
+}
 
-  const classrooms = Array.from(byId.values()).map(item => mapClassroomSummary(item, identity));
+async function handleListClassrooms(identity: TeacherIdentity, includeArchived = false): Promise<APIGatewayProxyStructuredResultV2> {
+  const items = await listVisibleAssignments(identity, includeArchived);
+  const classrooms = items.map(item => mapClassroomSummary(item, identity));
   return { statusCode: 200, body: JSON.stringify({ classrooms }) };
 }
 
@@ -1021,7 +1212,9 @@ async function handleGetClassroom(identity: TeacherIdentity, classroomId: string
       topic: result.Item.topic || null,
       sortDate: result.Item.sortDate || result.Item.createdAt || null,
       hasAssignment: hasAssignmentContent(result.Item),
+      meshGroupLimit: meshGroupLimitOf(result.Item),
       recommendedForSharing: !!result.Item.recommendedForSharingAt,
+      archivedAt: archivedAtOf(result.Item),
       role: result.Item.teacherSub === identity.sub ? 'owner' : 'co-teacher',
     }),
   };
@@ -1147,6 +1340,18 @@ async function handleUpdateClassroom(identity: TeacherIdentity, classroomId: str
     }
     updates.status = body.status;
   }
+  // Archiving stamps archivedAt (re-archiving keeps the original time);
+  // restoring drops it so a later archive is dated afresh. Any other edit of
+  // an item archived before archivedAt existed pins its stand-in (#1298).
+  const removes: string[] = [];
+  if (updates.status === 'archived' && classroom.Item.status !== 'archived') {
+    updates.archivedAt = updates.updatedAt;
+  } else if (updates.status === 'active') {
+    removes.push('archivedAt');
+  } else {
+    const legacy = legacyArchivedAt(classroom.Item);
+    if (legacy) updates.archivedAt = legacy;
+  }
   if (body.regenerateJoinCode === true) {
     updates.joinCode = generateJoinCode();
   }
@@ -1178,6 +1383,10 @@ async function handleUpdateClassroom(identity: TeacherIdentity, classroomId: str
   if (body.sortDate !== undefined) {
     updates.sortDate = validateSortDate(body.sortDate);
   }
+  const meshGroupLimit = validateMeshGroupLimit(body.meshGroupLimit);
+  if (meshGroupLimit !== undefined) {
+    updates.meshGroupLimit = meshGroupLimit;
+  }
 
   const expressionParts: string[] = [];
   const expressionValues: Record<string, unknown> = {};
@@ -1196,7 +1405,7 @@ async function handleUpdateClassroom(identity: TeacherIdentity, classroomId: str
   const result = await docClient.send(new UpdateCommand({
     TableName: CLASSROOMS_TABLE,
     Key: { classroomId },
-    UpdateExpression: `SET ${expressionParts.join(', ')}`,
+    UpdateExpression: `SET ${expressionParts.join(', ')}${removes.length ? ` REMOVE ${removes.join(', ')}` : ''}`,
     ExpressionAttributeNames: expressionNames,
     ExpressionAttributeValues: expressionValues,
     ReturnValues: 'ALL_NEW',
@@ -1210,7 +1419,9 @@ async function handleUpdateClassroom(identity: TeacherIdentity, classroomId: str
       assignmentName: result.Attributes?.assignmentName,
       joinCode: result.Attributes?.joinCode,
       studentCount: result.Attributes?.studentCount,
+      meshGroupLimit: meshGroupLimitOf(result.Attributes),
       status: result.Attributes?.status,
+      archivedAt: archivedAtOf(result.Attributes),
     }),
   };
 }
@@ -1353,9 +1564,58 @@ async function handleJoinClassroom(sourceIp: string, body: Record<string, unknow
       seatNumber,
       memberId,
       hasAssignment: hasAssignmentContent(classroom),
+      meshGroupLimit: meshGroupLimitOf(classroom),
+      ...studentAiSettingsOf(owningGroup),
       previousComment,
     }),
   };
+}
+
+/**
+ * 席ごとの aiUsage（ルビティーの上限と今日の回数）を relay の表から読む (#1311)。
+ * relay の表が読めないときは null を返し、メンバー一覧はふつうに返す（fail-open）。
+ */
+export async function loadAiUsageBySeat(
+  classroomId: string,
+  seats: string[],
+  nowMs: number,
+): Promise<Map<string, AiUsage> | null> {
+  if (!RUBYTEE_RATE_LIMIT_TABLE || !RUBYTEE_USAGE_TABLE) return null;
+  try {
+    const uniqueSeats = [...new Set(seats)];
+    const statusRows = new Map<string, Record<string, unknown>>();
+    // BatchGetItem は 1 回 100 キーまで
+    for (let i = 0; i < uniqueSeats.length; i += 100) {
+      const chunk = uniqueSeats.slice(i, i + 100);
+      const res = await docClient.send(new BatchGetCommand({
+        RequestItems: {
+          [RUBYTEE_RATE_LIMIT_TABLE]: { Keys: chunk.map(seat => seatStatusKey(classroomId, seat)) },
+        },
+      }));
+      if (Object.keys(res.UnprocessedKeys || {}).length > 0) {
+        throw new Error('BatchGet left unprocessed keys');
+      }
+      for (const row of res.Responses?.[RUBYTEE_RATE_LIMIT_TABLE] || []) {
+        const m = /^seat#.+:([^:#]+)#current$/.exec(String(row.sourceIp));
+        if (m) statusRows.set(m[1], row);
+      }
+    }
+    const usage = await docClient.send(new QueryCommand({
+      TableName: RUBYTEE_USAGE_TABLE,
+      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :today)',
+      ExpressionAttributeValues: { ':pk': usagePk(classroomId), ':today': `${jstDate(nowMs)}#` },
+    }));
+    const today = todayCountsBySeat(usage.Items || []);
+    const nowSeconds = Math.floor(nowMs / 1000);
+    const result = new Map<string, AiUsage>();
+    for (const seat of uniqueSeats) {
+      result.set(seat, buildAiUsage(statusRows.get(seat), today.get(seat), nowSeconds));
+    }
+    return result;
+  } catch (err) {
+    console.error('[aiUsage] failed to read rubytee relay tables, returning null:', err);
+    return null;
+  }
 }
 
 async function handleListMembers(identity: TeacherIdentity, classroomId: string): Promise<APIGatewayProxyStructuredResultV2> {
@@ -1397,8 +1657,16 @@ async function handleListMembers(identity: TeacherIdentity, classroomId: string)
     }
   }
 
-  const members = (membersResult.Items || []).map(item => {
+  const memberItems = membersResult.Items || [];
+  const aiUsageBySeat = await loadAiUsageBySeat(
+    classroomId,
+    memberItems.map(item => seatFromMemberId(item.memberId)).filter((s): s is string => s !== null),
+    Date.now(),
+  );
+
+  const members = memberItems.map(item => {
     const submission = submissionMap.get(item.memberId as string);
+    const seat = seatFromMemberId(item.memberId);
     return {
       memberId: item.memberId,
       displayName: item.displayName,
@@ -1408,6 +1676,8 @@ async function handleListMembers(identity: TeacherIdentity, classroomId: string)
       hasSubmission: !!submission,
       submissionStatus: submission?.status || null,
       submittedAt: submission?.submittedAt || null,
+      // 任意フィールド (#1311)。relay の表が読めないときは null
+      aiUsage: (seat && aiUsageBySeat?.get(seat)) || null,
     };
   });
 
@@ -1438,7 +1708,7 @@ async function handleDeleteClassroom(identity: TeacherIdentity, classroomId: str
   await docClient.send(new UpdateCommand({
     TableName: CLASSROOMS_TABLE,
     Key: { classroomId },
-    UpdateExpression: 'SET #status = :status, updatedAt = :now',
+    UpdateExpression: 'SET #status = :status, updatedAt = :now, archivedAt = :now',
     ExpressionAttributeNames: { '#status': 'status' },
     ExpressionAttributeValues: { ':status': 'archived', ':now': new Date().toISOString() },
   }));
@@ -1509,6 +1779,8 @@ async function handleLookupClassroom(sourceIp: string, body: Record<string, unkn
       activeKickRequestIds,
       expiresAt: classroom.ttl ? new Date((classroom.ttl as number) * 1000).toISOString() : null,
       hasAssignment: hasAssignmentContent(classroom),
+      meshGroupLimit: meshGroupLimitOf(classroom),
+      ...studentAiSettingsOf(lookupGroup),
     }),
   };
 }
@@ -1693,6 +1965,84 @@ async function handleListKickRequests(
   };
 }
 
+// Upper bound on how many assignments one pending-kick poll looks at. A kick
+// request lives 1h and only comes from a class in progress, so the most
+// recently touched active assignments are the ones that matter; the cap keeps
+// the 10-second teacher poll (#1200) cheap even for a teacher with many.
+const PENDING_KICK_MAX_ASSIGNMENTS = 50;
+
+/** Most recent of an assignment's timestamps, for picking the "recent" ones. */
+function assignmentRecency(item: Record<string, unknown>): string {
+  return [item.updatedAt, item.sortDate, item.createdAt]
+    .filter((v): v is string => typeof v === 'string')
+    .reduce((a, b) => (a > b ? a : b), '');
+}
+
+/**
+ * Pending kick requests across the teacher's recent active assignments (#1200).
+ * Polled every ~10s by the GUI while a teacher is logged in, so the teacher
+ * notices requests without keeping the members tab open. Each assignment is a
+ * key Query on the kick-request table — nothing is scanned. Visibility follows
+ * the assignment list exactly, so another teacher's requests never appear.
+ * @param identity - verified teacher
+ * @param since - optional ISO timestamp; only requests created after it
+ */
+async function handleListPendingKickRequests(
+  identity: TeacherIdentity,
+  since: string | undefined,
+): Promise<APIGatewayProxyStructuredResultV2> {
+  if (since !== undefined && isNaN(Date.parse(since))) {
+    throw new ValidationError('since must be an ISO timestamp');
+  }
+  // createdAt is stored as toISOString() (UTC, ms); compare in that same form
+  // so `+09:00` offsets or date-only values do not break the string compare.
+  const sinceIso = since === undefined ? undefined : new Date(since).toISOString();
+  const assignments = (await listVisibleAssignments(identity))
+    .sort((a, b) => (assignmentRecency(a) < assignmentRecency(b) ? 1 : -1))
+    .slice(0, PENDING_KICK_MAX_ASSIGNMENTS);
+
+  const perAssignment = await Promise.all(assignments.map(async (classroom) => {
+    const classroomId = classroom.classroomId as string;
+    const result = await docClient.send(new QueryCommand({
+      TableName: KICK_REQUESTS_TABLE,
+      KeyConditionExpression: 'classroomId = :cid',
+      ExpressionAttributeValues: { ':cid': classroomId },
+    }));
+    const nowSec = Math.floor(Date.now() / 1000);
+    const items = (result.Items || []).filter(item =>
+      // DynamoDB TTL deletes lazily; an expired row must not ring the teacher.
+      !(typeof item.ttl === 'number' && item.ttl < nowSec) &&
+      (sinceIso === undefined || (item.createdAt as string) > sinceIso));
+    return Promise.all(items.map(async (item) => {
+      const seatNumber = item.seatNumber as number;
+      const member = await docClient.send(new GetCommand({
+        TableName: MEMBERSHIPS_TABLE,
+        Key: { classroomId, memberId: `seat-${String(seatNumber).padStart(2, '0')}` },
+        ProjectionExpression: 'displayName, kicked',
+      }));
+      const occupant = member.Item && member.Item.kicked !== true ? member.Item : undefined;
+      return {
+        requestId: item.requestId,
+        classroomId,
+        className: classroom.className || null,
+        assignmentName: classroom.assignmentName || null,
+        groupId: classroom.groupId || null,
+        seatNumber,
+        reason: item.reason || null,
+        occupantName: occupant ? (occupant.displayName as string) || null : null,
+        createdAt: item.createdAt,
+      };
+    }));
+  }));
+
+  const requests = perAssignment.flat()
+    .sort((a, b) => ((a.createdAt as string) < (b.createdAt as string) ? -1 : 1));
+  return {
+    statusCode: 200,
+    body: JSON.stringify({ requests, activeAssignmentCount: assignments.length }),
+  };
+}
+
 async function handleApproveKickRequest(
   identity: TeacherIdentity,
   classroomId: string,
@@ -1797,6 +2147,40 @@ export async function verifySessionToken(sessionToken: string): Promise<{ classr
   return { classroomId: item.classroomId as string, memberId: item.memberId as string };
 }
 
+/**
+ * Refresh a seated student's `lastActiveAt` and session TTL on verify-session.
+ * The update is conditional on the row still belonging to this
+ * session and not being kicked: verifySessionToken reads an eventually
+ * consistent GSI, so a student who just left (row deleted) or was kicked could
+ * otherwise get a bare row recreated — blocking the seat for the full session
+ * TTL — or have the short kick-tombstone TTL extended (issue #1197).
+ */
+async function touchMembershipActivity(
+  session: { classroomId: string; memberId: string },
+  sessionToken: string,
+): Promise<void> {
+  try {
+    await docClient.send(new UpdateCommand({
+      TableName: MEMBERSHIPS_TABLE,
+      Key: { classroomId: session.classroomId, memberId: session.memberId },
+      UpdateExpression: 'SET lastActiveAt = :now, #ttl = :ttl',
+      ConditionExpression: 'sessionToken = :st AND (attribute_not_exists(kicked) OR kicked <> :true)',
+      ExpressionAttributeNames: { '#ttl': 'ttl' },
+      ExpressionAttributeValues: {
+        ':now': new Date().toISOString(),
+        ':ttl': Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS,
+        ':st': sessionToken,
+        ':true': true,
+      },
+    }));
+  } catch (err: unknown) {
+    if ((err as { name?: string })?.name === 'ConditionalCheckFailedException') {
+      throw new AuthError('Invalid or expired session token');
+    }
+    throw err;
+  }
+}
+
 // --- Submission handlers ---
 
 export function validateProjectName(name: unknown): string {
@@ -1819,6 +2203,31 @@ export function validateScreenshotCount(count: unknown): number {
   return n;
 }
 
+/**
+ * Validate the optional `screenshotLabels` (#1239): the sprite name of each
+ * block screenshot, in screenshot order. undefined means an older client that
+ * sends no names; the GUI then falls back to "スプライト 1, 2…".
+ */
+export function validateScreenshotLabels(labels: unknown, screenshotCount: number): string[] | undefined {
+  if (labels === undefined || labels === null) return undefined;
+  if (!Array.isArray(labels)) {
+    throw new ValidationError('screenshotLabels must be an array');
+  }
+  if (labels.length > screenshotCount) {
+    throw new ValidationError('screenshotLabels must not outnumber the screenshots');
+  }
+  return labels.map((label, i) => {
+    if (typeof label !== 'string') {
+      throw new ValidationError(`screenshotLabels[${i}] must be a string`);
+    }
+    const trimmed = label.trim();
+    if (trimmed.length > MAX_SCREENSHOT_LABEL_LENGTH) {
+      throw new ValidationError(`screenshotLabels[${i}] must be ${MAX_SCREENSHOT_LABEL_LENGTH} characters or less`);
+    }
+    return trimmed;
+  });
+}
+
 export function validateTeacherComment(comment: unknown): string {
   if (comment === undefined || comment === null) return '';
   if (typeof comment !== 'string') {
@@ -1836,6 +2245,7 @@ async function handleCreateSubmission(
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const projectName = validateProjectName(body.projectName);
   const screenshotCount = validateScreenshotCount(body.screenshotCount);
+  const screenshotLabels = validateScreenshotLabels(body.screenshotLabels, screenshotCount);
 
   // Reject submissions to archived / expired classrooms. Memberships survive
   // an archive (issue #1050, D1), so the session token may still resolve —
@@ -1856,9 +2266,13 @@ async function handleCreateSubmission(
     ExpressionAttributeValues: { ':cid': classroomId, ':mid': memberId },
     Limit: 1,
   }));
+  // A teacher's "hide from classmates" survives a resubmission (#1239): the
+  // student must not be able to lift it by submitting again.
+  let hiddenFromPeers = false;
   if (prevResult.Items && prevResult.Items.length > 0) {
     const prev = prevResult.Items[0];
     const prevId = prev.submissionId as string;
+    hiddenFromPeers = prev.hiddenFromPeers === true;
     const prevScreenshots = (prev.screenshotCount as number) || 0;
     // Delete old S3 objects (best-effort)
     const deleteKeys = [
@@ -1929,6 +2343,8 @@ async function handleCreateSubmission(
       s3Key: s3KeyProject,
       thumbnailS3Key: s3KeyThumbnail,
       screenshotCount,
+      ...(screenshotLabels ? { screenshotLabels } : {}),
+      ...(hiddenFromPeers ? { hiddenFromPeers } : {}),
       status: 'submitted',
       submittedAt: now,
       updatedAt: now,
@@ -1947,6 +2363,180 @@ async function handleCreateSubmission(
       submittedAt: now,
     }),
   };
+}
+
+/** True when a TTL'd row is past its expiry (DynamoDB deletes expired rows lazily). */
+function isTtlExpired(item: Record<string, unknown>, nowSec: number): boolean {
+  return typeof item.ttl === 'number' && item.ttl < nowSec;
+}
+
+/**
+ * The seat's single submission in one assignment, when it can still be
+ * downloaded (has a project.sb3 and is not past its TTL).
+ */
+async function findContinuableSubmission(
+  classroomId: string, memberId: string, nowSec: number,
+): Promise<Record<string, unknown> | null> {
+  const result = await docClient.send(new QueryCommand({
+    TableName: SUBMISSIONS_TABLE,
+    IndexName: 'classroomId-memberId-index',
+    KeyConditionExpression: 'classroomId = :cid AND memberId = :mid',
+    ExpressionAttributeValues: { ':cid': classroomId, ':mid': memberId },
+    Limit: 1,
+  }));
+  const sub = result.Items?.[0];
+  if (!sub || !sub.s3Key || isTtlExpired(sub, nowSec)) return null;
+  return sub;
+}
+
+async function toContinuableSubmission(
+  classroom: Record<string, unknown>, sub: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const projectUrl = await getSignedUrl(
+    s3Client,
+    new GetObjectCommand({ Bucket: SUBMISSIONS_BUCKET, Key: sub.s3Key as string }),
+    { expiresIn: PRESIGNED_URL_DOWNLOAD_EXPIRY },
+  );
+  return {
+    classroomId: classroom.classroomId,
+    assignmentName: classroom.assignmentName || null,
+    projectName: sub.projectName || null,
+    submittedAt: sub.submittedAt || null,
+    projectUrl,
+  };
+}
+
+/**
+ * Submissions a student can continue from (#1201): their own submission in
+ * this assignment (`current`) and the same seat's submission in the most
+ * recent earlier assignment of the same class (`previous`) — the same
+ * seat-number correspondence `previousComment` uses at join. Seats are
+ * anonymous, so whoever sits in that seat can load it (documented in
+ * docs/classroom/architecture.md). The caller has already matched the
+ * session to `classroomId`.
+ */
+async function handleListContinuableSubmissions(
+  classroomId: string, memberId: string,
+): Promise<APIGatewayProxyStructuredResultV2> {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const classroomResult = await docClient.send(new GetCommand({
+    TableName: CLASSROOMS_TABLE,
+    Key: { classroomId },
+  }));
+  const classroom = classroomResult.Item;
+  if (!classroom || classroom.status !== 'active' || isTtlExpired(classroom, nowSec)) {
+    throw new NotFoundError('This classroom is no longer active');
+  }
+
+  const currentSub = await findContinuableSubmission(classroomId, memberId, nowSec);
+  const current = currentSub ? await toContinuableSubmission(classroom, currentSub) : null;
+
+  let previous: Record<string, unknown> | null = null;
+  if (classroom.groupId) {
+    const createdAt = String(classroom.createdAt || '');
+    const siblings = await listAssignmentsInGroups([classroom.groupId as string]);
+    // Only assignments created before this one count as "last time"; a
+    // later assignment (e.g. re-opening an old one) must not be offered.
+    const earlier = siblings.filter(item =>
+      String(item.createdAt || '') < createdAt && !isTtlExpired(item, nowSec));
+    for (const prior of selectPriorClassrooms(earlier, classroom.groupId as string, classroomId)) {
+      const sub = await findContinuableSubmission(prior.classroomId as string, memberId, nowSec);
+      if (sub) {
+        previous = await toContinuableSubmission(prior, sub);
+        break;
+      }
+    }
+  }
+
+  return {
+    statusCode: 200,
+    body: JSON.stringify({ current, previous, startFromPrevious: startFromPreviousOf(classroom) }),
+  };
+}
+
+/** Presigned GET URLs of a submission's block screenshots, in order. */
+async function screenshotUrlsOf(item: Record<string, unknown>): Promise<string[]> {
+  const ssCount = typeof item.screenshotCount === 'number' ? item.screenshotCount : 0;
+  const screenshotUrls: string[] = [];
+  for (let i = 0; i < ssCount; i++) {
+    screenshotUrls.push(await getSignedUrl(
+      s3Client,
+      new GetObjectCommand({
+        Bucket: SUBMISSIONS_BUCKET,
+        Key: `${item.classroomId}/${item.submissionId}/screenshot-${i}.png`,
+      }),
+      { expiresIn: PRESIGNED_URL_DOWNLOAD_EXPIRY },
+    ));
+  }
+  return screenshotUrls;
+}
+
+/** Sprite names of the screenshots (#1239); null for submissions made before names were sent. */
+function screenshotLabelsOf(item: Record<string, unknown>): string[] | null {
+  return Array.isArray(item.screenshotLabels) ? item.screenshotLabels as string[] : null;
+}
+
+/** Seat number from the seat-based memberId (`seat-03` → 3). */
+function seatNumberOfMemberId(memberId: unknown): number {
+  const match = /^seat-(\d+)$/.exec(String(memberId));
+  return match ? parseInt(match[1], 10) : 0;
+}
+
+/**
+ * Classmates' submissions in the same assignment for peer view (#1239).
+ * Only what a classmate may see is returned — seat number, submitted time,
+ * and presigned image URLs with sprite names. The .sb3, the nickname and the
+ * teacher's comment never leave this function, so a student cannot copy the
+ * work or learn who made it beyond the seat. The caller has already matched
+ * the session to `classroomId`, so other assignments' submissions are never
+ * queried.
+ */
+async function handleListPeerSubmissions(
+  classroomId: string, memberId: string,
+): Promise<APIGatewayProxyStructuredResultV2> {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const classroomResult = await docClient.send(new GetCommand({
+    TableName: CLASSROOMS_TABLE,
+    Key: { classroomId },
+  }));
+  const classroom = classroomResult.Item;
+  if (!classroom || classroom.status !== 'active' || isTtlExpired(classroom, nowSec)) {
+    throw new NotFoundError('This classroom is no longer active');
+  }
+
+  const peerView = peerViewOf(classroom);
+  if (peerView === 'none') {
+    throw new PeerViewForbiddenError('peer-view-off');
+  }
+
+  const items = await queryAll({
+    TableName: SUBMISSIONS_TABLE,
+    KeyConditionExpression: 'classroomId = :cid',
+    ExpressionAttributeValues: { ':cid': classroomId },
+  });
+  const live = items.filter(item => !isTtlExpired(item, nowSec));
+  if (peerView === 'afterSubmit' && !live.some(item => item.memberId === memberId)) {
+    throw new PeerViewForbiddenError('not-submitted');
+  }
+
+  const visible = live
+    .filter(item => item.memberId !== memberId && item.hiddenFromPeers !== true)
+    .sort((a, b) => seatNumberOfMemberId(a.memberId) - seatNumberOfMemberId(b.memberId));
+  const submissions = await Promise.all(visible.map(async item => ({
+    seatNumber: seatNumberOfMemberId(item.memberId),
+    submittedAt: item.submittedAt || null,
+    thumbnailUrl: item.thumbnailS3Key
+      ? await getSignedUrl(
+        s3Client,
+        new GetObjectCommand({ Bucket: SUBMISSIONS_BUCKET, Key: item.thumbnailS3Key as string }),
+        { expiresIn: PRESIGNED_URL_DOWNLOAD_EXPIRY },
+      )
+      : null,
+    screenshotUrls: await screenshotUrlsOf(item),
+    screenshotLabels: screenshotLabelsOf(item),
+  })));
+
+  return { statusCode: 200, body: JSON.stringify({ peerView, submissions }) };
 }
 
 async function handleListSubmissions(
@@ -1991,20 +2581,7 @@ async function handleListSubmissions(
           { expiresIn: PRESIGNED_URL_DOWNLOAD_EXPIRY },
         );
       }
-      // Generate presigned URLs for screenshots
-      const ssCount = typeof item.screenshotCount === 'number' ? item.screenshotCount : 0;
-      const screenshotUrls: string[] = [];
-      for (let i = 0; i < ssCount; i++) {
-        const ssUrl = await getSignedUrl(
-          s3Client,
-          new GetObjectCommand({
-            Bucket: SUBMISSIONS_BUCKET,
-            Key: `${item.classroomId}/${item.submissionId}/screenshot-${i}.png`,
-          }),
-          { expiresIn: PRESIGNED_URL_DOWNLOAD_EXPIRY },
-        );
-        screenshotUrls.push(ssUrl);
-      }
+      const screenshotUrls = await screenshotUrlsOf(item);
 
       return {
         submissionId: item.submissionId,
@@ -2016,6 +2593,8 @@ async function handleListSubmissions(
         thumbnailUrl,
         projectUrl,
         screenshotUrls,
+        screenshotLabels: screenshotLabelsOf(item),
+        hiddenFromPeers: item.hiddenFromPeers === true,
       };
     })
   );
@@ -2060,6 +2639,17 @@ async function handleUpdateSubmission(
     exprValues[':tc'] = comment;
   }
 
+  if (body.hiddenFromPeers !== undefined) {
+    // Teacher hides this submission from classmates' peer view (#1239).
+    if (typeof body.hiddenFromPeers !== 'boolean') {
+      throw new ValidationError('hiddenFromPeers must be a boolean');
+    }
+    updates.hiddenFromPeers = body.hiddenFromPeers;
+    exprParts.push('#hfp = :hfp');
+    exprNames['#hfp'] = 'hiddenFromPeers';
+    exprValues[':hfp'] = body.hiddenFromPeers;
+  }
+
   if (body.status !== undefined) {
     if (body.status !== 'returned') {
       throw new ValidationError('Status can only be set to "returned"');
@@ -2096,6 +2686,131 @@ async function handleUpdateSubmission(
 }
 
 // --- Google Classroom handlers ---
+
+/**
+ * Snapshot of the teacher who linked a Google Classroom course to a class.
+ *
+ * Before issue #1184 only the course id was stored, so when a co-teacher hit
+ * Google's "you are not a teacher of this course" wall there was no way to tell
+ * them who to ask. `email` is kept for display (it is the same address the
+ * owner already types when inviting co-teachers) and may be null when the
+ * identity provider supplies no email claim.
+ */
+export interface GoogleClassroomLinkedBy {
+  sub: string;
+  email: string | null;
+}
+
+/**
+ * Build the attribution to store when a class gets linked to a GC course.
+ * @param identity - the teacher performing the link
+ * @returns the attribution to persist on the group item
+ */
+export function buildGoogleClassroomLinkedBy(identity: TeacherIdentity): GoogleClassroomLinkedBy {
+  return {
+    sub: identity.sub,
+    email: identity.email ? normalizeEmail(identity.email) : null,
+  };
+}
+
+/**
+ * Read the attribution back off a group item.
+ *
+ * Classes linked before #1184 carry no attribution, so fall back to the class
+ * owner — they are the only teacher who could have linked it under the old
+ * flow. The email is unknown in that case; the UI then names the linker
+ * generically instead of guessing.
+ * @param item - the group item (may be undefined)
+ * @returns the attribution, or null when there is nothing to attribute to
+ */
+export function readGoogleClassroomLinkedBy(
+  item: Record<string, unknown> | undefined,
+): GoogleClassroomLinkedBy | null {
+  const stored = item?.googleClassroomLinkedBy;
+  if (stored && typeof stored === 'object') {
+    const { sub, email } = stored as { sub?: unknown; email?: unknown };
+    if (typeof sub === 'string' && sub) {
+      return { sub, email: typeof email === 'string' && email ? email : null };
+    }
+  }
+  const owner = item?.teacherSub;
+  if (typeof owner === 'string' && owner) {
+    return { sub: owner, email: null };
+  }
+  return null;
+}
+
+/**
+ * Is this teacher the one who linked the class to its GC course?
+ *
+ * The linker is the only teacher Smalruby knows to be a teacher of the course
+ * (they picked it from their own `teacherId=me` list), so they are the one
+ * teacher allowed to share without proving anything — and the one teacher who
+ * must never be told to "ask the teacher who linked it", which would be
+ * themselves (issue #1184).
+ * @param identity - the signed-in teacher
+ * @param item - the group item (or, for pre-v2 links, the classroom item)
+ * @returns true when this teacher linked the course
+ */
+export function isGoogleClassroomLinker(
+  identity: TeacherIdentity,
+  item: Record<string, unknown> | undefined,
+): boolean {
+  const linkedBy = readGoogleClassroomLinkedBy(item);
+  return Boolean(linkedBy && linkedBy.sub === identity.sub);
+}
+
+/**
+ * Decide what a failed "am I a teacher of this course?" probe proves.
+ *
+ * Google answers 404 for a course the caller is not a member of (it hides the
+ * existence of other people's courses), so only that status proves "not a
+ * teacher". An expired token, a missing scope or a Google outage prove nothing
+ * — those stay `unknown` so the UI leaves the share button enabled rather than
+ * blocking a teacher who is in fact allowed (issue #1184).
+ * @param statusCode - the HTTP status Google answered with
+ * @returns 'notTeacher' when proven, 'unknown' otherwise
+ */
+export function classifyCourseTeacherFailure(statusCode: number): 'notTeacher' | 'unknown' {
+  return statusCode === 404 ? 'notTeacher' : 'unknown';
+}
+
+/**
+ * Report whether the caller can post course work to the class's linked GC
+ * course, so the UI can disable the share button before the teacher hits a
+ * Google error (issue #1184).
+ *
+ * Probes `courses/{id}/teachers/me`, which is cheap and answers exactly the
+ * question Google enforces on courseWork creation: a GC co-teacher of the same
+ * course passes, a Smalruby co-teacher who is not in the course does not.
+ */
+async function handleGetGoogleCourseAccess(
+  identity: TeacherIdentity,
+  accessToken: string,
+  groupId: string,
+): Promise<APIGatewayProxyStructuredResultV2> {
+  const group = await getManageableGroup(identity, groupId);
+  const courseId = typeof group.googleClassroomCourseId === 'string' ? group.googleClassroomCourseId : '';
+  const linkedBy = readGoogleClassroomLinkedBy(group);
+  const linkedByMe = isGoogleClassroomLinker(identity, group);
+  const linkedByEmail = linkedBy && !linkedByMe ? linkedBy.email : null;
+  if (!courseId) {
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ courseId: null, status: 'notLinked', linkedByEmail: null, linkedByMe: false }),
+    };
+  }
+
+  let status: 'teacher' | 'notTeacher' | 'unknown';
+  try {
+    await callGoogleClassroomAPI(accessToken, `courses/${courseId}/teachers/me`);
+    status = 'teacher';
+  } catch (err) {
+    if (!(err instanceof GoogleAPIError)) throw err;
+    status = classifyCourseTeacherFailure(err.statusCode);
+  }
+  return { statusCode: 200, body: JSON.stringify({ courseId, status, linkedByEmail, linkedByMe }) };
+}
 
 async function handleListGoogleCourses(accessToken: string): Promise<APIGatewayProxyStructuredResultV2> {
   const data = await callGoogleClassroomAPI(accessToken, 'courses?teacherId=me&courseStates=ACTIVE&pageSize=100') as {
@@ -2199,6 +2914,8 @@ async function handleImportGoogleClassroom(
       joinCode,
       studentCount,
       googleClassroomCourseId: courseId,
+      // A new assignment always stores its mesh group limit (#1255).
+      meshGroupLimit: DEFAULT_MESH_GROUP_LIMIT,
       status: 'active',
       createdAt: now,
       updatedAt: now,
@@ -2214,6 +2931,7 @@ async function handleImportGoogleClassroom(
       joinCode,
       studentCount,
       googleClassroomCourseId: courseId,
+      meshGroupLimit: DEFAULT_MESH_GROUP_LIMIT,
       status: 'active',
       createdAt: now,
       expiresAt,
@@ -2257,13 +2975,21 @@ async function handlePostAssignment(
   // v2: the GC link lives on the class (group); the assignment's own field
   // remains as a pre-v2 fallback. Only look the group up when the assignment
   // itself carries no courseId.
+  // Attribution belongs to whichever item carries the link we are about to
+  // post to: the class (group) for v2 links, the assignment itself for pre-v2
+  // ones (`readGoogleClassroomLinkedBy` then falls back to its owner, the only
+  // teacher who could have linked it back then).
   let courseId = resolveGoogleCourseId(result.Item, undefined);
+  let linkedByItem: Record<string, unknown> = result.Item;
   if (!courseId && typeof result.Item.groupId === 'string' && result.Item.groupId) {
     const groupResult = await docClient.send(new GetCommand({
       TableName: GROUPS_TABLE,
       Key: { groupId: result.Item.groupId },
     }));
     courseId = resolveGoogleCourseId(result.Item, groupResult.Item);
+    if (courseId && groupResult.Item) {
+      linkedByItem = groupResult.Item;
+    }
   }
   if (!courseId) {
     throw new ValidationError('This classroom is not linked to Google Classroom');
@@ -2289,13 +3015,24 @@ async function handlePostAssignment(
   }
   const description = typeof body.description === 'string' ? body.description.trim() : '';
 
-  const courseWork = await callGoogleClassroomAPI(accessToken, `courses/${courseId}/courseWork`, 'POST', {
-    title: title.trim(),
-    description: description || undefined,
-    workType: 'ASSIGNMENT',
-    state: 'PUBLISHED',
-    materials: [{ link: { url: link, title: 'スモウルビーで開く' } }],
-  }) as { id: string; alternateLink: string };
+  const courseWork = await callGoogleClassroomAPI(
+    accessToken,
+    `courses/${courseId}/courseWork`,
+    'POST',
+    {
+      title: title.trim(),
+      description: description || undefined,
+      workType: 'ASSIGNMENT',
+      state: 'PUBLISHED',
+      materials: [{ link: { url: link, title: 'スモウルビーで開く' } }],
+    },
+    // A 404 means something different depending on who pressed the button: for
+    // anyone but the linker it is "you are not a teacher of that course", but
+    // the linker *is* one, so for them it means the course is gone or no longer
+    // reachable — telling them to ask the teacher who linked it would point
+    // them at themselves (issue #1184).
+    isGoogleClassroomLinker(identity, linkedByItem) ? 'postCourseWorkAsLinker' : 'postCourseWork',
+  ) as { id: string; alternateLink: string };
 
   // Persist courseWork info to prevent duplicate posting
   await docClient.send(new UpdateCommand({
@@ -2356,18 +3093,13 @@ async function handleVerifySession(sessionToken: string): Promise<APIGatewayProx
     throw new AuthError('This classroom is no longer active');
   }
 
-  // Update lastActiveAt and extend TTL on each verify call
-  const now = new Date().toISOString();
-  await docClient.send(new UpdateCommand({
-    TableName: MEMBERSHIPS_TABLE,
-    Key: { classroomId: session.classroomId, memberId: session.memberId },
-    UpdateExpression: 'SET lastActiveAt = :now, #ttl = :ttl',
-    ExpressionAttributeNames: { '#ttl': 'ttl' },
-    ExpressionAttributeValues: {
-      ':now': now,
-      ':ttl': Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS,
-    },
-  }));
+  // Update lastActiveAt and extend TTL on each verify call. The owning class
+  // is read alongside so the teacher's AI settings (#1275) reach students who
+  // joined before the change.
+  const [, owningGroup] = await Promise.all([
+    touchMembershipActivity(session, sessionToken),
+    getOwningGroup(classroomResult.Item),
+  ]);
 
   if (subResult.Items && subResult.Items.length > 0) {
     const item = subResult.Items[0];
@@ -2384,6 +3116,9 @@ async function handleVerifySession(sessionToken: string): Promise<APIGatewayProx
       valid: true,
       submission,
       hasAssignment: hasAssignmentContent(classroomResult.Item),
+      // The teacher may change the limit after the student joined (#1255).
+      meshGroupLimit: meshGroupLimitOf(classroomResult.Item),
+      ...studentAiSettingsOf(owningGroup),
     }),
   };
 }
@@ -2671,7 +3406,163 @@ async function ensureGroupTopic(
   }));
 }
 
-function mapGroupSummary(item: Record<string, unknown>) {
+// --- Class-level AI settings (issue #1275) ---
+// The teacher decides per class whether students see a generative-AI link and
+// Rubytee. Classes written before this feature have neither attribute, which
+// reads as "both disabled".
+
+export type GenaiService = 'gemini' | 'chatgpt' | 'other';
+
+export interface GenaiSetting {
+  enabled: boolean;
+  service: GenaiService | null;
+  url: string | null;
+  /** The teacher confirmed the service's terms (age limits etc.) for this class. */
+  confirmed: boolean;
+}
+
+const GENAI_DEFAULT_URLS: Record<GenaiService, string | null> = {
+  gemini: 'https://gemini.google.com/app',
+  chatgpt: 'https://chatgpt.com/',
+  other: null,
+};
+
+// Services whose terms require users to be 18+ cannot be offered to school
+// students, even through the free-form "other" URL.
+const GENAI_ADULT_ONLY_HOSTS = ['claude.ai', 'claude.com', 'anthropic.com'];
+
+const MAX_GENAI_URL_LENGTH = 2048;
+
+// Own-property check: `in` would also accept inherited names like 'toString'.
+function isGenaiService(value: unknown): value is GenaiService {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(GENAI_DEFAULT_URLS, value);
+}
+
+function validateGenaiUrl(value: unknown): string {
+  if (typeof value !== 'string') {
+    throw new ValidationError('genai.url must be an https URL');
+  }
+  const trimmed = value.trim();
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new ValidationError('genai.url must be an https URL');
+  }
+  if (parsed.protocol !== 'https:' || trimmed.length > MAX_GENAI_URL_LENGTH) {
+    throw new ValidationError('genai.url must be an https URL');
+  }
+  // A trailing dot names the same host ("claude.ai." is claude.ai), so drop it
+  // before comparing or the block list is trivially bypassed.
+  const host = parsed.hostname.toLowerCase().replace(/\.+$/, '');
+  if (GENAI_ADULT_ONLY_HOSTS.some(blocked => host === blocked || host.endsWith(`.${blocked}`))) {
+    throw new ValidationError('genai.url points to a service that is not available to students');
+  }
+  return trimmed;
+}
+
+/** The stored genai setting of a class, defaulting to disabled. */
+export function genaiSettingOf(group: Record<string, unknown> | undefined): GenaiSetting {
+  const raw = group?.genai;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { enabled: false, service: null, url: null, confirmed: false };
+  }
+  const value = raw as Record<string, unknown>;
+  const service = isGenaiService(value.service) ? value.service : null;
+  return {
+    enabled: value.enabled === true && service !== null,
+    service,
+    url: typeof value.url === 'string' ? value.url : null,
+    confirmed: value.confirmed === true,
+  };
+}
+
+/** The stored rubytee setting of a class, defaulting to disabled. */
+export function rubyteeSettingOf(group: Record<string, unknown> | undefined): { enabled: boolean } {
+  const raw = group?.rubytee as Record<string, unknown> | undefined;
+  return { enabled: Boolean(raw && typeof raw === 'object' && raw.enabled === true) };
+}
+
+/**
+ * Validate a (partial) genai update and merge it onto the stored setting.
+ * Changing the service without a url switches to that service's default URL.
+ * Enabling needs a service, the teacher's confirmation and a URL.
+ * @param value - the `genai` object of the request body
+ * @param group - the stored class, whose setting the update is merged onto
+ * @returns the full setting to store
+ */
+export function validateGenaiSetting(value: unknown, group?: Record<string, unknown>): GenaiSetting {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ValidationError('genai must be an object');
+  }
+  const input = value as Record<string, unknown>;
+  const next = genaiSettingOf(group);
+  const previous = { service: next.service, url: next.url };
+
+  if (input.service !== undefined) {
+    if (!isGenaiService(input.service)) {
+      throw new ValidationError(`genai.service must be one of: ${Object.keys(GENAI_DEFAULT_URLS).join(', ')}`);
+    }
+    if (input.service !== next.service && input.url === undefined) {
+      next.url = GENAI_DEFAULT_URLS[input.service];
+    }
+    next.service = input.service;
+  }
+  if (input.url !== undefined) {
+    next.url = input.url === null || input.url === ''
+      ? (next.service ? GENAI_DEFAULT_URLS[next.service] : null)
+      : validateGenaiUrl(input.url);
+  }
+  if (next.service && next.url === null) {
+    next.url = GENAI_DEFAULT_URLS[next.service];
+  }
+  // The teacher's confirmation is about one service's terms (age, consent), so a
+  // change of service or URL needs a fresh confirmation unless it comes with one.
+  if ((next.service !== previous.service || next.url !== previous.url) && input.confirmed === undefined) {
+    next.confirmed = false;
+  }
+  for (const key of ['enabled', 'confirmed'] as const) {
+    if (input[key] !== undefined) {
+      if (typeof input[key] !== 'boolean') {
+        throw new ValidationError(`genai.${key} must be a boolean`);
+      }
+      next[key] = input[key] as boolean;
+    }
+  }
+
+  if (next.enabled) {
+    if (!next.service) {
+      throw new ValidationError('genai.service is required to enable generative AI');
+    }
+    if (!next.confirmed) {
+      throw new ValidationError('genai.confirmed must be true to enable generative AI');
+    }
+    if (!next.url) {
+      throw new ValidationError('genai.url is required to enable generative AI');
+    }
+  }
+  return next;
+}
+
+export function validateRubyteeSetting(value: unknown): { enabled: boolean } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || typeof (value as Record<string, unknown>).enabled !== 'boolean') {
+    throw new ValidationError('rubytee.enabled must be a boolean');
+  }
+  return { enabled: (value as Record<string, unknown>).enabled as boolean };
+}
+
+/**
+ * The AI settings a student sees for the class owning their assignment.
+ * `confirmed` is the teacher's own checkbox, so it is not sent. Assignments
+ * outside a class (pre-v2) have no settings and read as disabled.
+ */
+export function studentAiSettingsOf(group: Record<string, unknown> | undefined) {
+  const { enabled, service, url } = genaiSettingOf(group);
+  return { genai: { enabled, service, url }, rubytee: rubyteeSettingOf(group) };
+}
+
+function mapGroupSummary(item: Record<string, unknown>, identity?: TeacherIdentity) {
   return {
     groupId: item.groupId,
     name: item.name,
@@ -2681,8 +3572,22 @@ function mapGroupSummary(item: Record<string, unknown>) {
     schemaVersion: typeof item.schemaVersion === 'number' ? item.schemaVersion : 1,
     topics: Array.isArray(item.topics) ? item.topics : [],
     googleClassroomCourseId: item.googleClassroomCourseId || null,
+    // Who linked the GC course (#1184). Only the email is exposed — enough for
+    // "ask ◯◯ sensei" and the same address co-teachers are invited by.
+    googleClassroomLinkedByEmail: item.googleClassroomCourseId
+      ? (readGoogleClassroomLinkedBy(item)?.email ?? null)
+      : null,
+    // Whether *this* teacher linked it. The UI blocks sharing by default for
+    // everyone else (a Smalruby co-teacher is usually not in the GC course and
+    // can never become one across Workspaces), so it needs a server-decided
+    // boolean — matching email strings client-side breaks on case and aliases.
+    googleClassroomLinkedByMe: Boolean(
+      item.googleClassroomCourseId && identity && isGoogleClassroomLinker(identity, item),
+    ),
     studentCount: typeof item.studentCount === 'number' ? item.studentCount : null,
     coTeacherEmails: readCoTeacherEmails(item),
+    genai: genaiSettingOf(item),
+    rubytee: rubyteeSettingOf(item),
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
   };
@@ -2717,10 +3622,14 @@ async function handleCreateGroup(identity: TeacherIdentity, body: Record<string,
   }
   if (typeof body.googleClassroomCourseId === 'string' && body.googleClassroomCourseId.trim()) {
     item.googleClassroomCourseId = body.googleClassroomCourseId.trim();
+    // Only this teacher's Google account is known to be a teacher of that
+    // course (the list it was picked from is `teacherId=me`), so record them
+    // as the linker (#1184).
+    item.googleClassroomLinkedBy = buildGoogleClassroomLinkedBy(identity);
   }
   await docClient.send(new PutCommand({ TableName: GROUPS_TABLE, Item: item }));
 
-  return { statusCode: 201, body: JSON.stringify(mapGroupSummary(item)) };
+  return { statusCode: 201, body: JSON.stringify(mapGroupSummary(item, identity)) };
 }
 
 async function handleListGroups(identity: TeacherIdentity): Promise<APIGatewayProxyStructuredResultV2> {
@@ -2732,7 +3641,7 @@ async function handleListGroups(identity: TeacherIdentity): Promise<APIGatewayPr
   });
   const coManaged = await listCoManagedGroups(identity);
   const groups = [...result, ...coManaged].map(item => ({
-    ...mapGroupSummary(item),
+    ...mapGroupSummary(item, identity),
     role: item.teacherSub === identity.sub ? 'owner' : 'co-teacher',
   }));
   return { statusCode: 200, body: JSON.stringify({ groups }) };
@@ -2769,8 +3678,11 @@ async function handleUpdateGroup(identity: TeacherIdentity, groupId: string, bod
   if (body.googleClassroomCourseId !== undefined) {
     if (body.googleClassroomCourseId === null || body.googleClassroomCourseId === '') {
       updates.googleClassroomCourseId = null;
+      updates.googleClassroomLinkedBy = null;
     } else if (typeof body.googleClassroomCourseId === 'string') {
       updates.googleClassroomCourseId = body.googleClassroomCourseId.trim();
+      // Re-linking moves the attribution to whoever linked it now (#1184).
+      updates.googleClassroomLinkedBy = buildGoogleClassroomLinkedBy(identity);
     } else {
       throw new ValidationError('googleClassroomCourseId must be a string or null');
     }
@@ -2780,6 +3692,12 @@ async function handleUpdateGroup(identity: TeacherIdentity, groupId: string, bod
       throw new ValidationError('coTeacherEmails must be an array');
     }
     updates.coTeacherEmails = [...new Set(body.coTeacherEmails.map(validateCoTeacherEmail))];
+  }
+  if (body.genai !== undefined) {
+    updates.genai = validateGenaiSetting(body.genai, group);
+  }
+  if (body.rubytee !== undefined) {
+    updates.rubytee = validateRubyteeSetting(body.rubytee);
   }
 
   const expressionParts: string[] = [];
@@ -2820,7 +3738,7 @@ async function handleUpdateGroup(identity: TeacherIdentity, groupId: string, bod
     await propagateStudentCountToClassrooms(groupId, updates.studentCount as number);
   }
 
-  return { statusCode: 200, body: JSON.stringify(mapGroupSummary(result.Attributes || {})) };
+  return { statusCode: 200, body: JSON.stringify(mapGroupSummary(result.Attributes || {}, identity)) };
 }
 
 /**
@@ -2983,13 +3901,21 @@ async function handleUpdateGroupTopics(
     const targets = (await listAssignmentsInGroups([groupId]))
       .filter(assignment => assignment.topic === fromTopic);
     for (const item of targets) {
+      // Archived assignments follow the rename too; pin the legacy archive
+      // time before updatedAt moves (#1298).
+      const legacy = legacyArchivedAt(item);
+      const pin = legacy ? ', archivedAt = :archivedAt' : '';
       await docClient.send(new UpdateCommand({
         TableName: CLASSROOMS_TABLE,
         Key: { classroomId: item.classroomId },
         UpdateExpression: toTopic === null
-          ? 'REMOVE topic SET updatedAt = :now'
-          : 'SET topic = :to, updatedAt = :now',
-        ExpressionAttributeValues: toTopic === null ? { ':now': now } : { ':to': toTopic, ':now': now },
+          ? `REMOVE topic SET updatedAt = :now${pin}`
+          : `SET topic = :to, updatedAt = :now${pin}`,
+        ExpressionAttributeValues: {
+          ':now': now,
+          ...(toTopic === null ? {} : { ':to': toTopic }),
+          ...(legacy ? { ':archivedAt': legacy } : {}),
+        },
       }));
     }
   };
@@ -3032,7 +3958,7 @@ async function handleUpdateGroupTopics(
     ExpressionAttributeValues: { ':topics': topics, ':now': now },
     ReturnValues: 'ALL_NEW',
   }));
-  return { statusCode: 200, body: JSON.stringify(mapGroupSummary(result.Attributes || {})) };
+  return { statusCode: 200, body: JSON.stringify(mapGroupSummary(result.Attributes || {}, identity)) };
 }
 
 /**
@@ -3129,6 +4055,13 @@ async function handleDuplicateClassroom(
       topic,
       sortDate: now,
       assignment,
+      // Reusing a lesson keeps how students start it (#1202).
+      ...(startFromPreviousOf(source) ? { startFromPrevious: true } : {}),
+      // ...and who may see classmates' work (#1239). 'none' is the default, left unset.
+      ...(peerViewOf(source) !== 'none' ? { peerView: peerViewOf(source) } : {}),
+      // ...and how big its mesh groups may be (#1255), copied as stored: an
+      // unset (pre-#1255, no limit) source stays unset.
+      ...(hasStoredMeshGroupLimit(source) ? { meshGroupLimit: source.meshGroupLimit } : {}),
       status: 'active',
       createdAt: now,
       updatedAt: now,
@@ -3148,6 +4081,7 @@ async function handleDuplicateClassroom(
       topic: topic || null,
       sortDate: now,
       hasAssignment: !!assignment,
+      meshGroupLimit: meshGroupLimitOf(source),
       status: 'active',
       createdAt: now,
       expiresAt: new Date(ttl * 1000).toISOString(),
@@ -3222,6 +4156,91 @@ export function validateAssignmentPages(
   });
 }
 
+/**
+ * Validate the optional `startFromPrevious` setting (#1202) of a
+ * set-assignment request. undefined means "not sent" (an older client) and
+ * keeps the stored value.
+ */
+export function validateStartFromPrevious(value: unknown): boolean | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'boolean') {
+    throw new ValidationError('startFromPrevious must be a boolean');
+  }
+  return value;
+}
+
+/**
+ * The "start from the previous submission" setting of an assignment item
+ * (#1202). Stored on the item, not inside `assignment`, so it survives an
+ * assignment without pages or starter (a follow-up lesson often has neither).
+ */
+export function startFromPreviousOf(item: Record<string, unknown> | undefined): boolean {
+  return item?.startFromPrevious === true;
+}
+
+/** Who may see classmates' submissions of an assignment (#1239). */
+export const PEER_VIEW_VALUES = ['none', 'always', 'afterSubmit'] as const;
+export type PeerView = typeof PEER_VIEW_VALUES[number];
+
+/**
+ * Validate the optional `peerView` setting (#1239) of a set-assignment
+ * request. undefined means "not sent" (an older client) and keeps the stored
+ * value, the same as `startFromPrevious`.
+ */
+export function validatePeerView(value: unknown): PeerView | undefined {
+  if (value === undefined) return undefined;
+  if (!PEER_VIEW_VALUES.includes(value as PeerView)) {
+    throw new ValidationError(`peerView must be one of: ${PEER_VIEW_VALUES.join(', ')}`);
+  }
+  return value as PeerView;
+}
+
+/** The peer view setting of an assignment item; items saved before #1239 are 'none'. */
+export function peerViewOf(item: Record<string, unknown> | undefined): PeerView {
+  const value = item?.peerView;
+  return PEER_VIEW_VALUES.includes(value as PeerView) ? value as PeerView : 'none';
+}
+
+/**
+ * Size cap of a mesh group made by seat number (#1255): 6 caps a group at six
+ * students and 0 means "no limit". Only these two values are accepted for now;
+ * widening the set later stays backward compatible, narrowing it would not.
+ *
+ * Every newly created assignment stores 6 explicitly. An item without the
+ * field (saved before #1255) has no limit, so existing lessons keep working
+ * the way mesh worked before the cap existed.
+ */
+export const DEFAULT_MESH_GROUP_LIMIT = 6;
+export const MESH_GROUP_NO_LIMIT = 0;
+export const MESH_GROUP_LIMIT_VALUES = [DEFAULT_MESH_GROUP_LIMIT, MESH_GROUP_NO_LIMIT] as const;
+
+/**
+ * Validate the optional `meshGroupLimit` (#1255) of a create/update request.
+ * undefined means "not sent" (an older client): create stores the default,
+ * update keeps the stored value.
+ */
+export function validateMeshGroupLimit(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  if (!MESH_GROUP_LIMIT_VALUES.includes(value as typeof MESH_GROUP_LIMIT_VALUES[number])) {
+    throw new ValidationError(`meshGroupLimit must be one of: ${MESH_GROUP_LIMIT_VALUES.join(', ')} (0 = no limit)`);
+  }
+  return value as number;
+}
+
+/** Whether an item stores a valid mesh group limit (items saved before #1255 do not). */
+function hasStoredMeshGroupLimit(item: Record<string, unknown> | undefined): boolean {
+  return MESH_GROUP_LIMIT_VALUES.includes(item?.meshGroupLimit as typeof MESH_GROUP_LIMIT_VALUES[number]);
+}
+
+/**
+ * The mesh group limit of an assignment item as the API returns it: the stored
+ * value, or 0 ("no limit") for items saved before #1255. Responses therefore
+ * always carry 6 or 0 and clients never interpret a missing field.
+ */
+export function meshGroupLimitOf(item: Record<string, unknown> | undefined): number {
+  return hasStoredMeshGroupLimit(item) ? item!.meshGroupLimit as number : MESH_GROUP_NO_LIMIT;
+}
+
 /** Whether a classroom item carries assignment content (pages or a starter). */
 export function hasAssignmentContent(item: Record<string, unknown> | undefined): boolean {
   if (!item) return false;
@@ -3245,6 +4264,8 @@ async function handleSetAssignment(
   }
 
   const pagesInput = validateAssignmentPages(body.pages, classroomId);
+  const startFromPreviousInput = validateStartFromPrevious(body.startFromPrevious);
+  const peerViewInput = validatePeerView(body.peerView);
   const keepStarter = body.keepStarter === true;
   const newStarter = body.newStarter === true;
   if (keepStarter && newStarter) {
@@ -3311,24 +4332,33 @@ async function handleSetAssignment(
   }
 
   const now = new Date().toISOString();
+  // Only written when the client sent it, so an older client keeps the value.
+  const setStartFromPrevious = startFromPreviousInput === undefined ? '' : ', startFromPrevious = :sfp';
+  const startFromPreviousValues = startFromPreviousInput === undefined ? {} : { ':sfp': startFromPreviousInput };
+  const startFromPrevious = startFromPreviousInput ?? startFromPreviousOf(classroomResult.Item);
+  const setPeerView = peerViewInput === undefined ? '' : ', peerView = :pv';
+  const peerViewValues = peerViewInput === undefined ? {} : { ':pv': peerViewInput };
+  const peerView = peerViewInput ?? peerViewOf(classroomResult.Item);
   if (pages.length === 0 && !starterKey) {
-    // An empty request clears the assignment entirely.
+    // An empty request clears the assignment content (the settings stay).
     await docClient.send(new UpdateCommand({
       TableName: CLASSROOMS_TABLE,
       Key: { classroomId },
-      UpdateExpression: 'REMOVE assignment SET updatedAt = :now',
-      ExpressionAttributeValues: { ':now': now },
+      UpdateExpression: `REMOVE assignment SET updatedAt = :now${setStartFromPrevious}${setPeerView}`,
+      ExpressionAttributeValues: { ':now': now, ...startFromPreviousValues, ...peerViewValues },
     }));
-    return { statusCode: 200, body: JSON.stringify({ assignment: null }) };
+    return { statusCode: 200, body: JSON.stringify({ assignment: null, startFromPrevious, peerView }) };
   }
 
   await docClient.send(new UpdateCommand({
     TableName: CLASSROOMS_TABLE,
     Key: { classroomId },
-    UpdateExpression: 'SET assignment = :assignment, updatedAt = :now',
+    UpdateExpression: `SET assignment = :assignment, updatedAt = :now${setStartFromPrevious}${setPeerView}`,
     ExpressionAttributeValues: {
       ':assignment': { pages, starterKey, updatedAt: now },
       ':now': now,
+      ...startFromPreviousValues,
+      ...peerViewValues,
     },
   }));
 
@@ -3336,6 +4366,8 @@ async function handleSetAssignment(
     statusCode: 200,
     body: JSON.stringify({
       assignment: { pages, starterKey: starterKey || null, updatedAt: now },
+      startFromPrevious,
+      peerView,
       imageUploadUrls,
       starterUploadUrl,
     }),
@@ -3372,8 +4404,10 @@ async function handleGetAssignment(rawToken: string, classroomId: string): Promi
   }
 
   const assignment = classroomResult.Item.assignment as AssignmentContent | undefined;
+  const startFromPrevious = startFromPreviousOf(classroomResult.Item);
+  const peerView = peerViewOf(classroomResult.Item);
   if (!hasAssignmentContent(classroomResult.Item)) {
-    return { statusCode: 200, body: JSON.stringify({ assignment: null }) };
+    return { statusCode: 200, body: JSON.stringify({ assignment: null, startFromPrevious, peerView }) };
   }
 
   // imageKey is echoed back so the teacher editor can round-trip unchanged
@@ -3408,6 +4442,8 @@ async function handleGetAssignment(rawToken: string, classroomId: string): Promi
         starterUrl,
         updatedAt: assignment?.updatedAt || null,
       },
+      startFromPrevious,
+      peerView,
     }),
   };
 }
@@ -4356,6 +5392,8 @@ async function importSharedItem(
       groupId,
       sortDate: now,
       assignment,
+      // A new assignment always stores its mesh group limit (#1255).
+      meshGroupLimit: DEFAULT_MESH_GROUP_LIMIT,
       status: 'active',
       createdAt: now,
       updatedAt: now,
@@ -4386,6 +5424,7 @@ async function importSharedItem(
       groupId,
       sortDate: now,
       hasAssignment: !!assignment,
+      meshGroupLimit: DEFAULT_MESH_GROUP_LIMIT,
       status: 'active',
       createdAt: now,
       expiresAt: new Date(ttl * 1000).toISOString(),
@@ -4799,6 +5838,12 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
       const identity = await verifyTeacherIdToken(token);
       result = await handleListNotifications(identity);
 
+    // --- Pending kick requests across the teacher's assignments (#1200) ---
+    } else if (method === 'GET' && path === '/kick-requests/pending') {
+      const token = extractBearerToken(event.headers?.authorization);
+      const identity = await verifyTeacherIdToken(token);
+      result = await handleListPendingKickRequests(identity, event.queryStringParameters?.since || undefined);
+
     } else if (method === 'POST' && path === '/notifications/mark-read') {
       const token = extractBearerToken(event.headers?.authorization);
       const identity = await verifyTeacherIdToken(token);
@@ -4870,6 +5915,13 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
       const token = extractBearerToken(event.headers?.authorization);
       const identity = await verifyTeacherIdToken(token);
       result = await handleMigrateGroups(identity);
+
+    } else if (method === 'GET' && /^\/classroom-groups\/[^/]+\/google-course-access$/.test(path)) {
+      const token = extractBearerToken(event.headers?.authorization);
+      const identity = await verifyTeacherIdToken(token);
+      const accessToken = extractGoogleAccessToken(event.headers);
+      const groupId = event.pathParameters?.groupId || '';
+      result = await handleGetGoogleCourseAccess(identity, accessToken, groupId);
 
     } else if (method === 'PATCH' && /^\/classroom-groups\/[^/]+\/topics$/.test(path)) {
       const token = extractBearerToken(event.headers?.authorization);
@@ -5015,6 +6067,26 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
       }
       result = await handleCreateSubmission(classroomId, session.memberId, body);
 
+    } else if (method === 'GET' && /^\/classrooms\/[^/]+\/peer-submissions$/.test(path)) {
+      // Student-only (session token): classmates' submissions for peer view (#1239).
+      const token = extractBearerToken(event.headers?.authorization);
+      const session = await verifySessionToken(token);
+      const classroomId = event.pathParameters?.classroomId || '';
+      if (session.classroomId !== classroomId) {
+        throw new AuthError('Session does not match this classroom');
+      }
+      result = await handleListPeerSubmissions(classroomId, session.memberId);
+
+    } else if (method === 'GET' && /^\/classrooms\/[^/]+\/continuable-submissions$/.test(path)) {
+      // Student-only (session token): own submissions to continue from (#1201).
+      const token = extractBearerToken(event.headers?.authorization);
+      const session = await verifySessionToken(token);
+      const classroomId = event.pathParameters?.classroomId || '';
+      if (session.classroomId !== classroomId) {
+        throw new AuthError('Session does not match this classroom');
+      }
+      result = await handleListContinuableSubmissions(classroomId, session.memberId);
+
     } else if (method === 'GET' && /^\/classrooms\/[^/]+\/submissions$/.test(path)) {
       const token = extractBearerToken(event.headers?.authorization);
       const identity = await verifyTeacherIdToken(token);
@@ -5056,6 +6128,9 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
     if (err instanceof ConflictError) {
       return { statusCode: 409, headers: corsHeaders, body: JSON.stringify({ error: err.message }) };
     }
+    if (err instanceof PeerViewForbiddenError) {
+      return { statusCode: 403, headers: corsHeaders, body: JSON.stringify({ error: err.message, reason: err.reason }) };
+    }
     if (err instanceof KickedError) {
       return {
         statusCode: 410,
@@ -5070,13 +6145,8 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
       };
     }
     if (err instanceof GoogleAPIError) {
-      if (err.statusCode === 401) {
-        return { statusCode: 401, headers: corsHeaders, body: JSON.stringify({ error: 'Google access token expired. Please re-authorize.' }) };
-      }
-      if (err.statusCode === 403) {
-        return { statusCode: 403, headers: corsHeaders, body: JSON.stringify({ error: 'Insufficient Google Classroom permissions.' }) };
-      }
-      return { statusCode: 502, headers: corsHeaders, body: JSON.stringify({ error: 'Google Classroom API error' }) };
+      const mapped = googleApiErrorResponse(err.statusCode, err.googleStatus, err.googleMessage, err.operation);
+      return { ...mapped, headers: corsHeaders };
     }
     if (err instanceof SyntaxError) {
       return { statusCode: 400, headers: corsHeaders, body: JSON.stringify({ error: 'Invalid JSON body' }) };

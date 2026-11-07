@@ -1,6 +1,11 @@
-.modal-content {
-    width: 500px;
-    max-width: 90vw;
+/* The student modal targets the 1300x600 classroom PC (#1221): it is wide so
+   guidance and actions sit side by side, and it sits near the top so the body
+   gets most of the 600px height without scrolling. */
+.modal-content.modal-content {
+    width: 960px;
+    max-width: 95vw;
+    margin-top: 1rem;
+    margin-bottom: 1rem;
 }
 
 .modal-content-wide {
@@ -15,6 +20,56 @@
     overflow-y: auto;
     background-color: white;
     border-radius: 0 0 8px 8px;
+}
+
+/* Student body: 1rem margins x2 + 3.125rem header + 8px modal border. */
+.student-body {
+    padding: 1rem 1.5rem;
+    max-height: calc(100vh - 5.125rem - 8px);
+}
+
+/* Seat screen: the grid on the left, notices and the join action on the
+   right. When stacked, notices move above the grid so a student reads why
+   they are back here before picking a seat. */
+.student-seat-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 360px;
+    grid-template-rows: auto 1fr;
+    grid-template-areas:
+        'main notices'
+        'main actions';
+    column-gap: 1.5rem;
+}
+
+.student-main {
+    grid-area: main;
+    min-width: 0;
+}
+
+.student-notices {
+    grid-area: notices;
+    min-width: 0;
+}
+
+.student-actions {
+    grid-area: actions;
+    min-width: 0;
+}
+
+.student-notices > :first-child {
+    margin-top: 0;
+}
+
+/* Below the 960px modal (iPad portrait, phones) the columns stack. */
+@media (max-width: 1023px) {
+    .student-seat-layout {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto;
+        grid-template-areas:
+            'notices'
+            'main'
+            'actions';
+    }
 }
 
 .phase-title {
@@ -355,6 +410,43 @@
 
 .join-code-action-gc:hover {
     background-color: #d6e7ff;
+}
+
+/* GC コースの教師ではないため共有できないときのボタン表示 (#1184)。
+   強調色をやめ、押せないことが見て分かるようにする。 */
+.join-code-action-gc:disabled {
+    border-color: #c8cdd8;
+    background-color: #f2f3f7;
+    color: #9aa0b0;
+    cursor: not-allowed;
+}
+
+/* 共有できない理由。参加コードカードの中で 1 行占有して折り返す。 */
+.join-code-gc-blocked-note {
+    flex: 0 0 100%;
+    margin-top: 0.3rem;
+    color: #575e75;
+    font-size: 0.8rem;
+    line-height: 1.4;
+}
+
+/* 「自分も Google Classroom の先生です（確認する）」— ブロック表示の中の
+   オプトイン導線。押したときだけ同意を求める。#1184 */
+.join-code-gc-verify-button {
+    display: inline-block;
+    margin-top: 0.3rem;
+    padding: 0.2rem 0.6rem;
+    border: 1px solid #c3cad8;
+    border-radius: 0.5rem;
+    background-color: #fff;
+    color: #4c97ff;
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.join-code-gc-verify-button:disabled {
+    color: #9aa0ad;
+    cursor: default;
 }
 
 /* コピー完了のリアクション: アイコンがチェックに変わり緑で強調 */
@@ -722,6 +814,19 @@
     margin: 1rem 0;
 }
 
+/* Ten seats per row: 40 seats fit in 4 rows on the 1300x600 PC (#1221). */
+.student-main .seat-grid {
+    grid-template-columns: repeat(10, minmax(0, 1fr));
+    margin: 0.6rem 0 0;
+}
+
+@media (max-width: 1023px) {
+    .student-main .seat-grid {
+        grid-template-columns: repeat(auto-fill, minmax(48px, 1fr));
+    }
+}
+
+
 .seat-button {
     background-color: #4c97ff;
     color: white;
@@ -732,6 +837,10 @@
     cursor: pointer;
     font-weight: bold;
     text-align: center;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
 }
 
 .seat-button:hover {
@@ -832,13 +941,11 @@
     position: absolute;
     top: -4px;
     right: -4px;
-    background-color: #d32f2f;
-    color: #fff;
-    font-size: 0.7rem;
-    font-weight: bold;
+    background-color: #fff;
     border-radius: 50%;
-    width: 14px;
-    height: 14px;
+    width: clamp(18px, 26cqi, 40px);
+    height: clamp(18px, 26cqi, 40px);
+    box-shadow: 0 0 0 1px #d32f2f;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -878,6 +985,7 @@
 
 .kick-request-pending-banner {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 0.5rem;
     background-color: #e3f2fd;
@@ -1027,6 +1135,14 @@
     margin-top: 1rem;
 }
 
+/* "提出すると見られます" in place of the peer view button (#1210). */
+.peer-view-locked {
+    display: inline-flex;
+    align-items: center;
+    color: #575e75;
+    font-size: 0.75rem;
+}
+
 .loading {
     text-align: center;
     padding: 2rem;
@@ -1040,19 +1156,6 @@
     font-size: 0.75rem;
 }
 
-.legend-item {
-    display: inline-flex;
-    align-items: center;
-    padding: 0.15rem 0.5rem;
-    border-radius: 3px;
-    color: white;
-    font-weight: bold;
-}
-
-.legend-seated {
-    text-decoration: underline;
-}
-
 .members-grid {
     display: grid;
     grid-template-columns: repeat(10, 1fr);
@@ -1062,10 +1165,13 @@
 
 .member-cell {
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
     width: 100%;
     aspect-ratio: 1;
+    /* Size the number / status icons relative to the (square) cell (#1196) */
+    container-type: inline-size;
     border-radius: 4px;
     font-size: 0.8rem;
     font-weight: bold;
@@ -1994,6 +2100,68 @@
     margin-top: 0.5rem;
 }
 
+.assignment-preview-start {
+    flex: 0 0 auto;
+    padding: 0.4rem 0.6rem;
+    border-radius: 0.375rem;
+    background-color: #e9f1fc;
+    color: #575e75;
+    font-size: 0.8rem;
+}
+
+.assignment-start-from-previous {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    cursor: pointer;
+}
+
+.assignment-start-from-previous input {
+    margin-top: 0.2rem;
+}
+
+.assignment-start-from-previous-label {
+    display: block;
+    color: #575e75;
+    font-size: 0.9rem;
+    font-weight: bold;
+}
+
+.assignment-start-from-previous-hint {
+    display: block;
+    color: #575e75;
+    font-size: 0.8rem;
+}
+
+.assignment-peer-view {
+    margin-top: 0.75rem;
+}
+
+.assignment-peer-view-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.assignment-peer-view-select {
+    padding: 0.2rem 0.4rem;
+    border: 1px solid #ccc;
+    border-radius: 0.25rem;
+    background-color: white;
+    color: #575e75;
+    font-size: 0.85rem;
+}
+
+.hide-from-peers {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: #575e75;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
 .button-spinner {
     width: 1rem;
     height: 1rem;
@@ -2001,32 +2169,52 @@
 
 /* --- Assignment panel (student) --- */
 
+/* Title, joined badge and pager share one row: the classroom PC is 1300x600,
+   so the panel spends its height on the page itself (#1201 / #1221). */
+.assignment-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.6rem;
+}
+
+.assignment-header-title {
+    margin: 0;
+    font-size: 1.2rem;
+    color: #575e75;
+}
+
 .assignment-joined-notice {
     background-color: #e6f4ea;
     border: 1px solid #b7dfc2;
     border-radius: 0.4rem;
     color: #2d7a43;
-    font-size: 0.9rem;
+    font-size: 0.85rem;
     font-weight: bold;
-    padding: 0.5rem 0.75rem;
-    margin-bottom: 0.75rem;
+    padding: 0.25rem 0.6rem;
 }
 
+/* Image beside the text (not above it) and a bounded height: a long page
+   scrolls inside this box instead of pushing the modal past 600px. */
 .assignment-view-page {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
     border: 1px solid #c9cdd3;
     border-radius: 0.5rem;
-    padding: 1rem;
-    margin-bottom: 0.75rem;
+    padding: 0.75rem 1rem;
     background-color: #fafbfc;
-    min-height: 8rem;
+    min-height: 6rem;
+    max-height: 13rem;
+    overflow-y: auto;
 }
 
 .assignment-view-image {
     display: block;
-    max-width: 100%;
-    max-height: 240px;
+    flex: 0 0 auto;
+    max-width: 40%;
+    max-height: 11.5rem;
     object-fit: contain;
-    margin: 0 auto 0.75rem;
     border-radius: 0.3rem;
     background-color: white;
 }
@@ -2039,12 +2227,30 @@
     word-break: break-word;
 }
 
+.assignment-footer {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+}
+
+.assignment-footer .continue-choice {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin-top: 0;
+}
+
+.assignment-footer .button-row {
+    margin-top: 0;
+    margin-left: auto;
+    white-space: nowrap;
+}
+
 .assignment-pager {
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: 0.75rem;
-    margin-bottom: 0.75rem;
+    gap: 0.5rem;
+    margin-left: auto;
 }
 
 .assignment-pager-label {
@@ -2158,6 +2364,151 @@
     line-height: 1.5;
     white-space: pre-wrap;
     word-break: break-word;
+}
+
+/* --- Where to start: starter / last time's / this assignment's submission (#1201) ---
+   One horizontal row: the classroom PC is 1300x600, so the choices go side by
+   side instead of stacking (#1221). */
+
+/* "Where to start" choices (#1201). Each choice is a start action, styled as a
+   button (blue outline + bottom shadow) so it does not read as a text field or
+   an info box. "As it is" (load nothing) is the plain gray variant. */
+.continue-choice {
+    margin-top: 0.75rem;
+}
+
+.continue-choice-title {
+    color: #575e75;
+    font-size: 0.8rem;
+    font-weight: bold;
+    margin-bottom: 0.4rem;
+}
+
+.continue-choice-notice {
+    margin-left: 0.5rem;
+    color: #0b8e69;
+    font-weight: normal;
+}
+
+/* Alone (no choices to offer): no left gap to keep it aligned. */
+.continue-choice > .continue-choice-notice {
+    margin-left: 0;
+    font-size: 0.8rem;
+}
+
+.continue-choice-row {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.continue-choice-button {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background-color: #fff;
+    color: #4c97ff;
+    border: 2px solid #4c97ff;
+    border-radius: 0.5rem;
+    box-shadow: 0 2px 0 #3373cc;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.9rem;
+    font-weight: bold;
+    text-align: left;
+    cursor: pointer;
+}
+
+.continue-choice-button:hover {
+    background-color: #e9f1fc;
+}
+
+.continue-choice-button:active {
+    box-shadow: none;
+    transform: translateY(2px);
+}
+
+.continue-choice-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.continue-choice-button[aria-pressed='true'] {
+    border-color: #0b8e69;
+    box-shadow: 0 2px 0 #0b8e69;
+    background-color: #e6f4ea;
+}
+
+/* The choice the teacher's setting recommends (#1202): filled so it stands
+   out from the others without loading anything by itself. */
+.continue-choice-recommended {
+    background-color: #4c97ff;
+    color: #fff;
+}
+
+.continue-choice-recommended:hover {
+    background-color: #3d86ed;
+}
+
+.continue-choice-recommended .continue-choice-detail {
+    color: #e9f1fc;
+}
+
+.continue-choice-badge {
+    flex: none;
+    margin-left: auto;
+    padding: 0.1rem 0.4rem;
+    border-radius: 0.75rem;
+    background-color: #fff;
+    color: #3373cc;
+    font-size: 0.7rem;
+}
+
+.continue-choice-plain {
+    color: #575e75;
+    border-color: #b8b8b8;
+    box-shadow: 0 2px 0 #8a8fa3;
+}
+
+.continue-choice-plain:hover {
+    background-color: #f0f0f0;
+}
+
+.continue-choice-icon {
+    flex: none;
+    width: 1.5rem;
+    height: 1.5rem;
+}
+
+.continue-choice-check {
+    flex: none;
+    margin-left: auto;
+    color: #0b8e69;
+    font-weight: bold;
+}
+
+.continue-choice-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+/* the label wraps instead of being cut: with four choices it must stay readable */
+.continue-choice-label {
+    line-height: 1.25;
+}
+
+.continue-choice-detail {
+    color: #5a8fd8;
+    font-size: 0.75rem;
+    font-weight: normal;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.continue-choice-plain .continue-choice-detail {
+    color: #8a8fa3;
 }
 
 /* --- Term-end evaluation (teacher) --- */
@@ -3179,6 +3530,19 @@ button.detail-tabs-download-urgent:hover:not(:disabled) {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+    min-width: 0;
+    max-width: 56rem;
+}
+
+/* The form keeps its width; the students' screen preview takes the room on its right. */
+.class-settings-screen {
+    max-width: 78rem;
+}
+
+.class-settings-layout {
+    display: flex;
+    align-items: flex-start;
+    gap: 1.25rem;
 }
 
 .class-settings-form input {
@@ -3407,4 +3771,169 @@ button.detail-tabs-download-urgent:hover:not(:disabled) {
 
 .ungrouped-section {
     margin-top: 1rem;
+}
+
+/* Shared status icons (#1196) */
+.status-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    line-height: 0;
+}
+
+.status-icon-badge {
+    background-color: #fff;
+    border-radius: 50%;
+    padding: 2px;
+}
+
+.status-icons {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    line-height: 0;
+}
+
+.status-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem 0.7rem;
+    align-items: center;
+    color: #575e75;
+}
+
+.status-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    white-space: nowrap;
+}
+
+/* Grid cell: seat number on top, status icons underneath (#1196) */
+.member-cell-number {
+    line-height: 1;
+    font-size: clamp(0.8rem, 16cqi, 1.6rem);
+}
+
+/* The icons follow the cell size (cqi = 1% of the cell width), so they stay
+   legible on wide screens; clamp keeps them readable on narrow ones too. */
+.member-cell-icons {
+    margin-top: clamp(2px, 4cqi, 8px);
+    padding: clamp(1px, 2cqi, 4px) clamp(2px, 3cqi, 6px);
+    gap: clamp(2px, 3cqi, 6px);
+    border-radius: clamp(3px, 4cqi, 8px);
+    background-color: rgba(255, 255, 255, 0.85);
+}
+
+.member-cell-icons svg {
+    width: clamp(12px, 26cqi, 44px);
+    height: clamp(12px, 26cqi, 44px);
+}
+
+.seat-kick-request-badge svg {
+    width: clamp(14px, 18cqi, 30px);
+    height: clamp(14px, 18cqi, 30px);
+}
+
+.not-submitted-badge {
+    color: #8c8c8c;
+    font-size: 0.75rem;
+    margin-left: 0.5rem;
+}
+
+.submission-badge,
+.returned-badge,
+.seated-badge,
+.not-seated-badge,
+.not-submitted-badge {
+    display: inline-flex;
+    align-items: center;
+}
+
+.seat-button-number {
+    line-height: 1;
+}
+
+/* --- Seat selection: number input, guide and confirmation (#1198) --- */
+
+.seat-number-form {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin: 0.5rem 0;
+}
+
+.seat-number-input {
+    width: 6rem;
+    padding: 0.5rem;
+    font-size: 1.2rem;
+    text-align: center;
+    border: 2px solid #4c97ff;
+    border-radius: 6px;
+}
+
+.seat-guide {
+    margin: 0.5rem 0;
+    padding: 0.6rem 0.8rem;
+    border-radius: 8px;
+    background-color: #fff8e1;
+    border: 1px solid #ffcc80;
+    color: #575e75;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+.seat-guide-idle {
+    background-color: #ffe0b2;
+    border: 2px solid #ff9800;
+    font-weight: bold;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .seat-guide-idle {
+        animation: seat-guide-bounce 1.2s ease-in-out infinite;
+    }
+}
+
+@keyframes seat-guide-bounce {
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+    50% {
+        transform: translateY(-4px);
+    }
+}
+
+.seat-typed {
+    outline: 3px solid #ff9800;
+    outline-offset: 1px;
+}
+
+.seat-confirm {
+    margin: 0.5rem 0;
+    padding: 0.8rem 1rem;
+    border-radius: 8px;
+    background-color: #e8f8f2;
+    border: 2px solid #0fbd8c;
+    text-align: center;
+}
+
+.seat-confirm-title {
+    font-size: 1.6rem;
+    font-weight: bold;
+    color: #0b8e69;
+}
+
+.seat-confirm-note {
+    margin-top: 0.3rem;
+    font-size: 0.85rem;
+    color: #575e75;
+}
+
+.kick-request-pending-note {
+    flex-basis: 100%;
+    margin-top: 0.3rem;
+    font-size: 0.85rem;
 }

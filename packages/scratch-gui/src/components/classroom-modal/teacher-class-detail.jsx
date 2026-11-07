@@ -4,14 +4,37 @@ import PropTypes from 'prop-types';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import ClassCodeDisplay from './class-code-display.jsx';
+import ClassroomStatusIcon, {
+    ClassroomStatusIcons,
+    ClassroomStatusLegend,
+    getPresenceStatus,
+    getSubmissionStatus,
+} from './classroom-status-icon.jsx';
 import ErrorDisplay from './error-display.jsx';
 import TeacherAssignmentEditor from './teacher-assignment-editor.jsx';
 import TeacherMemberDetail from './teacher-member-detail.jsx';
 
 import { formatClassLabel } from '../../lib/classroom-class-label.js';
+import { isMemberSeated } from '../../lib/classroom-presence.js';
+import {
+    canVerifyGoogleShare,
+    googleShareBlockedMessage,
+    googleShareVerdict,
+    isGoogleShareBlocked,
+} from '../../lib/classroom-google-share.js';
 import { retentionLevel } from '../../lib/classroom-retention.js';
 import googleClassroomIcon from '../classroom-teacher-modal/google-classroom-icon.png';
 import styles from './classroom-modal.css';
+
+const MEMBER_LEGEND_STATUSES = [
+    'seated',
+    'notSeated',
+    'notJoined',
+    'submitted',
+    'notSubmitted',
+    'returned',
+    'kickRequested',
+];
 
 const TeacherClassDetail = ({
     selectedClassroom,
@@ -30,6 +53,7 @@ const TeacherClassDetail = ({
     onOpenSubmission,
     onRefresh,
     onReturnSubmission,
+    onSetHiddenFromPeers,
     onDownloadAll,
     downloadProgress,
     onShowCodeDisplay,
@@ -44,9 +68,13 @@ const TeacherClassDetail = ({
     onApproveKickRequest,
     onRejectKickRequest,
     onDetailTabChange,
+    detailEntry,
     onOpenShareSuggestion,
     assignmentEditor,
     group,
+    googleCourseAccess,
+    isVerifyingGoogleCourseAccess,
+    onVerifyGoogleCourseAccess,
 }) => {
     // Destructured with handle-prefixed names for the embedded editor
     // (react/jsx-handler-names requires handler props to look like handlers).
@@ -59,15 +87,19 @@ const TeacherClassDetail = ({
     const handleDescRemovePage = descEditor.onRemovePage;
     const handleDescRemovePageImage = descEditor.onRemovePageImage;
     const handleDescRemoveStarter = descEditor.onRemoveStarter;
+    const handleDescChangeStartFromPrevious = descEditor.onChangeStartFromPrevious;
+    const handleDescChangePeerView = descEditor.onChangePeerView;
+    const handleDescChangeMeshGroupLimit = descEditor.onChangeMeshGroupLimit;
     const handleDescSave = descEditor.onSave;
     const handleDescUseCurrentProject = descEditor.onUseCurrentProject;
     const handleDescUseFile = descEditor.onUseFile;
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const deleteConfirmRef = useRef(null);
     const [showCodeDisplay, setShowCodeDisplay] = useState(false);
-    // The description tab is the entry view (teacher review): editing the
-    // student-facing pages is the primary task when opening an assignment.
-    const [activeTab, setActiveTab] = useState('description');
+    // The members tab is the entry view; the description tab only on the
+    // first open of a just-created assignment (pickDetailEntryTab, #1199).
+    const entryTab = (detailEntry && detailEntry.tab) || 'members';
+    const [activeTab, setActiveTab] = useState(entryTab);
     const [previewPage, setPreviewPage] = useState(0);
     const [editAssignmentName, setEditAssignmentName] = useState(
         selectedClassroom.assignmentName || '',
@@ -78,10 +110,10 @@ const TeacherClassDetail = ({
         setEditAssignmentName(selectedClassroom.assignmentName || '');
         setShowDeleteConfirm(false);
         setShowCodeDisplay(false);
-        setActiveTab('description');
+        setActiveTab(entryTab);
         setPreviewPage(0);
-        if (onDetailTabChange) onDetailTabChange('description');
-    }, [selectedClassroom.classroomId]);
+        if (onDetailTabChange) onDetailTabChange(entryTab);
+    }, [selectedClassroom.classroomId, detailEntry && detailEntry.seq]);
 
     const handleTabClick = useCallback(
         (e) => {
@@ -168,6 +200,42 @@ const TeacherClassDetail = ({
     // next to the deadline and the urgent styling on the download button.
     const retention = retentionLevel(selectedClassroom && selectedClassroom.expiresAt);
 
+    // Google Classroom share is posted with this teacher's own Google account,
+    // so a class co-teacher who is not a teacher of the linked course cannot
+    // share it — and a co-teacher on a personal Google account never can.
+    // Block by default and let a genuine GC co-teacher lift it themselves,
+    // instead of letting Google answer with an opaque error (#1184).
+    //
+    // Only meaningful where the share button itself is: a class linked to a GC
+    // course whose assignment has not been posted yet. Once posted the button
+    // becomes an "open it" link, and telling the teacher to ask someone to
+    // share what is already shared would just confuse them.
+    const gcShareAvailable = Boolean(
+        (selectedClassroom.googleClassroomCourseId || (group && group.googleClassroomCourseId)) &&
+            !selectedClassroom.googleClassroomAlternateLink,
+    );
+    const gcVerdict = googleShareVerdict(googleCourseAccess, group);
+    const gcShareBlocked = gcShareAvailable && isGoogleShareBlocked(googleCourseAccess, group);
+    const gcShareBlockedText = gcShareBlocked
+        ? googleShareBlockedMessage(
+            intl,
+            (gcVerdict && gcVerdict.linkedByEmail) ||
+                  (group && group.googleClassroomLinkedByEmail) ||
+                  null,
+            Boolean(gcVerdict && gcVerdict.verifyFailed),
+        )
+        : '';
+    // The way out for a teacher who is in the course but has not proven it yet
+    // (they have granted Google access to nothing so far). Asking costs a
+    // consent popup, so it only ever happens when they press it.
+    const gcCanVerify = Boolean(
+        gcShareBlocked && onVerifyGoogleCourseAccess && canVerifyGoogleShare(googleCourseAccess, group),
+    );
+
+    const handleVerifyGcAccess = useCallback(() => {
+        if (onVerifyGoogleCourseAccess) onVerifyGoogleCourseAccess(group);
+    }, [onVerifyGoogleCourseAccess, group]);
+
     const handleShowCode = useCallback(() => {
         setShowCodeDisplay(true);
         onShowCodeDisplay(selectedClassroom.classroomId);
@@ -185,11 +253,7 @@ const TeacherClassDetail = ({
         onCloseCodeDisplay();
     }, [onCloseCodeDisplay]);
 
-    const isSeated = useCallback((member) => {
-        if (!member || !member.lastActiveAt) return false;
-        const elapsed = Date.now() - new Date(member.lastActiveAt).getTime();
-        return elapsed < 60 * 60 * 1000; // 1 hour
-    }, []);
+    const isSeated = useCallback((member) => isMemberSeated(member), []);
 
     const joinedCount = members.filter((m) => !m.left).length;
     const totalCount = selectedClassroom.studentCount;
@@ -395,6 +459,8 @@ const TeacherClassDetail = ({
                                                 <button
                                                     className={classNames(styles.joinCodeAction, styles.joinCodeActionGc)}
                                                     data-testid="classroom-post-assignment"
+                                                    disabled={gcShareBlocked}
+                                                    title={gcShareBlockedText || null}
                                                     type="button"
                                                     onClick={onShowPostAssignment}
                                                 >
@@ -412,6 +478,40 @@ const TeacherClassDetail = ({
                                                     </span>
                                                 </button>
                                             ))}
+                                    {/* 共有できない理由（GC コースの教師ではない共同担当）
+                                        をボタンの近くに出す。本当に GC の共同教師である
+                                        先生だけが「確認する」で自分で解除できる。#1184 */}
+                                    {gcShareBlocked && (
+                                        <div
+                                            className={styles.joinCodeGcBlockedNote}
+                                            data-testid="classroom-post-assignment-blocked"
+                                        >
+                                            {gcShareBlockedText}
+                                            {gcCanVerify && (
+                                                <button
+                                                    className={styles.joinCodeGcVerifyButton}
+                                                    data-testid="classroom-post-assignment-verify"
+                                                    disabled={isVerifyingGoogleCourseAccess}
+                                                    type="button"
+                                                    onClick={handleVerifyGcAccess}
+                                                >
+                                                    {isVerifyingGoogleCourseAccess ? (
+                                                        <FormattedMessage
+                                                            defaultMessage="Checking…"
+                                                            description="Label while checking the teacher's Google Classroom access"
+                                                            id="gui.classroom.googleShare.verifying"
+                                                        />
+                                                    ) : (
+                                                        <FormattedMessage
+                                                            defaultMessage="I am a teacher of this Google Classroom class (check)"
+                                                            description="Button that lets a Google Classroom co-teacher prove their access and share"
+                                                            id="gui.classroom.googleShare.verify"
+                                                        />
+                                                    )}
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                             {/* 保存期限とその警告を1行に統合（issue #1052/#1049）:
@@ -565,6 +665,9 @@ const TeacherClassDetail = ({
                                     selectedClassroom={selectedClassroom}
                                     starterMode={descEditor.starterMode}
                                     starterSource={descEditor.starterSource}
+                                    startFromPrevious={!!descEditor.startFromPrevious}
+                                    peerView={descEditor.peerView || 'none'}
+                                    meshGroupLimit={descEditor.meshGroupLimit}
                                     onAddPage={handleDescAddPage}
                                     onAttachPageImage={handleDescAttachPageImage}
                                     onCancel={handleDescCancel}
@@ -572,6 +675,9 @@ const TeacherClassDetail = ({
                                     onMovePage={handleDescMovePage}
                                     onRemovePage={handleDescRemovePage}
                                     onRemovePageImage={handleDescRemovePageImage}
+                                    onChangeStartFromPrevious={handleDescChangeStartFromPrevious}
+                                    onChangePeerView={handleDescChangePeerView}
+                                    onChangeMeshGroupLimit={handleDescChangeMeshGroupLimit}
                                     onRemoveStarter={handleDescRemoveStarter}
                                     onSave={handleDescSave}
                                     onUseCurrentProject={handleDescUseCurrentProject}
@@ -583,19 +689,10 @@ const TeacherClassDetail = ({
                             {activeTab === 'members' && (
                                 <React.Fragment>
                             <div className={styles.membersHeader}>
-                                <div className={styles.membersLegend}>
-                                    <span className={`${styles.legendItem} ${styles.memberCellJoined}`}>
-                                        <span className={styles.legendSeated}>
-                                            <FormattedMessage defaultMessage="Seated" description="Legend: seated" id="gui.classroom.teacherDetail.legend.seated" />
-                                        </span>
-                                    </span>
-                                    <span className={`${styles.legendItem} ${styles.memberCellSubmitted}`}>
-                                        <FormattedMessage defaultMessage="Submitted" description="Legend: submitted" id="gui.classroom.teacherDetail.legend.submitted" />
-                                    </span>
-                                    <span className={`${styles.legendItem} ${styles.memberCellReturned}`}>
-                                        <FormattedMessage defaultMessage="Returned" description="Legend: returned" id="gui.classroom.teacherDetail.legend.returned" />
-                                    </span>
-                                </div>
+                                <ClassroomStatusLegend
+                                    className={styles.membersLegend}
+                                    statuses={MEMBER_LEGEND_STATUSES}
+                                />
                                 <div className={styles.membersHeaderRight}>
                                     <span
                                         className={styles.membersCount}
@@ -668,14 +765,24 @@ const TeacherClassDetail = ({
                                                 key={memberId}
                                                 onClick={handleCellClick}
                                             >
-                                                {seatNum}
+                                                <span className={styles.memberCellNumber}>
+                                                    {seatNum}
+                                                </span>
+                                                <ClassroomStatusIcons
+                                                    className={styles.memberCellIcons}
+                                                    presence={getPresenceStatus(member, seated)}
+                                                    size={10}
+                                                    submission={getSubmissionStatus(member)}
+                                                />
                                                 {seatKickRequests.length > 0 && (
                                                     <span
                                                         className={styles.seatKickRequestBadge}
                                                         data-testid={`classroom-seat-kick-request-${seatNum}`}
-                                                        title="退室リクエストあり"
                                                     >
-                                                        !
+                                                        <ClassroomStatusIcon
+                                                            size={14}
+                                                            status="kickRequested"
+                                                        />
                                                     </span>
                                                 )}
                                             </button>
@@ -819,6 +926,39 @@ const TeacherClassDetail = ({
                                                         {page ? page.text : ''}
                                                     </p>
                                                 </div>
+                                                {/* How the student starts on join (#1202). */}
+                                                <div
+                                                    className={styles.assignmentPreviewStart}
+                                                    data-testid="classroom-description-preview-start"
+                                                >
+                                                    {(() => {
+                                                        if (descEditor.startFromPrevious) {
+                                                            return (
+                                                                <FormattedMessage
+                                                                    defaultMessage="On join: continuing from last time's submission is recommended (the starter if there is none)"
+                                                                    description="Student-view preview: start-from-previous setting is on"
+                                                                    id="gui.classroom.teacherDetail.previewStartPrevious"
+                                                                />
+                                                            );
+                                                        }
+                                                        if (descEditor.starterMode && descEditor.starterMode !== 'none') {
+                                                            return (
+                                                                <FormattedMessage
+                                                                    defaultMessage="On join: students start from the starter with a button (students with an earlier submission choose where to start)"
+                                                                    description="Student-view preview: setting off, assignment has a starter"
+                                                                    id="gui.classroom.teacherDetail.previewStartStarter"
+                                                                />
+                                                            );
+                                                        }
+                                                        return (
+                                                            <FormattedMessage
+                                                                defaultMessage="On join: students start with the open project (students with an earlier submission choose where to start)"
+                                                                description="Student-view preview: setting off, no starter"
+                                                                id="gui.classroom.teacherDetail.previewStartNone"
+                                                            />
+                                                        );
+                                                    })()}
+                                                </div>
                                             </React.Fragment>
                                         );
                                     })()}
@@ -840,6 +980,7 @@ const TeacherClassDetail = ({
                                 onOpenSubmission={onOpenSubmission}
                                 onRejectKickRequest={onRejectKickRequest}
                                 onReturnSubmission={onReturnSubmission}
+                                onSetHiddenFromPeers={onSetHiddenFromPeers}
                             />
                             )}
                         </div>
@@ -873,6 +1014,7 @@ TeacherClassDetail.propTypes = {
     onOpenSubmission: PropTypes.func.isRequired,
     onRefresh: PropTypes.func.isRequired,
     onReturnSubmission: PropTypes.func.isRequired,
+    onSetHiddenFromPeers: PropTypes.func,
     onSelectMember: PropTypes.func.isRequired,
     onShowCodeDisplay: PropTypes.func.isRequired,
     onShowPostAssignment: PropTypes.func,
@@ -882,9 +1024,22 @@ TeacherClassDetail.propTypes = {
     onApproveKickRequest: PropTypes.func,
     onRejectKickRequest: PropTypes.func,
     onDetailTabChange: PropTypes.func,
+    detailEntry: PropTypes.shape({
+        tab: PropTypes.oneOf(['members', 'description']),
+        seq: PropTypes.number,
+    }),
     onOpenShareSuggestion: PropTypes.func,
     assignmentEditor: PropTypes.object,
     group: PropTypes.object,
+    googleCourseAccess: PropTypes.shape({
+        groupId: PropTypes.string,
+        status: PropTypes.string,
+        linkedByEmail: PropTypes.string,
+        linkedByMe: PropTypes.bool,
+        verifyFailed: PropTypes.bool,
+    }),
+    isVerifyingGoogleCourseAccess: PropTypes.bool,
+    onVerifyGoogleCourseAccess: PropTypes.func,
     selectedClassroom: PropTypes.object.isRequired,
     selectedMember: PropTypes.string,
 };

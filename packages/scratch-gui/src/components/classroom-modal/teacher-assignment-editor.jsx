@@ -2,19 +2,41 @@
  * Teacher assignment editor.
  *
  * Edits the assignment content of a classroom: pages of (short text +
- * optional image) plus one optional starter project. Kept deliberately
+ * optional image) plus one optional starter project, and how students start
+ * (#1202: "start from the previous submission") and whether students may
+ * see classmates' submission images (#1208: "peer view"), and the mesh
+ * group size limit (#1257). Kept deliberately
  * simple — a constrained format the teacher can fill in minutes.
  */
 import PropTypes from 'prop-types';
 import React, { useCallback, useRef } from 'react';
-import { FormattedMessage, useIntl } from 'react-intl';
+import { FormattedMessage, defineMessages, useIntl } from 'react-intl';
 
 import Spinner from '../spinner/spinner.jsx';
 import ErrorDisplay from './error-display.jsx';
+import MeshGroupLimitField from './mesh-group-limit-field.jsx';
 
 import { MAX_ASSIGNMENT_PAGES, MAX_ASSIGNMENT_PAGE_TEXT_LENGTH } from '../../lib/classroom-assignment-utils.js';
 
 import styles from './classroom-modal.css';
+
+const messages = defineMessages({
+    peerViewNone: {
+        defaultMessage: "Don't show",
+        description: 'Assignment editor: peer view option — students cannot see classmates\' work',
+        id: 'gui.classroom.assignmentEditor.peerViewNone',
+    },
+    peerViewAlways: {
+        defaultMessage: 'Anytime',
+        description: 'Assignment editor: peer view option — students can always see classmates\' work',
+        id: 'gui.classroom.assignmentEditor.peerViewAlways',
+    },
+    peerViewAfterSubmit: {
+        defaultMessage: 'After submitting their own',
+        description: 'Assignment editor: peer view option — students see classmates\' work once they submit',
+        id: 'gui.classroom.assignmentEditor.peerViewAfterSubmit',
+    },
+});
 
 const AssignmentPageEditor = ({
     index,
@@ -182,11 +204,17 @@ const TeacherAssignmentEditor = ({
     selectedClassroom,
     starterMode,
     starterSource,
+    startFromPrevious,
+    peerView,
+    meshGroupLimit,
     onAddPage,
     onAttachPageImage,
     embedded,
     onCancel,
     onChangePageText,
+    onChangeMeshGroupLimit,
+    onChangePeerView,
+    onChangeStartFromPrevious,
     onMovePage,
     onRemovePage,
     onRemovePageImage,
@@ -197,6 +225,16 @@ const TeacherAssignmentEditor = ({
 }) => {
     const intl = useIntl();
     const starterFileInputRef = useRef(null);
+
+    const handleStartFromPreviousChange = useCallback(
+        (e) => onChangeStartFromPrevious && onChangeStartFromPrevious(e.target.checked),
+        [onChangeStartFromPrevious],
+    );
+
+    const handlePeerViewChange = useCallback(
+        (e) => onChangePeerView && onChangePeerView(e.target.value),
+        [onChangePeerView],
+    );
 
     const handleStarterFileClick = useCallback(() => starterFileInputRef.current?.click(), []);
     const handleStarterFileChange = useCallback(
@@ -262,7 +300,7 @@ const TeacherAssignmentEditor = ({
             )}
             <p className={styles.teacherViewHint}>
                 <FormattedMessage
-                    defaultMessage="Students see these pages and the starter project opens automatically when they join with the class code."
+                    defaultMessage="Students see these pages when they join with the class code, and start from the starter project with a button."
                     description="Assignment editor explanation"
                     id="gui.classroom.assignmentEditor.hint"
                 />
@@ -364,6 +402,82 @@ const TeacherAssignmentEditor = ({
                         />
                     </p>
                 )}
+                {/* Follow-up lessons (#1202): students open last time's work by
+                    default instead of choosing (and mistaking) the starter. */}
+                {onChangeStartFromPrevious && (
+                    <label className={styles.assignmentStartFromPrevious}>
+                        <input
+                            checked={startFromPrevious}
+                            data-testid="classroom-assignment-start-from-previous"
+                            disabled={isSaving}
+                            type="checkbox"
+                            onChange={handleStartFromPreviousChange}
+                        />
+                        <span>
+                            <span className={styles.assignmentStartFromPreviousLabel}>
+                                <FormattedMessage
+                                    defaultMessage="Start from the previous submission"
+                                    description="Assignment editor: setting that opens the previous submission when students join"
+                                    id="gui.classroom.assignmentEditor.startFromPrevious"
+                                />
+                            </span>
+                            <span className={styles.assignmentStartFromPreviousHint}>
+                                <FormattedMessage
+                                    defaultMessage="For follow-up lessons: when students join, continuing from the project they submitted last time in this class is recommended (the starter is not offered). Students without one are told to start from the starter."
+                                    description="Assignment editor: explanation of the start-from-previous setting"
+                                    id="gui.classroom.assignmentEditor.startFromPreviousHint"
+                                />
+                            </span>
+                        </span>
+                    </label>
+                )}
+                {/* Peer view (#1208): students see classmates' submission
+                    images (never the .sb3) to learn from each other. */}
+                {onChangePeerView && (
+                    <div className={styles.assignmentPeerView}>
+                        <label className={styles.assignmentPeerViewRow}>
+                            <span className={styles.assignmentStartFromPreviousLabel}>
+                                <FormattedMessage
+                                    defaultMessage="Let students see classmates' work"
+                                    description="Assignment editor: label of the peer view setting"
+                                    id="gui.classroom.assignmentEditor.peerView"
+                                />
+                            </span>
+                            <select
+                                className={styles.assignmentPeerViewSelect}
+                                data-testid="classroom-assignment-peer-view"
+                                disabled={isSaving}
+                                value={peerView || 'none'}
+                                onChange={handlePeerViewChange}
+                            >
+                                <option value="none">
+                                    {intl.formatMessage(messages.peerViewNone)}
+                                </option>
+                                <option value="always">
+                                    {intl.formatMessage(messages.peerViewAlways)}
+                                </option>
+                                <option value="afterSubmit">
+                                    {intl.formatMessage(messages.peerViewAfterSubmit)}
+                                </option>
+                            </select>
+                        </label>
+                        <span className={styles.assignmentStartFromPreviousHint}>
+                            <FormattedMessage
+                                defaultMessage="Students see only the stage image and block images of classmates' submissions (not the project file, names or your comments). Choose after submitting to have them try on their own first."
+                                description="Assignment editor: explanation of the peer view setting"
+                                id="gui.classroom.assignmentEditor.peerViewHint"
+                            />
+                        </span>
+                    </div>
+                )}
+                {onChangeMeshGroupLimit && (
+                    <MeshGroupLimitField
+                        disabled={isSaving}
+                        testId="classroom-assignment-mesh-group-limit"
+                        value={meshGroupLimit}
+                        onChange={onChangeMeshGroupLimit}
+                    />
+                )}
             </div>
 
             <div className={styles.buttonRow}>
@@ -418,11 +532,17 @@ TeacherAssignmentEditor.propTypes = {
     selectedClassroom: PropTypes.object,
     starterMode: PropTypes.oneOf(['none', 'keep', 'new']).isRequired,
     starterSource: PropTypes.object,
+    startFromPrevious: PropTypes.bool,
+    peerView: PropTypes.oneOf(['none', 'always', 'afterSubmit']),
+    meshGroupLimit: PropTypes.number,
     onAddPage: PropTypes.func.isRequired,
     onAttachPageImage: PropTypes.func.isRequired,
     embedded: PropTypes.bool,
     onCancel: PropTypes.func,
     onChangePageText: PropTypes.func.isRequired,
+    onChangeMeshGroupLimit: PropTypes.func,
+    onChangePeerView: PropTypes.func,
+    onChangeStartFromPrevious: PropTypes.func,
     onMovePage: PropTypes.func.isRequired,
     onRemovePage: PropTypes.func.isRequired,
     onRemovePageImage: PropTypes.func.isRequired,

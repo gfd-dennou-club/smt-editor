@@ -17,7 +17,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { PROMPT_DIR } = require('./phases');
+const { PROMPT_DIR, DEFAULT_USAGE_PAUSE_THRESHOLDS } = require('./phases');
 
 /**
  * 既定の worker 設定。model はフェーズの性質に合わせた推奨値
@@ -62,8 +62,40 @@ const DEFAULT_SETTINGS = {
         review: { model: 'opus' },
         'address-review': { model: 'opus' },
         verify: { model: 'sonnet' },
+        'resolve-conflict': { model: 'opus' },
+    },
+    /**
+     * 1 回の run の時間（分）。`maxMinutes` を超えると runner が worker を止め、`softMinutes` で
+     * 「まとめに入れ」（checkpoint）信号を送る。softMinutes を省くと maxMinutes − 8 分。
+     * 解釈と不正値の扱いは phases.js の watchdogFromSettings。部分指定は既定とマージされる。
+     */
+    watchdog: { maxMinutes: 60, softMinutes: 52 },
+    /**
+     * Claude 使用量による自動 pause の閾値（%・#1193）。セッション（直近 5 時間）/ 週間（7 日）
+     * のどちらかが閾値以上になったら新規ディスパッチを止める（pausedBy='usage'）。
+     * 100 より大きい値にするとその枠では止めない。部分指定は既定とマージされる。
+     */
+    usagePause: {
+        sessionPercent: DEFAULT_USAGE_PAUSE_THRESHOLDS.session,
+        weeklyPercent: DEFAULT_USAGE_PAUSE_THRESHOLDS.weekly,
     },
 };
+
+/**
+ * settings の `usagePause` から usage pause の閾値 { session, weekly }（%）を解決する（純粋関数）。
+ * 数値でない値は既定（{@link DEFAULT_USAGE_PAUSE_THRESHOLDS}）に戻す（設定ミスで止まらなく
+ * なるより既定で守る方が安全）。
+ * @param {object} [settings] マージ済み設定
+ * @returns {{session:number, weekly:number}}
+ */
+function resolveUsagePauseThresholds(settings) {
+    const u = (settings && settings.usagePause) || {};
+    const num = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
+    return {
+        session: num(u.sessionPercent, DEFAULT_USAGE_PAUSE_THRESHOLDS.session),
+        weekly: num(u.weeklyPercent, DEFAULT_USAGE_PAUSE_THRESHOLDS.weekly),
+    };
+}
 
 /** 開発者ごとの設定ファイルの既定パス */
 function userSettingsPath(env = process.env, homedir = os.homedir()) {
@@ -83,6 +115,12 @@ function mergeSettings(base, override) {
     out.phases = { ...(base.phases || {}) };
     for (const [phase, cfg] of Object.entries((override && override.phases) || {})) {
         out.phases[phase] = { ...(out.phases[phase] || {}), ...(cfg || {}) };
+    }
+    if (base.watchdog || (override && override.watchdog)) {
+        out.watchdog = { ...(base.watchdog || {}), ...((override && override.watchdog) || {}) };
+    }
+    if (base.usagePause || (override && override.usagePause)) {
+        out.usagePause = { ...(base.usagePause || {}), ...((override && override.usagePause) || {}) };
     }
     return out;
 }
@@ -205,6 +243,7 @@ module.exports = {
     DEFAULT_SETTINGS,
     userSettingsPath,
     mergeSettings,
+    resolveUsagePauseThresholds,
     loadSettings,
     phaseSettings,
     shellQuote,

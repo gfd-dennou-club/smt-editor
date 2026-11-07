@@ -92,6 +92,9 @@ const ClassroomTeacherModal = ({ containerProps, onClose }) => {
         codeDisplayFullscreen,
         downloadProgress,
         googleCourses,
+        googleCourseAccess,
+        isVerifyingGoogleCourseAccess,
+        onVerifyGoogleCourseAccess,
         selectedGoogleCourse,
         googleSignInRef,
         googleFallbackReason,
@@ -108,6 +111,7 @@ const ClassroomTeacherModal = ({ containerProps, onClose }) => {
         onSelectMember,
         onOpenSubmission,
         onReturnSubmission,
+        onSetHiddenFromPeers,
         onDownloadAll,
         onDownloadClassAll,
         onShowCodeDisplay,
@@ -130,6 +134,9 @@ const ClassroomTeacherModal = ({ containerProps, onClose }) => {
         assignmentStarterSource,
         assignmentHasExistingStarter,
         assignmentIsSaving,
+        assignmentStartFromPrevious,
+        assignmentPeerView,
+        assignmentMeshGroupLimit,
         onAssignmentAddPage,
         onAssignmentRemovePage,
         onAssignmentMovePage,
@@ -139,6 +146,9 @@ const ClassroomTeacherModal = ({ containerProps, onClose }) => {
         onAssignmentUseCurrentProject,
         onAssignmentUseFile,
         onAssignmentRemoveStarter,
+        onAssignmentChangeStartFromPrevious,
+        onAssignmentChangePeerView,
+        onAssignmentChangeMeshGroupLimit,
         onAssignmentSave,
         onAssignmentCancel,
         groups,
@@ -152,6 +162,7 @@ const ClassroomTeacherModal = ({ containerProps, onClose }) => {
         onCreateAssignmentInClass,
         onReuseAssignment,
         onDetailTabChange,
+        detailEntry,
         onBackFromGroupManage,
         onCreateGroup,
         onUpdateGroup,
@@ -321,6 +332,9 @@ const ClassroomTeacherModal = ({ containerProps, onClose }) => {
                             starterSource: assignmentStarterSource,
                             hasExistingStarter: assignmentHasExistingStarter,
                             isSaving: assignmentIsSaving,
+                            startFromPrevious: assignmentStartFromPrevious,
+                            peerView: assignmentPeerView,
+                            meshGroupLimit: assignmentMeshGroupLimit,
                             onAddPage: onAssignmentAddPage,
                             onAttachPageImage: onAssignmentAttachPageImage,
                             onCancel: onAssignmentCancel,
@@ -329,6 +343,9 @@ const ClassroomTeacherModal = ({ containerProps, onClose }) => {
                             onRemovePage: onAssignmentRemovePage,
                             onRemovePageImage: onAssignmentRemovePageImage,
                             onRemoveStarter: onAssignmentRemoveStarter,
+                            onChangeStartFromPrevious: onAssignmentChangeStartFromPrevious,
+                            onChangePeerView: onAssignmentChangePeerView,
+                            onChangeMeshGroupLimit: onAssignmentChangeMeshGroupLimit,
                             onSave: onAssignmentSave,
                             onUseCurrentProject: onAssignmentUseCurrentProject,
                             onUseFile: onAssignmentUseFile,
@@ -340,8 +357,10 @@ const ClassroomTeacherModal = ({ containerProps, onClose }) => {
                         errorActionHandler={errorActionHandler}
                         errorActionLabel={errorActionLabel}
                         errorTitle={errorTitle}
+                        googleCourseAccess={googleCourseAccess}
                         group={selectedGroup}
                         isLoading={isLoading}
+                        isVerifyingGoogleCourseAccess={isVerifyingGoogleCourseAccess}
                         kickRequestsBySeat={kickRequestsBySeat}
                         members={members}
                         noBackButton
@@ -352,17 +371,20 @@ const ClassroomTeacherModal = ({ containerProps, onClose }) => {
                         onCopyInviteLink={onCopyInviteLink}
                         onDeleteClassroom={onDeleteClassroom}
                         onDeleteMember={onDeleteMember}
+                        detailEntry={detailEntry}
                         onDetailTabChange={onDetailTabChange}
                         onDownloadAll={onDownloadAll}
                         onOpenSubmission={onOpenSubmission}
                         onRefresh={onRefreshDetail}
                         onRejectKickRequest={onRejectKickRequest}
                         onReturnSubmission={onReturnSubmission}
+                        onSetHiddenFromPeers={onSetHiddenFromPeers}
                         onSelectMember={onSelectMember}
                         onShowCodeDisplay={onShowCodeDisplay}
                         shared={shared}
                         onOpenShareSuggestion={handleOpenShareSuggestion}
                         onShowPostAssignment={authProvider === 'google' ? onShowPostAssignment : null}
+                        onVerifyGoogleCourseAccess={authProvider === 'google' ? onVerifyGoogleCourseAccess : null}
                         onToggleCodeFullscreen={onToggleCodeFullscreen}
                         onUpdateAssignmentName={onUpdateAssignmentName}
                     />

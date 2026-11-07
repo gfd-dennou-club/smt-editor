@@ -1,13 +1,37 @@
 import {
+    DEFAULT_MESH_GROUP_LIMIT,
     MAX_ASSIGNMENT_PAGES,
+    MESH_GROUP_LIMIT_VALUES,
     MAX_ASSIGNMENT_PAGE_TEXT_LENGTH,
+    PEER_VIEW_VALUES,
     buildAssignmentPayload,
+    normalizeMeshGroupLimit,
+    normalizePeerView,
     isEmptyAssignment,
     moveItem,
     validateEditorPages,
 } from '../../../src/lib/classroom-assignment-utils';
 
 describe('buildAssignmentPayload', () => {
+    test('includes startFromPrevious only when given (#1202)', () => {
+        expect(buildAssignmentPayload([{ text: 'p' }], 'keep', true)).toEqual({
+            pages: [{ text: 'p' }],
+            keepStarter: true,
+            startFromPrevious: true,
+        });
+        expect(buildAssignmentPayload([{ text: 'p' }], 'none', false).startFromPrevious).toBe(false);
+        expect(buildAssignmentPayload([{ text: 'p' }], 'none')).not.toHaveProperty('startFromPrevious');
+    });
+
+    test('includes peerView only when given (#1208)', () => {
+        expect(buildAssignmentPayload([{ text: 'p' }], 'none', false, 'afterSubmit')).toEqual({
+            pages: [{ text: 'p' }],
+            startFromPrevious: false,
+            peerView: 'afterSubmit',
+        });
+        expect(buildAssignmentPayload([{ text: 'p' }], 'none', false)).not.toHaveProperty('peerView');
+    });
+
     test('maps text-only pages', () => {
         const payload = buildAssignmentPayload([{ text: 'ねこを動かそう' }, { text: '' }], 'none');
         expect(payload).toEqual({ pages: [{ text: 'ねこを動かそう' }, { text: '' }] });
@@ -120,5 +144,31 @@ describe('moveItem', () => {
         const items = ['a', 'b', 'c'];
         moveItem(items, 0, 2);
         expect(items).toEqual(['a', 'b', 'c']);
+    });
+});
+
+describe('normalizePeerView (#1208)', () => {
+    test('keeps the three known values and falls back to none', () => {
+        expect(PEER_VIEW_VALUES).toEqual(['none', 'always', 'afterSubmit']);
+        expect(normalizePeerView('always')).toBe('always');
+        expect(normalizePeerView('afterSubmit')).toBe('afterSubmit');
+        expect(normalizePeerView(undefined)).toBe('none');
+        expect(normalizePeerView('bogus')).toBe('none');
+    });
+});
+
+describe('normalizeMeshGroupLimit (#1257)', () => {
+    test('新規作成の既定は 6（6人まで）', () => {
+        expect(DEFAULT_MESH_GROUP_LIMIT).toBe(6);
+        expect(MESH_GROUP_LIMIT_VALUES).toEqual([6, 0]);
+    });
+
+    test('6 / 0 はそのまま、値が無い（この機能より前の課題）・不正値は 0（制限なし）', () => {
+        expect(normalizeMeshGroupLimit(6)).toBe(6);
+        expect(normalizeMeshGroupLimit(0)).toBe(0);
+        expect(normalizeMeshGroupLimit('6')).toBe(6);
+        expect(normalizeMeshGroupLimit(undefined)).toBe(0);
+        expect(normalizeMeshGroupLimit(null)).toBe(0);
+        expect(normalizeMeshGroupLimit(3)).toBe(0);
     });
 });

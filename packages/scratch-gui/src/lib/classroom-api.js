@@ -39,9 +39,20 @@ class ClassroomAPI {
      * @param {number} studentCount - Number of students
      * @param {string} [googleClassroomCourseId] - Google Classroom course ID (for imported classes)
      * @param {string} [groupId] - Owning class (group) — inherits studentCount when omitted
+     * @param {object} [options] - optional settings
+     * @param {number} [options.meshGroupLimit] - mesh group size limit (6 / 0 = no limit).
+     *     The server stores 6 when omitted.
      * @returns {Promise<object>} Created classroom data
      */
-    async createClassroom(idToken, className, assignmentName, studentCount, googleClassroomCourseId, groupId) {
+    async createClassroom(
+        idToken,
+        className,
+        assignmentName,
+        studentCount,
+        googleClassroomCourseId,
+        groupId,
+        { meshGroupLimit } = {},
+    ) {
         const body = { className, assignmentName };
         // v2: omit studentCount to inherit it from the owning class (group)
         if (typeof studentCount === 'number') {
@@ -52,6 +63,9 @@ class ClassroomAPI {
         }
         if (groupId) {
             body.groupId = groupId;
+        }
+        if (typeof meshGroupLimit === 'number') {
+            body.meshGroupLimit = meshGroupLimit;
         }
         return this._request('POST', '/classrooms', body, idToken);
     }
@@ -182,6 +196,17 @@ class ClassroomAPI {
     }
 
     /**
+     * Pending kick requests across every assignment the teacher may manage
+     * (#1200). Polled every ~10s while a teacher is logged in.
+     * @param {string} idToken - Teacher ID token
+     * @returns {Promise<object>} {requests: [{requestId, classroomId, className, assignmentName,
+     *   groupId, seatNumber, reason, occupantName, createdAt}], activeAssignmentCount}
+     */
+    async listPendingKickRequests(idToken) {
+        return this._request('GET', '/kick-requests/pending', null, idToken);
+    }
+
+    /**
      * Approve a kick request: removes the seat occupant and clears all
      * sibling requests for that seat (teacher only).
      * @param {string} idToken - Teacher ID token
@@ -257,15 +282,13 @@ class ClassroomAPI {
      * @param {string} classroomId - Classroom ID
      * @param {string} projectName - Project name
      * @param {number} [screenshotCount] - Number of block screenshots
+     * @param {Array<string>} [screenshotLabels] - Sprite name of each screenshot (#1208)
      * @returns {Promise<object>} Submission data with upload URLs
      */
-    async createSubmission(sessionToken, classroomId, projectName, screenshotCount = 0) {
-        return this._request(
-            'POST',
-            `/classrooms/${classroomId}/submissions`,
-            { projectName, screenshotCount },
-            sessionToken,
-        );
+    async createSubmission(sessionToken, classroomId, projectName, screenshotCount = 0, screenshotLabels) {
+        const body = { projectName, screenshotCount };
+        if (Array.isArray(screenshotLabels)) body.screenshotLabels = screenshotLabels;
+        return this._request('POST', `/classrooms/${classroomId}/submissions`, body, sessionToken);
     }
 
     /**
@@ -283,7 +306,7 @@ class ClassroomAPI {
      * @param {string} idToken - Google ID token
      * @param {string} classroomId - Classroom ID
      * @param {string} submissionId - Submission ID
-     * @param {object} updates - Fields to update (teacherComment, status)
+     * @param {object} updates - Fields to update (teacherComment, status, hiddenFromPeers)
      * @returns {Promise<object>} Updated submission data
      */
     async updateSubmission(idToken, classroomId, submissionId, updates) {
@@ -528,6 +551,33 @@ class ClassroomAPI {
     }
 
     /**
+     * Get the student's submissions they can continue from (#1201): their own
+     * submission in this assignment and the same seat's submission in the
+     * previous assignment of the same class, each with a download URL.
+     * @param {string} sessionToken - Student session token
+     * @param {string} classroomId - Joined classroom ID
+     * @returns {Promise<object>} {current, previous} — each null or
+     *   {classroomId, assignmentName, projectName, submittedAt, projectUrl}
+     */
+    async getContinuableSubmissions(sessionToken, classroomId) {
+        return this._request('GET', `/classrooms/${classroomId}/continuable-submissions`, null, sessionToken);
+    }
+
+    /**
+     * Classmates' submissions of the joined assignment for peer view (#1210):
+     * seat number, submitted time and presigned image URLs with sprite names
+     * only (no .sb3, no nickname). 403 with body.reason 'peer-view-off' /
+     * 'not-submitted' when the assignment does not allow it (yet).
+     * @param {string} sessionToken - Student session token
+     * @param {string} classroomId - Joined classroom ID
+     * @returns {Promise<object>} {peerView, submissions: [{seatNumber, submittedAt,
+     *   thumbnailUrl, screenshotUrls, screenshotLabels}]}
+     */
+    async listPeerSubmissions(sessionToken, classroomId) {
+        return this._request('GET', `/classrooms/${classroomId}/peer-submissions`, null, sessionToken);
+    }
+
+    /**
      * Upload data to a presigned URL.
      * @param {string} url - Presigned URL
      * @param {ArrayBuffer|Blob|string} data - Data to upload
@@ -555,6 +605,25 @@ class ClassroomAPI {
      */
     async listGoogleCourses(idToken, googleAccessToken) {
         return this._request('GET', '/classrooms/google-courses', null, idToken, googleAccessToken);
+    }
+
+    /**
+     * Ask whether the signed-in teacher may post course work to the Google
+     * Classroom course linked to this class (issue #1184). Never prompts for
+     * consent: the caller passes a token it already holds.
+     * @param {string} idToken - Teacher ID token
+     * @param {string} googleAccessToken - Google access token with Classroom scopes
+     * @param {string} groupId - Class (group) ID
+     * @returns {Promise<object>} {courseId, status, linkedByEmail}
+     */
+    async getGoogleCourseAccess(idToken, googleAccessToken, groupId) {
+        return this._request(
+            'GET',
+            `/classroom-groups/${groupId}/google-course-access`,
+            null,
+            idToken,
+            googleAccessToken,
+        );
     }
 
     /**

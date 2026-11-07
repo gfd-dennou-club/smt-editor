@@ -5,7 +5,7 @@
  * {@link useTeacherSubmissions}, and {@link useGoogleClassroom} into
  * a single return object consumed by {@link ClassroomModal}.
  */
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import useGoogleClassroom from './use-google-classroom.js';
 import useSharedAssignments from './use-shared-assignments.js';
 import useTeacherAssignment from './use-teacher-assignment.js';
@@ -109,6 +109,8 @@ const useTeacherClassroom = ({
         setIsLoading,
         setPhase,
         vm,
+        setSelectedClassroom: classrooms.setSelectedClassroom,
+        setClassrooms: classrooms.setClassrooms,
     });
 
     const groups = useTeacherGroups({
@@ -122,9 +124,23 @@ const useTeacherClassroom = ({
         intl,
         setIsLoading,
         setPhase,
+        markClassroomCreated: classrooms.markClassroomCreated,
     });
 
     importCourseRef.current = groups.handleCreateClassFromCourse;
+
+    // Re-run the Google Classroom share pre-flight whenever the selected class
+    // changes, so the share button in its assignments is already disabled (with
+    // the reason) for a co-teacher who is not a teacher of the linked GC course
+    // (#1184). Silent — it only uses an access token the teacher already granted.
+    const { handleCheckGoogleCourseAccess } = google;
+    const selectedGroupId = groups.selectedGroup && groups.selectedGroup.groupId;
+    useEffect(() => {
+        handleCheckGoogleCourseAccess(groups.selectedGroup);
+        // groups.selectedGroup is intentionally not a dependency: it is a fresh
+        // object on every list refresh, and keying on its id keeps this to one
+        // probe per class selection.
+    }, [selectedGroupId, handleCheckGoogleCourseAccess]);
 
     const evaluation = useTeacherEvaluation({
         idToken: auth.idToken,
@@ -242,6 +258,7 @@ const useTeacherClassroom = ({
 
         // Setters (needed by container for go-to-login reset)
         setIdToken: auth.setIdToken,
+        setAuthProvider: auth.setAuthProvider,
         setClassrooms: classrooms.setClassrooms,
         setSelectedClassroom: classrooms.setSelectedClassroom,
         setMembers: classrooms.setMembers,
@@ -264,6 +281,7 @@ const useTeacherClassroom = ({
         handleUpdateAssignmentName: classrooms.handleUpdateAssignmentName,
         handleUpdateAssignmentMeta: classrooms.handleUpdateAssignmentMeta,
         setDetailTab: classrooms.setDetailTab,
+        detailEntry: classrooms.detailEntry,
 
         // Kick requests (Phase 4-6)
         kickRequestsBySeat: classrooms.kickRequestsBySeat,
@@ -282,6 +300,7 @@ const useTeacherClassroom = ({
         handleToggleCodeFullscreen: submissions.handleToggleCodeFullscreen,
         handleCopyInviteLink: submissions.handleCopyInviteLink,
         handleReturnSubmission: submissions.handleReturnSubmission,
+        handleSetHiddenFromPeers: submissions.handleSetHiddenFromPeers,
         handleDownloadAll: submissions.handleDownloadAll,
         handleDownloadClassAll: submissions.handleDownloadClassAll,
 
@@ -291,6 +310,9 @@ const useTeacherClassroom = ({
         assignmentStarterSource: assignment.starterSource,
         assignmentHasExistingStarter: assignment.hasExistingStarter,
         assignmentIsSaving: assignment.isSaving,
+        assignmentStartFromPrevious: assignment.startFromPrevious,
+        assignmentPeerView: assignment.peerView,
+        assignmentMeshGroupLimit: assignment.meshGroupLimit,
         handleAssignmentAddPage: assignment.handleAddPage,
         handleAssignmentRemovePage: assignment.handleRemovePage,
         handleAssignmentMovePage: assignment.handleMovePage,
@@ -300,6 +322,9 @@ const useTeacherClassroom = ({
         handleAssignmentUseCurrentProject: assignment.handleUseCurrentProjectAsStarter,
         handleAssignmentUseFile: assignment.handleUseFileAsStarter,
         handleAssignmentRemoveStarter: assignment.handleRemoveStarter,
+        handleAssignmentChangeStartFromPrevious: assignment.handleChangeStartFromPrevious,
+        handleAssignmentChangePeerView: assignment.handleChangePeerView,
+        handleAssignmentChangeMeshGroupLimit: assignment.handleChangeMeshGroupLimit,
         handleAssignmentSave: assignment.handleSaveAssignment,
         handleAssignmentCancel: assignment.handleCancelAssignmentEdit,
         handleAssignmentApplyTemplate: assignment.handleApplyTemplate,
@@ -321,6 +346,7 @@ const useTeacherClassroom = ({
 
         // Groups (組)
         groups: groups.groups,
+        groupsLoaded: groups.groupsLoaded,
         selectedGroup: groups.selectedGroup,
         handleSelectGroup: groups.handleSelectGroup,
         handleShowClassList: groups.handleShowClassList,
@@ -332,6 +358,9 @@ const useTeacherClassroom = ({
 
         // Google Classroom
         googleCourses: google.googleCourses,
+        googleCourseAccess: google.googleCourseAccess,
+        isVerifyingGoogleCourseAccess: google.isVerifyingGoogleCourseAccess,
+        handleVerifyGoogleCourseAccess: google.handleVerifyGoogleCourseAccess,
         selectedGoogleCourse: google.selectedGoogleCourse,
         handleShowGoogleCourses: google.handleShowGoogleCourses,
         handleLoadGoogleCourses: google.handleLoadGoogleCourses,

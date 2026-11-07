@@ -104,6 +104,29 @@ describe('TeacherClassList', () => {
         );
     });
 
+    test.each([
+        ['cancel', 'classroom-class-create-cancel'],
+        ['the class list breadcrumb', 'classroom-breadcrumb-class-list'],
+    ])('should reset the create form when it is left by %s (review FYI4)', (_label, leaveTestId) => {
+        renderList();
+        const byTestId = (id) => document.querySelector(`[data-testid="${id}"]`);
+        fireEvent.click(byTestId('classroom-class-create'));
+        const defaultYear = byTestId('classroom-class-create-year').value;
+        fireEvent.change(byTestId('classroom-class-create-name'), { target: { value: '技術' } });
+        fireEvent.change(byTestId('classroom-class-create-year'), { target: { value: '2030' } });
+        fireEvent.change(byTestId('classroom-class-create-section'), { target: { value: '2年1組' } });
+        fireEvent.change(byTestId('classroom-class-create-count'), { target: { value: '30' } });
+        fireEvent.change(byTestId('classroom-class-create-assignment'), { target: { value: '課題1' } });
+        fireEvent.click(byTestId(leaveTestId));
+
+        fireEvent.click(byTestId('classroom-class-create'));
+        expect(byTestId('classroom-class-create-name').value).toBe('');
+        expect(byTestId('classroom-class-create-year').value).toBe(defaultYear);
+        expect(byTestId('classroom-class-create-section').value).toBe('');
+        expect(byTestId('classroom-class-create-count').value).toBe('');
+        expect(byTestId('classroom-class-create-assignment').value).toBe('');
+    });
+
     test('should show the class label with year and section', () => {
         renderList({ groups: [group({ name: '技術', section: '2年1組' })] });
         expect(document.querySelector('[data-testid="classroom-class-open-g1"]')).toHaveTextContent(
@@ -136,6 +159,31 @@ describe('TeacherClassList', () => {
         );
         // The form closes back to the card
         expect(document.querySelector('[data-testid="classroom-class-settings-g1"]')).not.toBeInTheDocument();
+    });
+
+    test('saves the class AI settings once the conditions are confirmed, with the preview beside the form', () => {
+        const onUpdateGroup = jest.fn();
+        renderList({ onUpdateGroup });
+        const byTestId = (id) => document.querySelector(`[data-testid="${id}"]`);
+        fireEvent.click(byTestId('classroom-class-settings-open-g1'));
+        expect(byTestId('classroom-class-ai-preview')).toBeInTheDocument();
+        expect(byTestId('classroom-class-ai-preview-consult')).toBeNull();
+
+        fireEvent.click(byTestId('classroom-class-ai-service-gemini'));
+        expect(byTestId('classroom-class-ai-preview-consult')).toBeInTheDocument();
+        // The teacher has to confirm the conditions before saving.
+        expect(byTestId('classroom-class-settings-save')).toBeDisabled();
+        fireEvent.click(byTestId('classroom-class-ai-confirm'));
+        fireEvent.click(byTestId('classroom-class-ai-rubytee'));
+        fireEvent.click(byTestId('classroom-class-settings-save'));
+
+        expect(onUpdateGroup).toHaveBeenCalledWith(
+            'g1',
+            expect.objectContaining({
+                genai: { enabled: true, service: 'gemini', url: 'https://gemini.google.com/app', confirmed: true },
+                rubytee: { enabled: true },
+            }),
+        );
     });
 
     test('increasing the student count saves immediately without a warning', () => {

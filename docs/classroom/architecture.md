@@ -181,28 +181,29 @@ One Tap が表示できない環境（Windows や Playwright では毎回）で�
 
 | Method | Path | 説明 |
 |--------|------|------|
-| `POST` | `/classrooms` | 課題作成 |
-| `GET` | `/classrooms` | 課題一覧（既定は active のみ。`?includeArchived=1` でアーカイブ済みも返す。各要素に `status` を含む） |
-| `GET` | `/classrooms/{id}` | 課題詳細 |
-| `PATCH` | `/classrooms/{id}` | 課題更新。`{status: 'active'}` でアーカイブ済み課題の復元も行う |
-| `DELETE` | `/classrooms/{id}` | 課題削除 (アーカイブ)。soft-delete でメンバー・提出メタ・S3 は保持され、PATCH で復元可能。生徒の遮断は status ガード（join / lookup / verify-session / 提出がすべて非 active を拒否） |
+| `POST` | `/classrooms` | 課題作成。任意の `meshGroupLimit`（`6` / `0`・Issue #1255）でメッシュのグループの人数の上限を設定する（`0` = 制限なし。送らなくても `6` を必ず保存する。それ以外の値は 400）。レスポンスに `meshGroupLimit` を含む |
+| `GET` | `/classrooms` | 課題一覧（既定は active のみ。`?includeArchived=1` でアーカイブ済みも返す。各要素に `status` と `meshGroupLimit`（未設定は `0` = 制限なし）、`archivedAt`（アーカイブした日時。active は `null`、日時を持たない古いアーカイブ済み課題は `updatedAt`）を含む） |
+| `GET` | `/classrooms/{id}` | 課題詳細（`archivedAt`（active なので常に `null`）と `meshGroupLimit` を含む。未設定は `0` = 制限なし） |
+| `PATCH` | `/classrooms/{id}` | 課題更新。`{status: 'active'}` でアーカイブ済み課題の復元も行う。任意の `meshGroupLimit`（`6` / `0`）を受け付ける（送らなければ保存済みの値を変えない。それ以外の値は 400）。レスポンスに `meshGroupLimit` と `archivedAt` を含む。archived にすると `archivedAt` を記録し、active に戻すと消す |
+| `DELETE` | `/classrooms/{id}` | 課題削除 (アーカイブ)。`archivedAt` を記録する。soft-delete でメンバー・提出メタ・S3 は保持され、PATCH で復元可能。生徒の遮断は status ガード（join / lookup / verify-session / 提出がすべて非 active を拒否） |
 | `GET` | `/classrooms/{id}/co-teachers` | 共同管理者一覧 (`{ownerSub, coTeacherEmails}`) |
 | `POST` | `/classrooms/{id}/co-teachers` | 共同管理者を email で招待 (`{email}`)。冪等・最大10・email 形式検証 |
 | `DELETE` | `/classrooms/{id}/co-teachers/{email}` | 共同管理者を解除 |
-| `GET` | `/classrooms/{id}/members` | メンバー一覧 (kicked 行は除外) |
+| `GET` | `/classrooms/{id}/members` | メンバー一覧 (kicked 行は除外)。各メンバーに任意の `aiUsage`（ルビティーの上限と今日の回数。下記） |
 | `DELETE` | `/classrooms/{id}/members/{memberId}` | メンバー削除 = ソフト kick (1h tombstone を残し、`kicked: true` をマーク)。verify-session が 410 reason='kicked' を返せるようにするための仕様。lookup の takenSeats も即座に空く |
 | `GET` | `/classrooms/{id}/kick-requests` | 退室リクエスト一覧 (Issue #692) |
 | `POST` | `/classrooms/{id}/kick-requests/{requestId}/approve` | 承認 = `handleDeleteMember` (= kick) + 同席への全リクエスト削除 |
 | `DELETE` | `/classrooms/{id}/kick-requests/{requestId}` | 却下 = リクエストのみ削除、メンバーは残る |
-| `GET` | `/classrooms/{id}/submissions` | 提出一覧 (ダウンロード URL 付き) |
-| `PATCH` | `/classrooms/{id}/submissions/{subId}` | 提出の返却・コメント |
-| `PUT` | `/classrooms/{id}/assignment` | 課題コンテンツの設定・更新（ページ + スターター。画像/スターターの Presigned upload URL を返す。空 body で削除） |
+| `GET` | `/kick-requests/pending` | 先生に見える課題（`GET /classrooms` と同じ範囲）をまたいだ未処理の退室依頼。`?since=<ISO>` でそれ以降に作られた依頼だけ。各要素は `requestId, classroomId, className, assignmentName, groupId, seatNumber, reason, occupantName, createdAt`、ほかに `activeAssignmentCount`。下の「退室依頼の先生への通知」参照 |
+| `GET` | `/classrooms/{id}/submissions` | 提出一覧 (ダウンロード URL 付き)。各提出に `screenshotLabels`（スプライト名の配列。無い古い提出は `null`）と `hiddenFromPeers`（既定 false・Issue #1239）を含む |
+| `PATCH` | `/classrooms/{id}/submissions/{subId}` | 提出の返却・コメント。任意の `hiddenFromPeers`（boolean・Issue #1239）で、その提出を他者参照で「他の生徒に見せない」に切り替える |
+| `PUT` | `/classrooms/{id}/assignment` | 課題コンテンツの設定・更新（ページ + スターター。画像/スターターの Presigned upload URL を返す。空 body で削除）。任意の `startFromPrevious`（boolean・Issue #1202）で「前回の提出物から始めさせる」を設定する（送らなければ保存済みの値を変えない。課題コンテンツを空にしても設定は残る）。任意の `peerView`（`none` / `always` / `afterSubmit`・Issue #1239）で他者参照を設定する（扱いは `startFromPrevious` と同じ）。レスポンスに `startFromPrevious` と `peerView` を含む |
 | `POST` | `/classroom-groups` | クラス（学級）の作成（name, year, 任意で studentCount / googleClassroomCourseId） |
-| `GET` | `/classroom-groups` | 自分のクラス一覧（active + archived、共同管理分は role=co-teacher で合流） |
-| `PATCH` | `/classroom-groups/{groupId}` | クラスのリネーム・年度変更・人数・GC 紐づけ・共同管理者・アーカイブ/復帰 |
+| `GET` | `/classroom-groups` | 自分のクラス一覧（active + archived、共同管理分は role=co-teacher で合流）。各要素に生成AI・ルビティーの設定 `genai` / `rubytee`（下記「クラス単位の AI 設定」。未設定は両方無効）を含む |
+| `PATCH` | `/classroom-groups/{groupId}` | クラスのリネーム・年度変更・人数・GC 紐づけ・共同管理者・アーカイブ/復帰・生成AI / ルビティーの設定（`genai` / `rubytee`。送った項目だけ保存済みの値に重ねる部分更新。条件を満たさない値は 400） |
 | `POST` | `/classroom-groups/migrate` | v1→v2 冪等 bulk migration（未所属課題のクラス自動作成・割当 + フィールド引き上げ） |
 | `PATCH` | `/classroom-groups/{groupId}/topics` | トピックの add / remove / rename（rename・remove は課題へ一括追従） |
-| `POST` | `/classrooms/{id}/duplicate` | 課題（1 授業）の複製。課題コンテンツの S3 オブジェクトもコピー。`groupId` / `className` / `assignmentName` を上書き可。メンバー・提出は複製しない |
+| `POST` | `/classrooms/{id}/duplicate` | 課題（1 授業）の複製。課題コンテンツの S3 オブジェクトもコピー。`groupId` / `className` / `assignmentName` を上書き可。メンバー・提出は複製しない。`meshGroupLimit` は元の保存値をそのまま写し（未設定なら未設定のまま）、レスポンスにも含む |
 | `POST` | `/classrooms/{id}/evaluate` | AI 評価支援。静的解析結果（シグナル + 擬似コード）を Anthropic API にリレーし、`mode: grade` は S/A/B/C 案 + 根拠 + needsReview、`mode: comment` は生徒向けポジティブコメント下書きを返す。1リクエスト最大10提出（API GW の30秒制限対策、クライアントがチャンク分割）。先生ごとにレート制限（既定 60回/時） |
 | `GET` | `/notifications` | お知らせ一覧（EPIC #1111）。自分宛て（teacherSub）の直近 50 件 + `unreadCount` を返す。書き込みは admin スタックのみ（単一ライター） |
 | `POST` | `/notifications/mark-read` | お知らせ既読化。`{notificationIds?}` — 省略時は一覧窓（直近 50 件）の未読を全既読化（パネルを開いたらバッジが消える UX） |
@@ -233,21 +234,86 @@ One Tap が表示できない環境（Windows や Playwright では毎回）で�
 
 | Method | Path | 認証 | 説明 |
 |--------|------|------|------|
-| `POST` | `/classrooms/lookup` | 不要 | 参加コードで課題を検索 |
+| `POST` | `/classrooms/lookup` | 不要 | 参加コードで課題を検索。`meshGroupLimit`（`6` / `0` = 制限なし。未設定の課題は `0`・Issue #1255）と、課題が属するクラスの `genai: {enabled, service, url}` / `rubytee: {enabled}`（`confirmed` は含めない。設定の無いクラス・クラスに属さない課題は両方無効）を含む |
 | `POST` | `/classrooms/lookup/kick-request` | 不要 | 「使用中の席」を空けてもらう依頼を先生に送信 (Issue #692) |
-| `POST` | `/classrooms/join` | 不要 | 課題に参加 (→ sessionToken 取得) |
-| `POST` | `/classrooms/verify-session` | Session Token | セッション検証 + 提出状況取得。kick された生徒には 410 + `{reason: 'kicked', joinCode, className, seatNumber}` を返す。課題が非 active（アーカイブ/期限切れ）なら 401 |
-| `POST` | `/classrooms/{id}/submissions` | Session Token | 提出 (Presigned URL 取得)。課題が非 active なら 404 |
+| `POST` | `/classrooms/join` | 不要 | 課題に参加 (→ sessionToken 取得)。`meshGroupLimit` / `genai` / `rubytee`（lookup と同じ）を含む |
+| `POST` | `/classrooms/verify-session` | Session Token | セッション検証 + 提出状況取得。kick された生徒には 410 + `{reason: 'kicked', joinCode, className, seatNumber}` を返す。課題が非 active（アーカイブ/期限切れ）なら 401。`meshGroupLimit` / `genai` / `rubytee`（lookup と同じ。参加後に先生が変えた値もここで届く）を含む |
+| `POST` | `/classrooms/{id}/submissions` | Session Token | 提出 (Presigned URL 取得)。課題が非 active なら 404。任意の `screenshotLabels`（各ブロック画像のスプライト名の配列・`screenshotCount` 以下・各100文字以内・Issue #1239）を保存する |
 | `DELETE` | `/classrooms/{id}/members/me` | Session Token | 自主退出 |
-| `GET` | `/classrooms/{id}/assignment` | Session Token または 先生 ID Token | 課題コンテンツ取得（ページ + 画像/スターターのダウンロード URL）。lookup / join / verify-session は `hasAssignment` フラグを返す |
+| `GET` | `/classrooms/{id}/assignment` | Session Token または 先生 ID Token | 課題コンテンツ取得（ページ + 画像/スターターのダウンロード URL）。`startFromPrevious`（未設定は false）と `peerView`（未設定は `none`）も返す（`assignment: null` のときも）。lookup / join / verify-session は `hasAssignment` フラグを返す |
+| `GET` | `/classrooms/{id}/continuable-submissions` | Session Token | 続きに使える提出物（Issue #1201）。`{current, previous, startFromPrevious}` を返す（`startFromPrevious` は課題の設定・Issue #1202）。`current` = この課題での自分の席の提出物、`previous` = 同じクラスのこの課題より前に作られた課題（最大3回分遡る）での同じ席番号の提出物。各要素は `{classroomId, assignmentName, projectName, submittedAt, projectUrl}`（`projectUrl` は project.sb3 の Presigned GET URL）か `null`。TTL 切れの提出物・課題、project.sb3 の無い記録は返さない。パスの課題とセッションの課題が違えば 401、課題が非 active なら 404 |
+| `GET` | `/classrooms/{id}/peer-submissions` | Session Token | 他者参照（Issue #1239）。同じ課題の提出済みクラスメイトを `{peerView, submissions: [{seatNumber, submittedAt, thumbnailUrl, screenshotUrls, screenshotLabels}]}` で席番号順に返す（URL は Presigned GET・`screenshotLabels` は無ければ `null`）。**`.sb3` の URL・ニックネーム・作品名・先生のコメントは返さない**。自分・先生が `hiddenFromPeers` にした提出・TTL 切れは除く。`peerView` が `none` なら 403 `{reason:'peer-view-off'}`、`afterSubmit` で自分が未提出なら 403 `{reason:'not-submitted'}`。パスの課題とセッションの課題が違えば 401、課題が非 active なら 404 |
 
 ### Google Classroom 連携 (ID Token + Access Token)
 
 | Method | Path | 説明 |
 |--------|------|------|
 | `GET` | `/classrooms/google-courses` | Google Classroom のコース一覧 |
+| `GET` | `/classroom-groups/{groupId}/google-course-access` | **押す先生自身が**紐付け先コースの GC 教師かの判定（`{courseId, status, linkedByEmail, linkedByMe}`。status = `teacher` / `notTeacher` / `notLinked` / `unknown`） |
 | `POST` | `/classrooms/google-import` | コースをインポートして課題を作成（`Classrooms` に書き込む） |
 | `POST` | `/classrooms/{id}/google-assignment` | Google Classroom に課題を投稿 |
+
+#### Google API 失敗時のレスポンス
+
+Google Classroom API の失敗は、Google が返した `error.status` / `error.message` を
+そのまま透過し、UI が翻訳するための安定キー `reason` を付けて返す
+（詳細は CloudWatch にも `Google Classroom API error` として記録する。アクセストークンは記録しない）。
+
+| Google の HTTP | 返す HTTP | `reason` | 典型的な原因 |
+|---|---|---|---|
+| 401 | 401 | `googleTokenExpired` | Google のアクセストークンが失効 |
+| 403 | 403 | `googlePermissionDenied` | 権限（スコープ）不足 / そのコースの先生ではない |
+| 404 | 404 | `googleCourseNotFound` | ひもづけたコースが削除された / そのコースにアクセスできない |
+| 404（課題配信時・押した先生が連携者でない） | 404 | `googleNotCourseTeacher` | 押した先生がそのコースの GC 教師ではない（Google は未参加のコースを 404 で隠すため） |
+| 404（課題配信時・押した先生が連携者） | 404 | `googleCourseNotFound` | 連携者はそのコースの教師なので、404 はコース消失/到達不能を意味する（「連携し直す」案内にする） |
+| 400 | 400 | `googleInvalidRequest` | Google がリクエストを拒否（`FAILED_PRECONDITION` 等を含む） |
+| その他 | 502 | `googleApiError` | レート超過・Google 側障害など |
+
+レスポンス本文: `{error, reason, googleStatus?, googleMessage?}`。
+
+#### 共有できる先生の判定（GC 教師かどうか）
+
+課題配信は **押した先生自身の Google アクセストークン**で `courseWork` を作成するため、
+Google はその先生がそのコースの教師であることを要求する。Smalruby のクラス共同担当は
+Smalruby 上の権限であって GC の教師とは別物なので、両者が食い違うと Google 側で失敗する。
+
+**既定はブロック**で、共有できるのは次のどちらかに当てはまる先生だけ:
+
+1. **そのコースを連携した先生**（`googleClassroomLinkedBy`。既存データはクラス作成者
+   `teacherSub` にフォールバック）。サーバーが真偽値 `linkedByMe` を返し、クライアントは
+   メール文字列を突き合わせない（大小文字・別名でぶれるため）。
+   `GET /classroom-groups` も `googleClassroomLinkedByMe` を返す。
+2. **GC 教師であることを実際に確認できた先生**。
+   `GET /classroom-groups/{groupId}/google-course-access` が `courses/{courseId}/teachers/me` を
+   caller のトークンで引き、200 なら `teacher`、404 なら `notTeacher`。401/403/5xx などは
+   `unknown`（判定不能）。
+
+既定を「押させて失敗させる」から「ブロック」に反転したのは、**別の Google ワークスペース
+（Workspace 契約の無い個人アカウント等）の共同担当は、運用でコースの教師になることが
+できない**ため。この先生はそもそも Classroom のトークンを取得できず、判定は常に `unknown`
+になる。判定不能を「押させる」側に倒すと、この先生だけが救われないまま残る。
+
+正当な GC 共同教師の救済は**明示的なオプトイン**:
+UI のブロック表示に「自分もこの Google Classroom のクラスの先生です（確認する）」を置き、
+押されたときだけ同意（`requestClassroomAccessToken()`）→ 上記の判定を実行し、`teacher` なら
+共有を解禁する。**自動では同意ポップアップを出さない**方針は維持する（クラスを開いた時点の
+判定は、すでに取得済みのトークンがあるときだけ走る）。同意が得られない / `notTeacher` の
+ときはエラーバナーを出さず、ブロック表示のまま「確認できませんでした」に差し替える。
+
+連携した先生本人は判定を一切経ずに共有でき、404 になったときの文言も「依頼してください」では
+なく `googleCourseNotFound`（連携し直す案内）になる — 依頼先は本人自身だからである。
+
+メールが分からないとき（既存データ等）は「連携した先生」と一般名詞で表示する
+（推測で名前を出さない）。**メールドメインの一致は判定条件にしない** — Workspace の設定次第で
+外部ドメインの先生もコースの教師になれるため。
+
+クライアントが取得するアクセストークンは `classroom.coursework.students` を含む 3 スコープを要求するが、
+Google の同意画面はスコープごとにチェックボックスを出すため**一部だけ許可される**ことがある。
+クライアントは `hasGrantedAllScopes` で検証し、不足していれば `prompt: 'consent'` で再要求する。
+再要求してもなお不足する場合に加え、**再要求のポップアップがブラウザにブロックされた / 先生が
+閉じた・拒否した場合**も `googlePermissionDenied` として扱う（再要求は最初のクリックから時間が
+経っているため、ブラウザがポップアップを開かないことがある）。ただし OAuth の state 不一致
+（CSRF の疑い）はこの扱いに含めず、そのままエラーにする。
 
 ## データモデル
 
@@ -264,10 +330,14 @@ erDiagram
         string googleClassroomCourseId "任意"
         list coTeacherEmails "共同管理者の email 配列 (任意, 最大10)"
         map assignment "課題コンテンツ (任意): {pages: [{text, imageKey?}], starterKey?, updatedAt}"
+        boolean startFromPrevious "前回の提出物から始めさせる (#1202, 任意・既定 false)。assignment の外に置くので課題コンテンツが空でも残る。再利用 (duplicate) で引き継ぐ"
+        string peerView "他者参照 (#1239, 任意): none / always / afterSubmit。未設定は none。duplicate で引き継ぐ"
+        number meshGroupLimit "出席番号で作るメッシュのグループの人数の上限 (#1255, 任意): 6 / 0 (= 制限なし)。未設定 (#1255 より前の課題) は制限なしとして 0 を返す。新しく作る課題 (作成・Google Classroom 取り込み・みんなの課題の取り込み) は常に 6 を保存。duplicate は元の保存値をそのまま写す"
         string recommendedForSharingAt "共有推奨 (#1106, 任意)。書き込みは admin API のみ。先生側 API には boolean recommendedForSharing を投影"
         string recommendedForSharingBy "推奨した admin の email (内部用・先生側 API では返さない)"
         string groupId "所属する組 (任意)"
         string status "active / archived"
+        string archivedAt "アーカイブした日時 ISO8601 (任意)。DELETE / PATCH {status:'archived'} で記録し、復元 (PATCH {status:'active'}) で消す。既にアーカイブ済みの課題を再度 archived にしても元の日時を保つ。この属性より前にアーカイブした課題は持たないため、API は updatedAt で代用して返す。そうした課題の updatedAt を進める書き込み（編集・再アーカイブ・トピック名の変更など）では、先にその値を archivedAt として固定する"
         string createdAt "ISO8601"
         string updatedAt "ISO8601"
         number ttl "Unix timestamp"
@@ -314,6 +384,8 @@ erDiagram
 
 **GSI:**
 - `sessionToken-index` — セッショントークンでの認証
+
+**着席判定（`lastActiveAt`）:** `lastActiveAt` を更新するのは参加と verify-session（生徒がページを開いたとき・クラスのモーダルを開いたとき）だけで、定期的なハートビートは**送らない**（通信量を増やさないため）。先生の画面は `lastActiveAt` が **1 時間以内**なら「着席中」と表示する目安で、正確さは求めない。席を空ける依頼（kick request）は、先生が教室で本人に確かめてから承認する前提。しきい値は `packages/scratch-gui/src/lib/classroom-presence.js` の 1 か所にまとめてある。verify-session の更新は「行がまだそのセッションのもので kick されていない」ことを条件にしており、退出・kick の直後に届いても行を作り直したり tombstone の TTL を延ばしたりしない（条件を満たさなければ 401）。
 
 ### ClassroomKickRequests テーブル (Issue #692)
 
@@ -368,6 +440,17 @@ erDiagram
 - `link.kind` は whitelist（現在 `classroom` のみ）。エディタは未知の kind を無視する（前方互換）
 - GUI は先生モーダルのタイトルバー 🔔 から一覧を開く。パネルを開いた時点で mark-read（全件）が走りバッジが消える。60 秒間隔でポーリング
 
+### 退室依頼の先生への通知（ポーリング方針）
+
+先生がクラス管理モーダルを閉じて授業をしていても退室依頼に気付けるよう、GUI は先生のログイン中ずっと `GET /kick-requests/pending` を問い合わせ、新しい依頼を画面下部のトーストで知らせる（`classroom-teacher-kick-alerts.jsx`）。
+
+- **間隔は 10 秒**（`CLASSROOM_TEACHER_KICK_POLL_INTERVAL_MS`、既定 10000）。席が空かないと生徒が参加できず授業が止まるため、先生には短い間隔のポーリングを許す。**生徒側には新しい定期通信を足さない**（生徒は依頼中だけ 5 秒ごとに lookup する既存の仕組みのまま）。
+- **WebSocket は使わない**。classroom にはリアルタイム基盤が無く、10 秒ポーリングで授業に支障が無いため。
+- GUI 全体で 1 つだけ動かす（モーダルの外）。タブが非表示の間は止め、表示に戻ったとき・ログインしたときはすぐに 1 回問い合わせる。
+- エラーが続くと間隔を倍々に伸ばす（上限 5 分）。有効な課題が 1 件も無い（`activeAssignmentCount: 0`）間は 6 倍（60 秒）に落とす。
+- サーバーは先生に見える課題のうち、有効（active）で**直近に触れた 50 件まで**を対象に、課題ごとに `ClassroomKickRequests` をキー Query する（Scan しない・インデックス追加なし）。期限（TTL）切れの行は除外する。
+- お知らせ（🔔、1 日 1 回取得・admin が書く）とは**別の流れ**。退室依頼は数秒で処理されるべきものなので日次キャッシュに載せない。
+
 ### ClassroomSubmissions テーブル
 
 ```mermaid
@@ -380,6 +463,8 @@ erDiagram
         string s3Key "S3 オブジェクトキー"
         string thumbnailS3Key "サムネイル S3 キー"
         number screenshotCount "0-20"
+        list screenshotLabels "各ブロック画像のスプライト名 (#1239, 任意)"
+        boolean hiddenFromPeers "先生が他者参照から外した (#1239, 任意・既定 false)"
         string status "submitted / returned"
         string submittedAt "ISO8601"
         string updatedAt "ISO8601"
@@ -404,8 +489,11 @@ erDiagram
         number schemaVersion "データモデル版 (v2 = クラス→課題モデル)"
         string_array topics "課題のトピック一覧 (最大20件)"
         string googleClassroomCourseId "GC コース紐づけ (クラス単位, 任意)"
+        map googleClassroomLinkedBy "GC を紐付けた先生 {sub, email} (任意)"
         number studentCount "人数 (課題の座席数の真実, 任意)"
         string_array coTeacherEmails "クラス単位の共同管理者 (任意)"
+        map genai "生成AI {enabled, service, url, confirmed} (#1275, 任意。未設定は無効)"
+        map rubytee "ルビティー {enabled} (#1275, 任意。未設定は無効)"
         string createdAt "ISO8601"
         string updatedAt "ISO8601"
         number ttl "Unix timestamp (既定400日)"
@@ -414,11 +502,29 @@ erDiagram
 
 **GSI:** `teacherSub-index` — 先生のクラス一覧
 
+#### クラス単位の AI 設定（`genai` / `rubytee`）
+
+先生がクラスごとに「生徒に生成AIのリンクを見せるか」「ルビティーを使わせるか」を決める。
+
+| 項目 | 値 | 検証 |
+|---|---|---|
+| `genai.enabled` | boolean（既定 false） | true にするには `service` と `confirmed: true` と `url` が要る |
+| `genai.service` | `gemini` / `chatgpt` / `other` | それ以外（`claude` など 18 歳以上限定のサービスを含む）は 400 |
+| `genai.url` | https の URL（最大 2048 文字） | http・不正な URL・18 歳以上限定サービスのホスト（`claude.ai` / `claude.com` / `anthropic.com`）は 400。省略すると `gemini` = `https://gemini.google.com/app`、`chatgpt` = `https://chatgpt.com/`（`service` を変えて `url` を省くと新しい既定に切り替わる） |
+| `genai.confirmed` | boolean（既定 false） | 先生が利用規約（年齢制限など）を確認した印。先生向けの応答にだけ含める |
+| `rubytee.enabled` | boolean（既定 false） | — |
+
+- 項目の無い既存のクラスは両方無効として返す（先生向け: `genai = {enabled:false, service:null, url:null, confirmed:false}`、`rubytee = {enabled:false}`）。
+- 生徒向け（lookup / join / verify-session）は課題が属するクラスの設定から `confirmed` を除いて返す。
+
 クラス（学級・Group）は**先生側の管理概念**で、1 つのクラスが年間の複数の課題（Classrooms レコード = 1 授業）を束ねる。生徒には見えない（生徒のモデル = 課題ごとの参加コード + 匿名席番号は不変）。
 
 - クラスは生徒の作品を持たないため、90日ではなく**長期 TTL（既定400日 ≈ 年度 + バッファ、`GROUP_TTL_DAYS`）**
 - クラスのアーカイブは表示上の整理。課題データ自体は 90 日 TTL で自然消滅する
 - **前回コメント再掲**: クラスに属する課題に生徒が join すると、同じクラスの直近の授業（最大3回分遡る）で同じ席に返却されたコメントが `previousComment` として join レスポンスに載る（連休明けの個別リキャップ用）。前回授業の列挙は `groupId` 起点なので、前回を共同管理者が作っていても拾える
+- **前回の提出物から続ける**（Issue #1201）: 同じ席番号の対応を使い、`GET /classrooms/{id}/continuable-submissions` が前回の課題での同じ席の提出物（と、この課題で自分が出した提出物）のダウンロード URL を返す。生徒が自分の提出物を取れる経路はこれだけ（先生の `GET /submissions` とは別）
+- **⚠️ プライバシーの前提（席番号は匿名）**: 生徒は課題ごとに匿名の席番号で参加するだけで、本人を識別する情報は持たない。そのため「前回その席に座っていた生徒」と「今回その席に座った生徒」が同じ人だとはシステムは確かめられない。**同じクラスの次の課題で同じ席番号を選んだ別の生徒も、前回の提出物を読み込める**。これは前回コメント再掲（`previousComment`）と同じ範囲のリスクで、席番号を毎回同じにする運用（出席番号を使う）を前提にしている。別のクラスの課題・別の席の提出物は取れない
+- **他者参照のプライバシー**（Issue #1239）: `GET /classrooms/{id}/peer-submissions` は課題の `peerView` が許すときだけ、同じ課題の提出済みクラスメイトの**画像（サムネイル・ブロック画像）とスプライト名・席番号・提出日時だけ**を返す。作品をそのまま写せないよう `.sb3` は渡さず、誰の作品か分からないようニックネーム・作品名・先生のコメントも返さない。先生は提出ごとに `hiddenFromPeers` で見せないようにできる（生徒が再提出しても引き継ぐので、出し直しで外せない）。別の課題の提出は（同じクラスでも）返さない
 
 #### データモデル v2（クラス→課題モデル）
 
@@ -511,3 +617,35 @@ smalruby-classroom-submissions-{stage}/
 | ウィンドウ | 60秒 | 30秒 |
 | 最大リクエスト数 | 50回 | 100回 |
 | 実装方式 | Lambda インメモリ Map | 同左 |
+
+## メンバー一覧の `aiUsage`（ルビティーの上限）
+
+`GET /classrooms/{id}/members` の `members[]` には任意のフィールド `aiUsage` が付く（既存のフィールドは同じ）。
+rubytee relay（`infra/smalruby-rubytee-relay`）が書く表を**読み取り権限だけ**で読む（詳細は `docs/rubytee/README.md`
+の「利用の集計・席ごとの状況」）。relay の `classroom` = この課題の `classroomId`、`seat` = 出席番号の数字。
+
+```jsonc
+"aiUsage": {
+  "takeover": {              // 「ルビティーにまかせる」の上限（1 席ごと）
+    "used": 12,              // 今の窓で使った回数（窓が終わっていれば 0）
+    "limit": 40,             // 上限（relay が書いた値）
+    "windowMinutes": 35,
+    "resetAt": "2026-11-01T10:15:00+09:00",   // 窓が終わる時刻。使っていなければ null
+    "limited": false         // used >= limit
+  },
+  "today": {                 // 今日（日本時間）の回数
+    "takeover": { "requests": 15, "rateLimited": 0, "succeeded": 14, "failed": 1 },
+    "chat":     { "requests": 3,  "rateLimited": 0, "succeeded": 3,  "failed": 0 }
+  }
+}
+```
+
+- 席に記録が無ければ `used: 0` / `resetAt: null`、`today` の各値は 0。
+- Ruby タブのルビティー（`chat`）は IP 単位の上限なので、1 席ごとの残りは出さず `today` の回数だけ。
+- 読み取りは 1 課題あたり `BatchGetItem`（100 席ごと）+ `Query` 1 回。relay の表が読めない・Lambda の環境変数
+  `RUBYTEE_RATE_LIMIT_TABLE_NAME` / `RUBYTEE_USAGE_TABLE_NAME` が空のときは **`aiUsage: null`** で、メンバー一覧は
+  ふつうに返す（fail-open）。
+- `BatchGetItem` が `UnprocessedKeys` を返したとき（混雑時）も**再試行せずクラス全体を `aiUsage: null`** にする。
+  一時的に全員分が見えなくなるのは許容する（授業中の応答を遅らせない。方針は `.claude/rules/infra/development.md`
+  の「混雑・障害時の劣化」）。
+- 組み立ては `lambda/ai-usage-lib.ts`（純粋関数）。キーの形は relay の `lambda/takeover.ts` と対で変える。
