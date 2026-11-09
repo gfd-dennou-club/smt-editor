@@ -36,7 +36,8 @@ const builtinExtensions = {
     unifiedapi: () => require('../extensions/smt_unifiedapi'),
     mctboard:   () => require('../extensions/smt_mctboard'),
     rboard:     () => require('../extensions/smt_rboard'),
-    peripherals:() => require('../extensions/smt_peripherals'),    
+    peripherals:() => require('../extensions/smt_peripherals'),
+    m5unified:  () => require('../extensions/smt_m5unified')
     // === Smalruby: End of builtin extension entries ===
 };
 

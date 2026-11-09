@@ -43,6 +43,7 @@ import RBoardBlocks from './smt_rboard.js'
 import MCTBoardBlocks from './smt_mctboard.js'
 import UnifiedAPIBlocks from './smt_unifiedapi.js'
 import PeripheralsBlocks from './smt_peripherals.js'
+import M5unifiedBlocks from './smt_m5unified.js'
 
 const SCALAR_TYPE = '';
 const LIST_TYPE = 'list';
@@ -698,6 +699,7 @@ RBoardBlocks(RubyGenerator);
 MCTBoardBlocks(RubyGenerator);
 UnifiedAPIBlocks(RubyGenerator);
 PeripheralsBlocks(RubyGenerator);
+M5unifiedBlocks(RubyGenerator);
 
 
 export default RubyGenerator;

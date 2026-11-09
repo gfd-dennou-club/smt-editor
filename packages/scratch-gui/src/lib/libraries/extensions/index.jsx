@@ -167,6 +167,26 @@ export default [
         ),
         featured: true
     },
+    {
+        name: (
+            <FormattedMessage
+                defaultMessage="M5unified"
+                description="Name for the 'M5unified' extension"
+                id="gui.m5unified.name"
+            />
+        ),
+        extensionId: 'm5unified',
+        iconURL: peripherals,
+        insetIconURL: peripheralsInsetIconURL,
+        description: (
+            <FormattedMessage
+                defaultMessage="M5unified"
+                description="Description for the 'M5unified' extension"
+                id="gui.m5unified.description"
+            />
+        ),
+        featured: true
+    },    
     // === Smalruby: Start of Ruby String extension ===
 //    ruby
     // === Smalruby: End of Ruby String extension ===
