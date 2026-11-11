@@ -22,6 +22,9 @@ import unifiedapiInsetIconURL from './smt/unifiedapi-small.png';
 import peripherals              from './smt/peripherals.png';
 import peripheralsInsetIconURL  from './smt/peripherals-small.png';
 
+import m5stack              from './smt/m5stack.png';
+import m5stackInsetIconURL  from './smt/m5stack-small.png';
+
 // === Smalruby: Start of Ruby String extension ===
 //import ruby from './smalruby-ruby/index.jsx';
 // === Smalruby: End of Ruby String extension ===
@@ -176,8 +179,8 @@ export default [
             />
         ),
         extensionId: 'm5unified',
-        iconURL: peripherals,
-        insetIconURL: peripheralsInsetIconURL,
+        iconURL: m5stack,
+        insetIconURL: m5stackInsetIconURL,
         description: (
             <FormattedMessage
                 defaultMessage="M5unified"

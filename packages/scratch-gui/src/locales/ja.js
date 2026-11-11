@@ -1312,6 +1312,9 @@ export default {
     "gui.peripherals.name": "周辺機器",
     "gui.peripherals.description": "周辺機器用ブロック",
 
+    "gui.m5unified.name": "M5 Unified",
+    "gui.m5unified.description": "M5 Unified ブロック",
+
     "gui.rboard.name": "RBoard",
     "gui.rboard.description": "RBoard 用ブロック",
 
@@ -1447,7 +1450,7 @@ export default {
     "unifiedapi.menutools.ord": "の文字コード",
     "unifiedapi.menutools.bytes": "の数値配列化",
     "unifiedapi.menutools.split": "のカンマ分割",
-    "unifiedapi.menutools.size": "の配列サイズ",    
+    "unifiedapi.menutools.size": "の配列サイズ",
 /*
     "unifiedapi.name": "共通 I/O API",
     "unifiedapi.gpio_init":     "GPIO: ピン[PIN]を変数[INSTANCE]として初期化する(モード:[DIRECTION])",
@@ -1512,7 +1515,32 @@ export default {
     "peripherals.sd_gets":   'SD+File: 読み込む ([MODE])',
     "peripherals.sd_close":  'SD+File: ファイルを閉じる',    
     "peripherals.sd_umount": 'SD: マウント解除する',
-/*
+    // M5unified
+    "m5unified.menuColor01": '黒',
+    "m5unified.menuColor02": '白',
+    "m5unified.menuColor03": '赤',
+    "m5unified.menuColor04": '緑',
+    "m5unified.menuColor05": '青',
+    "m5unified.menuColor06": '黄',
+    "m5unified.menuColor07": 'シアン',
+    "m5unified.menuColor08": 'マゼンタ',
+    "m5unified.menuColor09": 'グレイ',
+    "m5unified.menuColor10": 'シルバー',
+    "m5unified.menuColor11": 'マルーン',
+    "m5unified.menuColor12": 'オリーブ',
+    "m5unified.menuColor13": 'ティール',
+    "m5unified.menuColor14": 'ネイビー',
+    "m5unified.menuColor15": 'パープル',
+    "m5unified.menuColor16": 'オレンジ',
+    "m5unified.menuColor17": 'ピンク',
+    "m5unified.menuColor18": 'ブラウン',
+    "m5unified.menuColor19": 'ゴールド',
+    "m5unified.clear": '画面クリア, 色：[COLOR]',
+    "m5unified.rect":  '画面に四角を書く, 位置：([POS1],[POS2])，大きさ：([SIZE1],[SIZE2])，色：[COLOR]，塗りつぶし：[FILL]',
+    "m5unified.circle":'画面に丸を書く, 位置：([POS1],[POS2])，半径：[RADIUS]，色：[COLOR]，塗りつぶし：[FILL]',
+    "m5unified.line":'画面に線を書く, 始点：([POS1],[POS2])，終点：([POS3],[POS4])，太さ：[WIDTH]，色：[COLOR]',
+    "m5unified.text":'画面に[TEXT]を書く, 位置：([POS1],[POS2])，ポイントサイズ：[SIZE]，文字色：[COLOR]，背景色：[COLOR2]',
+    /*
     "peripherals.menuILI934Xline_line1": "線",
     "peripherals.menuILI934Xline_fillrectangle": "四角",
     "peripherals.menuILI934Xline_rectangle": "四角(枠のみ)",
