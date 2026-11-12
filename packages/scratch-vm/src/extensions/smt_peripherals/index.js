@@ -35,32 +35,35 @@ const PeripheralsMenus = {
 	    { id: 'peripherals.menu_dist', default: 'Distance',    value: 'distance'}
 	]
     },    
-/*
-    menuILI934Xline: {
+    menuCOLOR: {
 	items: [
-	    { id: 'peripherals.menuILI934Xline_line', default: 'Line', value: 'line' },
-	    { id: 'peripherals.menuILI934Xline_fillrectangle', default: 'FillRectangle', value: 'fillrectangle' },
-	    { id: 'peripherals.menuILI934Xline_rectangle', default: 'Rectangle', valueo: 'rectangle' }
+	    {id: 'm5unified.menuColor01', default: 'BLACK',   value: '[0,0,0]' },
+	    {id: 'm5unified.menuColor02', default: 'WHITE',   value: '[255,255,255]' },
+	    {id: 'm5unified.menuColor03', default: 'RED',     value: '[255,0,0]' },
+	    {id: 'm5unified.menuColor04', default: 'GREEN',   value: '[0,255,0]' },
+	    {id: 'm5unified.menuColor05', default: 'BLUE',    value: '[0,0,255]' },
+	    {id: 'm5unified.menuColor06', default: 'YELLOW',  value: '[255,255,0]' },
+	    {id: 'm5unified.menuColor07', default: 'CYAN',    value: '[0,255,255]' },
+	    {id: 'm5unified.menuColor08', default: 'MAGENTA', value: '[255,0,255]' },
+	    {id: 'm5unified.menuColor09', default: 'GRAY',    value: '[128,128,128]' },
+	    {id: 'm5unified.menuColor10', default: 'SILVER',  value: '[192,192,192]' },
+	    {id: 'm5unified.menuColor11', default: 'MAROON',  value: '[128,0,0]' },
+	    {id: 'm5unified.menuColor12', default: 'OLIVE',   value: '[128,128,0]' },
+	    {id: 'm5unified.menuColor13', default: 'TEAL',    value: '[0,128,128]' },
+	    {id: 'm5unified.menuColor14', default: 'NAVY',    value: '[0,0,128]' },
+	    {id: 'm5unified.menuColor15', default: 'PURPLE',  value: '[128,0,128]' },
+	    {id: 'm5unified.menuColor16', default: 'ORANGE',  value: '[255,165,0]' },
+	    {id: 'm5unified.menuColor17', default: 'PINK',    value: '[255,192,203]' },
+	    {id: 'm5unified.menuColor18', default: 'BROWN',   value: '[165,42,42]' },
+	    {id: 'm5unified.menuColor19', default:'GOLD',     value: '[255,215,0]' }
 	]
     },
-    menuILI934Xcircle: {
+    menuFILL: {
 	items: [
-	    { id: 'peripherals.menuILI934Xcircle_fillcircle', default: 'FillCircle', value: 'fillcircle' },
-	    { id: 'peripherals.menuILI934Xcircle_circle', default: 'Circle', value: 'circle' }
+	    { text: 'OFF', value: 'false'},
+	    { text: 'ON',  value: 'true'}
 	]
     },
-    menuILI934Xcolor: {
-	items: [
-	    { id: 'peripherals.menuILI934Xcolor_white',  default: 'white',  value: '[0xFF, 0xFF, 0xFF]' },
-	    { id: 'peripherals.menuILI934Xcolor_black',  default: 'black',  value: '[0x00, 0x00, 0x00]' },
-	    { id: 'peripherals.menuILI934Xcolor_red',    default: 'red',    OAvalue: '[0xFF, 0x00, 0x00]' },
-	    { id: 'peripherals.menuILI934Xcolor_green',  default: 'green',  value: '[0x00, 0xFF, 0x00]' },
-	    { id: 'peripherals.menuILI934Xcolor_blue',   default: 'blue',   value: '[0x00, 0x00, 0xFF]' },
-	    { id: 'peripherals.menuILI934Xcolor_yellow', default: 'yellow', value: '[0xFF, 0xFF, 0x00]' },
-
-	]
-    },
-*/
     menuSensors2: {
 	items: [
 	    { text: 'PCF85063', value: 'PCF85063' },
@@ -175,54 +178,6 @@ class Peripherals {
                         }
                     }		    
                 },
-/*		
-                {
-                    opcode: 'ili934x_write_line',
-                    text: formatMessage({
-                        id: 'peripherals.ili934x_write_line',
-                        default: 'ILI934x: Line, line from ([X1], [Y1]) to ([X2], [Y2]), type = [TYPE], color = [COLOR]',
-                    }),
-                    blockType: BlockType.COMMAND,
-                    arguments: {
-			X1: { type: ArgumentType.NUMBER, defaultValue: 0 },
-			Y1: { type: ArgumentType.NUMBER, defaultValue: 10 },
-			X2: { type: ArgumentType.NUMBER, defaultValue: 100 },
-			Y2: { type: ArgumentType.NUMBER, defaultValue: 200 },
-			TYPE: { type: ArgumentType.STRING, menu: 'menuILI934Xline' },
-			COLOR:{ type: ArgumentType.STRING, menu: 'menuILI934Xcolor' }
-                    }
-		},
-                {
-                    opcode: 'ili934x_write_circle',
-                    text: formatMessage({
-                        id: 'peripherals.ili934x_write_circle',
-                        default: 'ILI934x: Circle, center = ([X1], [Y1]), radius = [SIZE], type = [TYPE], color = [COLOR]',
-                    }),		    		    
-                    blockType: BlockType.COMMAND,
-                    arguments: {
-			X1:   { type: ArgumentType.NUMBER, defaultValue: 100 },
-			Y1:   { type: ArgumentType.NUMBER, defaultValue: 200 },
-			SIZE: { type: ArgumentType.NUMBER, defaultValue: 50 },
-			TYPE: { type: ArgumentType.STRING, menu: 'menuILI934Xcircle' },
-			COLOR:{ type: ArgumentType.STRING, menu: 'menuILI934Xcolor' }
-                    }
-		},
-                {
-                    opcode: 'ili934x_write_string',
-                    text: formatMessage({
-                        id: 'peripherals.ili934x_write_string',
-                        default: 'ILI934x: String, center = ([X1], [Y1]), font size = [SIZE], message = [MESS], color = [COLOR]',
-                    }),		    		    
-                    blockType: BlockType.COMMAND,
-                    arguments: {
-			X1:   { type: ArgumentType.NUMBER, defaultValue: 0 },
-			Y1:   { type: ArgumentType.NUMBER, defaultValue: 10 },
-			SIZE: { type: ArgumentType.NUMBER, defaultValue: 20 },
-			MESS: { type: ArgumentType.STRING, defaultValue: "Hello world!" },
-			COLOR:{ type: ArgumentType.STRING, menu: 'menuILI934Xcolor' }
-                    }
-                    }
-*/
                 {
                     opcode: 'lcd_init',
                     text: formatMessage({
@@ -237,6 +192,20 @@ class Peripherals {
                         }
                     }
                 },
+                {
+                    opcode: 'lcd_clear',
+                    text: formatMessage({
+                        id: 'peripherals.lcd_clear',
+                        default: 'LCD: [LCD] clear',
+                    }),		    		    
+                    blockType: BlockType.COMMAND,
+                    arguments: {
+                        LCD: {
+                            type: ArgumentType.STRING,
+                            menu: 'menuLCD'
+			}
+                    }
+                },		
                 {
                     opcode: 'lcd_cursor',
                     text: formatMessage({
@@ -268,17 +237,85 @@ class Peripherals {
 		    }
                 },
                 {
-                    opcode: 'lcd_clear',
+                    opcode: 'lcdspi_init',
                     text: formatMessage({
-                        id: 'peripherals.lcd_clear',
-                        default: 'LCD: [LCD] clear',
-                    }),		    		    
+                        id: 'peripherals.lcdspi_init',
+                        default: 'LCDSPI: setup ILI934x (M5 Stack basic)'
+                    }),
+                    blockType: BlockType.COMMAND,
+                },
+                {
+                    opcode: 'lcdspi_clear',
+                    text: formatMessage({
+                        id: 'peripherals.lcdspi_clear',
+                        default: 'LCDSPI: clear Display. color: [COLOR]'
+                    }),
                     blockType: BlockType.COMMAND,
                     arguments: {
-                        LCD: {
-                            type: ArgumentType.STRING,
-                            menu: 'menuLCD'
-			}
+                        COLOR: { type: ArgumentType.STRING, menu: 'menuCOLOR' },
+                    }
+                },
+                {
+                    opcode: 'lcdspi_rect',
+                    text: formatMessage({
+                        id: 'peripherals.lcdspi_rect',
+                        default: 'LCDSPI: draw rectangle. position: ([POS1],[POS2]), size: ([SIZE1],[SIZE2]), color: [COLOR], fill: [FILL]'
+                    }),
+                    blockType: BlockType.COMMAND,
+                    arguments: {
+                        POS1:  { type: ArgumentType.NUMBER, defaultValue: 10},
+                        POS2:  { type: ArgumentType.NUMBER, defaultValue: 10},
+                        SIZE1: { type: ArgumentType.NUMBER, defaultValue: 40},
+                        SIZE2: { type: ArgumentType.NUMBER, defaultValue: 40},
+                        COLOR: { type: ArgumentType.STRING, menu: 'menuCOLOR' },			
+                        FILL:  { type: ArgumentType.STRING, menu: 'menuFILL' }
+                    }
+                },
+                {
+                    opcode: 'lcdspi_circle',
+                    text: formatMessage({
+                        id: 'peripherals.lcdspi_circle',
+                        default: 'LCDSPI: draw circle. position: ([POS1],[POS2]), radius: [RADIUS], color: [COLOR], fill: [FILL]'
+                    }),
+                    blockType: BlockType.COMMAND,
+                    arguments: {
+                        POS1:  { type: ArgumentType.NUMBER, defaultValue: 10},
+                        POS2:  { type: ArgumentType.NUMBER, defaultValue: 10},
+                        RADIUS:{ type: ArgumentType.NUMBER, defaultValue: 20},
+                        COLOR: { type: ArgumentType.STRING, menu: 'menuCOLOR' },			
+                        FILL:  { type: ArgumentType.STRING, menu: 'menuFILL' }
+                    }
+                },
+                {
+                    opcode: 'lcdspi_line',
+                    text: formatMessage({
+                        id: 'peripherals.lcdspi_line',
+                        default: 'LCDSPI: draw line. pos_from: ([POS1],[POS2]), pos_end: ([POS3],[POS4]), width: [WIDTH], color: [COLOR]'
+                    }),
+                    blockType: BlockType.COMMAND,
+                    arguments: {
+                        POS1:  { type: ArgumentType.NUMBER, defaultValue: 10},
+                        POS2:  { type: ArgumentType.NUMBER, defaultValue: 10},
+                        POS3:  { type: ArgumentType.NUMBER, defaultValue: 10},
+                        POS4:  { type: ArgumentType.NUMBER, defaultValue: 50},
+                        WIDTH: { type: ArgumentType.NUMBER, defaultValue: 3},
+                        COLOR: { type: ArgumentType.STRING, menu: 'menuCOLOR' }
+                    }
+                },
+		{                    
+                    opcode :'lcdspi_text',
+                    text: formatMessage({
+                        id: 'peripherals.lcdspi_text',
+                        default:'LCDSPI: draw [TEXT]. pos: ([POS1],[POS2]), pointsize: [SIZE], color: [COLOR], backgroud_color: [COLOR2]'
+                    }),
+                    blockType:BlockType.COMMAND,
+                    arguments: {
+                        TEXT:  { type: ArgumentType.STRING, defaultValue: "text"},
+                        POS1:  { type: ArgumentType.NUMBER, defaultValue: 10},
+                        POS2:  { type: ArgumentType.NUMBER, defaultValue: 10},
+                        SIZE:  { type: ArgumentType.NUMBER, defaultValue: 12},
+                        COLOR: { type: ArgumentType.STRING, menu: 'menuCOLOR' },
+                        COLOR2:{ type: ArgumentType.STRING, menu: 'menuCOLOR' }
                     }
                 },
                 {
@@ -449,9 +486,8 @@ class Peripherals {
 		menuSensors2: { acceptReporters: false, items: createMenuItems('menuSensors2')},
 		menuTargets:  { acceptReporters: false, items: createMenuItems('menuTargets')},
 		menuLCD:      { acceptReporters: false, items: createMenuItems('menuLCD')},
-		// menuILI934Xline:   { acceptReporters: false, items: createMenuItems('menuILI934Xline')},
-		// menuILI934Xcircle: { acceptReporters: false, items: createMenuItems('menuILI934Xcircle')},
-		// menuILI934Xcolor:  { acceptReporters: false, items: createMenuItems('menuILI934Xcolor')},
+		menuCOLOR:  { acceptReporters: false, items: createMenuItems('menuCOLOR') },
+		menuFILL:   { acceptReporters: false, items: createMenuItems('menuFILL') },
                 menuTime:   { acceptReporters: false, items: createMenuItems('menuTime')},
 		menuSDopen:{ acceptReporters: false, items: createMenuItems('menuSDopen') },
 		menuSDread:{ acceptReporters: false, items: createMenuItems('menuSDread') }		
@@ -463,9 +499,12 @@ class Peripherals {
     i2c_sensor_init () {}
     i2c_sensor_read () {}
     i2c_sensor_value () {}
-//    ili934x_write_line() {}
-//    ili934x_write_circle() {}
-//    ili934x_write_string() {}
+    lcdspi_init(){}
+    lcdspi_clear() {}
+    lcdspi_rect() {}
+    lcdspi_circle() {}
+    lcdspi_text() {}
+    lcdspi_line() {}
     lcd_init(){}
     lcd_cursor(){}
     lcd_print(){}

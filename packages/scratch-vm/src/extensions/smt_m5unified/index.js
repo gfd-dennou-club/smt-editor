@@ -14,7 +14,6 @@ const menuIconURI = 'data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZ
 
 //メニュー定義
 const M5unifiedMenus = {
-    //GPIO 出力用
     menuCOLOR: {
 	items: [
 	    {id: 'm5unified.menuColor01', default: 'BLACK',   value: '[0,0,0]' },

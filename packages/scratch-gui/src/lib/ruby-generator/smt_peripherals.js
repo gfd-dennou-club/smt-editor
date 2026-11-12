@@ -5,42 +5,67 @@
  */
 export default function (Generator) {
 
-/*    
-    Generator.peripherals_m5lcd_init = function () {
-        return `m5lcd = ILI934X.new(23, 18, 14, 27, 33, 32) \n`;
+
+    Generator.peripherals_lcdspi_init = function (){
+        return (
+	    `ili934x = LCDSPI.new( spi, cs_pin: 14, dc_pin: 27, rst_pin: 33, bl_pin: 32, rotation: 1)\n`
+	);
+    };
+
+    Generator.peripherals_lcdspi_clear = function (block) {
+	const color = Generator.getFieldValue(block, 'COLOR', Generator.ORDER_NONE);
+        return (
+	    `ili934x.clear(color: ${color})\n` 
+	);
+    };
+
+    Generator.peripherals_lcdspi_rect = function (block) {
+	const pos1  = Generator.valueToCode(block, "POS1", Generator.ORDER_NONE) || null;
+	const pos2  = Generator.valueToCode(block, "POS2", Generator.ORDER_NONE) || null;
+	const size1 = Generator.valueToCode(block, "SIZE1", Generator.ORDER_NONE) || null;
+	const size2 = Generator.valueToCode(block, "SIZE2", Generator.ORDER_NONE) || null;
+	const color = Generator.getFieldValue(block, 'COLOR', Generator.ORDER_NONE);
+	const fill  = Generator.getFieldValue(block, 'FILL', Generator.ORDER_NONE);
+        return (
+	    `ili934x.rect(pos: [${pos1}, ${pos2}], size: [${size1}, ${size2}], color: ${color}, fill: ${fill})\n` 
+	);
+    };
+
+    Generator.peripherals_lcdspi_circle = function (block) {
+	const pos1  = Generator.valueToCode(block, "POS1", Generator.ORDER_NONE) || null;
+	const pos2  = Generator.valueToCode(block, "POS2", Generator.ORDER_NONE) || null;
+	const radius= Generator.valueToCode(block, "RADIUS", Generator.ORDER_NONE) || null;
+	const color = Generator.getFieldValue(block, 'COLOR', Generator.ORDER_NONE);
+	const fill  = Generator.getFieldValue(block, 'FILL', Generator.ORDER_NONE);
+        return (
+	    `ili934x.circle(pos: [${pos1}, ${pos2}], radius: ${radius}, color: ${color}, fill: ${fill})\n` 
+	);
     };
     
-    Generator.peripherals_ili934x_write_line = function (block) {
-        Generator.prepares_.i2c_m5lcd = Generator.peripherals_m5lcd_init(null);
-        const x1   = Generator.valueToCode(block, 'X1', Generator.ORDER_NONE);
-        const y1   = Generator.valueToCode(block, 'Y1', Generator.ORDER_NONE);
-        const x2   = Generator.valueToCode(block, 'X2', Generator.ORDER_NONE);
-        const y2   = Generator.valueToCode(block, 'X2', Generator.ORDER_NONE);
-        const type = Generator.getFieldValue(block, 'TYPE') || null;
-        const color = Generator.getFieldValue(block, 'COLOR') || null;
-        return `m5lcd.draw_${type}(${x1}, ${y1}, ${x2}, ${y2}, ${color}) \n`;
+    Generator.peripherals_lcdspi_line = function (block) {
+	const pos1  = Generator.valueToCode(block, "POS1", Generator.ORDER_NONE) || null;
+	const pos2  = Generator.valueToCode(block, "POS2", Generator.ORDER_NONE) || null;
+	const pos3  = Generator.valueToCode(block, "POS3", Generator.ORDER_NONE) || null;
+	const pos4  = Generator.valueToCode(block, "POS4", Generator.ORDER_NONE) || null;
+	const width = Generator.valueToCode(block, "WIDTH",Generator.ORDER_NONE) || null;
+	const color = Generator.getFieldValue(block, 'COLOR', Generator.ORDER_NONE);
+        return (
+	    `ili934x.line(pos_start: [${pos1}, ${pos2}], pos_end: [${pos3},${pos4}], width: ${width}, color: ${color})\n` 
+	);
     };
 
-    Generator.peripherals_ili934x_write_circle = function (block) {
-        Generator.prepares_.i2c_m5lcd = Generator.peripherals_m5lcd_init(null);
-        const x1   = Generator.valueToCode(block, 'X1', Generator.ORDER_NONE);
-        const y1   = Generator.valueToCode(block, 'Y1', Generator.ORDER_NONE);
-        const size = Generator.valueToCode(block, 'SIZE', Generator.ORDER_NONE);
-        const type = Generator.getFieldValue(block, 'TYPE') || null;
-        const color = Generator.getFieldValue(block, 'COLOR') || null;
-        return `m5lcd.draw_${type}(${x1}, ${y1}, ${size}, ${color}) \n`;
+    Generator.peripherals_lcdspi_text = function (block) {
+	const text  = Generator.valueToCode(block, "TEXT", Generator.ORDER_NONE) || null;
+	const pos1  = Generator.valueToCode(block, "POS1", Generator.ORDER_NONE) || null;
+	const pos2  = Generator.valueToCode(block, "POS2", Generator.ORDER_NONE) || null;
+	const size  = Generator.valueToCode(block, "SIZE",Generator.ORDER_NONE) || null;
+	const color = Generator.getFieldValue(block, 'COLOR', Generator.ORDER_NONE);
+	const color2= Generator.getFieldValue(block, 'COLOR2', Generator.ORDER_NONE);
+        return (
+	    `ili934x.text(${text}, pos: [${pos1}, ${pos2}], pointsize: ${size}, color: ${color}, background: ${color2})\n` 
+	);
     };
-
-    Generator.peripherals_ili934x_write_string = function (block) {
-        Generator.prepares_.i2c_m5lcd = Generator.peripherals_m5lcd_init(null);
-        const x1   = Generator.valueToCode(block, 'X1', Generator.ORDER_NONE);
-        const y1   = Generator.valueToCode(block, 'Y1', Generator.ORDER_NONE);
-        const size = Generator.valueToCode(block, 'SIZE', Generator.ORDER_NONE);
-        const mess = Generator.valueToCode(block, 'MESS', Generator.ORDER_NONE);
-        const color = Generator.getFieldValue(block, 'COLOR') || null;
-        return `m5lcd.drawString(${x1}, ${y1}, ${mess}, ${size}, ${color}) \n`;
-    };
-*/
+    
     //
     // I2C Sensors
     //
